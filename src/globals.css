@@ -1,0 +1,319 @@
+@import 'tailwindcss';
+@import "tw-animate-css";
+
+@config '../tailwind.config.js';
+
+@custom-variant dark (&:is(.dark *));
+
+/* ─── PlayStation-Inspired Game Theme ─── */
+:root {
+  /* Brand */
+  --ps-blue: #0070cc;
+  --ps-cyan: #1eaedb;
+  --ps-black: #000000;
+  --ps-white: #ffffff;
+  --ps-charcoal: #1f1f1f;
+
+  /* Surfaces */
+  --background: #0a0a0f;
+  --foreground: #f0f0f5;
+  --card: #141418;
+  --card-foreground: #f0f0f5;
+  --popover: #1a1a22;
+  --popover-foreground: #f0f0f5;
+
+  /* System */
+  --primary: #0070cc;
+  --primary-foreground: #ffffff;
+  --secondary: #1a1a24;
+  --secondary-foreground: #f0f0f5;
+  --muted: #22222e;
+  --muted-foreground: #8888a0;
+  --accent: #1eaedb;
+  --accent-foreground: #000000;
+  --destructive: #c81b3a;
+  --destructive-foreground: #ffffff;
+
+  --border: #2a2a38;
+  --input: #2a2a38;
+  --ring: #0070cc;
+  --radius: 0.75rem;
+
+  /* Board */
+  --river: #1a5a8a;
+  --mountains: #4a3a2a;
+  --farmland: #2a5a2a;
+  --railway: #3a3a42;
+  --plot-default: #1e1e28;
+  --plot-label: #c0c0d0;
+  --street: #12121a;
+  --cathedral: #1a5a3a;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-river: var(--river);
+  --color-mountains: var(--mountains);
+  --color-farmland: var(--farmland);
+  --color-railway: var(--railway);
+  --color-plot-default: var(--plot-default);
+  --color-plot-label: var(--plot-label);
+  --color-street: var(--street);
+  --color-cathedral: var(--cathedral);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from { height: 0; }
+    to { height: var(--radix-accordion-content-height); }
+  }
+  @keyframes accordion-up {
+    from { height: var(--radix-accordion-content-height); }
+    to { height: 0; }
+  }
+}
+
+/* ─── Base ─── */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border);
+  }
+
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-space-grotesk), 'Space Grotesk', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .building-label {
+    font-family: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+  }
+}
+
+/* ─── PlayStation Shadow System ─── */
+.shadow-feather { box-shadow: 0 5px 9px rgba(0,0,0,0.06); }
+.shadow-tile { box-shadow: 0 5px 9px rgba(0,0,0,0.08); }
+.shadow-emphasis { box-shadow: 0 5px 9px rgba(0,0,0,0.16); }
+.shadow-hero { box-shadow: 0 5px 9px rgba(0,0,0,0.8); }
+
+/* ─── PlayStation Button Treatment ─── */
+.btn-ps {
+  transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+.btn-ps:hover {
+  background-color: var(--ps-cyan) !important;
+  border-color: var(--ps-white);
+  box-shadow: 0 0 0 2px var(--ps-blue);
+  transform: scale(1.05);
+}
+.btn-ps:active {
+  opacity: 0.7;
+  transform: scale(1.0);
+}
+
+/* ─── Animations ─── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes placement-glow {
+  0%, 100% { box-shadow: 0 0 6px var(--ps-cyan), inset 0 0 4px rgba(30,174,219,0.15); }
+  50% { box-shadow: 0 0 16px var(--ps-cyan), inset 0 0 8px rgba(30,174,219,0.25); }
+}
+
+/** Stronger cue when a property card is active — legal build cells pop against dimmed vacant lots */
+@keyframes fs-build-target-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(0, 212, 255, 0.55),
+      0 0 18px rgba(30, 174, 219, 0.55),
+      0 0 40px rgba(0, 112, 204, 0.38),
+      inset 0 0 10px rgba(30, 174, 219, 0.22);
+    filter: brightness(1.05);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(255, 255, 255, 0.55),
+      0 0 26px rgba(0, 200, 255, 0.75),
+      0 0 52px rgba(0, 100, 200, 0.45),
+      inset 0 0 14px rgba(185, 240, 255, 0.2);
+    filter: brightness(1.12);
+  }
+}
+.plot-valid-placement {
+  animation: placement-glow 1.5s ease-in-out infinite;
+  cursor: pointer;
+}
+
+@keyframes active-player-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--player-color, #0070cc); }
+  50% { box-shadow: 0 0 12px var(--player-color, #0070cc); }
+}
+.player-panel-active {
+  animation: active-player-glow 2.5s ease-in-out infinite;
+}
+
+/* ─── Board Patterns ─── */
+.river-pattern {
+  background-image: repeating-linear-gradient(
+    170deg, transparent, transparent 6px,
+    rgba(255,255,255,0.04) 6px, rgba(255,255,255,0.04) 7px
+  );
+}
+.mountain-pattern {
+  background-image: repeating-linear-gradient(
+    0deg, transparent, transparent 6px,
+    rgba(255,255,255,0.05) 6px, rgba(255,255,255,0.05) 7px
+  );
+}
+.farmland-pattern {
+  background-image: repeating-linear-gradient(
+    90deg, transparent, transparent 10px,
+    rgba(255,255,255,0.04) 10px, rgba(255,255,255,0.04) 11px
+  );
+}
+.railway-pattern {
+  background-image: repeating-linear-gradient(
+    180deg, transparent, transparent 8px,
+    rgba(255,255,255,0.06) 8px, rgba(255,255,255,0.06) 9px
+  );
+}
+
+/* ─── Plot Cells ─── */
+.plot-city {
+  border: 1px solid rgba(255,255,255,0.06);
+  transition: all 150ms ease;
+}
+.plot-city:hover {
+  border-color: rgba(255,255,255,0.15);
+}
+.plot-city.plot-claimed {
+  border-color: rgba(255,255,255,0.12);
+}
+
+/* ─── Card Category Patterns ─── */
+.card-pattern-civic {
+  background-image: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAwIDEwIEwgNjAgMTAgTSAxMCAwIEwgMTAgNjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjA2IiBzdHJva2Utd2lkdGg9IjEiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZ3JpZCkiLz48L3N2Zz4=");
+}
+.card-pattern-commercial,
+.card-pattern-action {
+  background-image: repeating-linear-gradient(
+    45deg, transparent, transparent 8px,
+    rgba(255,255,255,0.03) 8px, rgba(255,255,255,0.03) 9px
+  );
+}
+.card-pattern-residential {
+  background-image: repeating-linear-gradient(0deg, transparent, transparent 10px, rgba(255,255,255,0.02) 10px, rgba(255,255,255,0.02) 11px),
+    repeating-linear-gradient(90deg, transparent, transparent 8px, rgba(255,255,255,0.02) 8px, rgba(255,255,255,0.02) 9px);
+}
+.card-pattern-industrial {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+.card-pattern-service {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+.card-pattern-anchor {
+  background-image: linear-gradient(135deg, rgba(255,215,0,0.05) 25%, transparent 25%),
+    linear-gradient(225deg, rgba(255,215,0,0.05) 25%, transparent 25%);
+  background-size: 16px 16px;
+}
+
+@keyframes fs-board-notice-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fs-intro-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fs-board-notice-panel {
+  animation: fs-board-notice-in 220ms ease-out both;
+}
+
+.fs-intro-line-in {
+  animation: fs-intro-line-in 0.45s ease-out both;
+}
+
+/* Sonner fixed globally; game dock uses a scoped toaster aligned to the B–F × row-20 HUD. */
+.fs-board-toast-anchor {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.fs-board-toast-anchor [data-sonner-toaster] {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: 0 !important;
+  bottom: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  transform: none !important;
+  --width: 100%;
+  pointer-events: auto;
+}
+
+.fs-board-toast-anchor [data-sonner-toaster][data-x-position='center'] {
+  left: 0 !important;
+  right: 0 !important;
+  transform: none !important;
+}
+
+.fs-board-dock-toast {
+  box-shadow: 0 14px 40px -18px rgba(0, 0, 0, 0.85) !important;
+  backdrop-filter: blur(10px);
+}
