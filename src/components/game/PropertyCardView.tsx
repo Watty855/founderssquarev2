@@ -94,6 +94,10 @@ export function PropertyCardView({ card, className, onClick }: PropertyCardViewP
           textTransform: 'uppercase' as const,
           color: color,
           marginBottom: 6,
+          textAlign: 'center' as const,
+          paddingTop: cornerText ? 2 : 0,
+          position: 'relative',
+          zIndex: 1,
         }}>
           {card.category}
         </div>

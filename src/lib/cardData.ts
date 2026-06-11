@@ -141,7 +141,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(1).fill(null).map((_, i) => ({
     id: `mining-riverfront-${i + 1}`,
     type: 'property' as const,
-    name: 'Industry & Mining',
+    name: 'Industry',
     buildCost: 8,
     buildIncome: 6,
     influence: 0,
@@ -155,7 +155,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(4).fill(null).map((_, i) => ({
     id: `mining-mountain-${i + 1}`,
     type: 'property' as const,
-    name: 'Industry & Mining',
+    name: 'Industry',
     buildCost: 8,
     buildIncome: 6,
     influence: 0,
@@ -169,7 +169,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(1).fill(null).map((_, i) => ({
     id: `mining-railway-${i + 1}`,
     type: 'property' as const,
-    name: 'Industry & Mining',
+    name: 'Industry',
     buildCost: 8,
     buildIncome: 6,
     influence: 0,
@@ -184,7 +184,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(3).fill(null).map((_, i) => ({
     id: `industry-riverfront-${i + 1}`,
     type: 'property' as const,
-    name: 'Industry & Mining',
+    name: 'Industry',
     buildCost: 8,
     buildIncome: 6,
     influence: 0,
@@ -198,7 +198,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(2).fill(null).map((_, i) => ({
     id: `industry-mountain-${i + 1}`,
     type: 'property' as const,
-    name: 'Industry & Mining',
+    name: 'Industry',
     buildCost: 8,
     buildIncome: 6,
     influence: 0,
@@ -212,7 +212,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(6).fill(null).map((_, i) => ({
     id: `industry-railway-${i + 1}`,
     type: 'property' as const,
-    name: 'Industry & Mining',
+    name: 'Industry',
     buildCost: 8,
     buildIncome: 6,
     influence: 0,
@@ -226,7 +226,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(3).fill(null).map((_, i) => ({
     id: `industry-farm-${i + 1}`,
     type: 'property' as const,
-    name: 'Industry & Mining',
+    name: 'Industry',
     buildCost: 8,
     buildIncome: 6,
     influence: 0,
@@ -347,7 +347,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(1).fill(null).map((_, i) => ({
     id: `museum-riverfront-${i + 1}`,
     type: 'property' as const,
-    name: 'Arts & Entertainment',
+    name: 'Arts',
     buildCost: 6,
     buildIncome: 2,
     influence: 1,
@@ -362,7 +362,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(1).fill(null).map((_, i) => ({
     id: `museum-city-${i + 1}`,
     type: 'property' as const,
-    name: 'Arts & Entertainment',
+    name: 'Arts',
     buildCost: 6,
     buildIncome: 2,
     influence: 1,
@@ -657,7 +657,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(1).fill(null).map((_, i) => ({
     id: `grocery-riverfront-${i + 1}`,
     type: 'property' as const,
-    name: 'Food & Grocery',
+    name: 'Food',
     buildCost: 4,
     buildIncome: 2,
     influence: 1,
@@ -671,7 +671,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(3).fill(null).map((_, i) => ({
     id: `grocery-mountain-${i + 1}`,
     type: 'property' as const,
-    name: 'Food & Grocery',
+    name: 'Food',
     buildCost: 4,
     buildIncome: 2,
     influence: 1,
@@ -685,7 +685,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(4).fill(null).map((_, i) => ({
     id: `grocery-railway-${i + 1}`,
     type: 'property' as const,
-    name: 'Food & Grocery',
+    name: 'Food',
     buildCost: 4,
     buildIncome: 2,
     influence: 1,
@@ -699,7 +699,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(2).fill(null).map((_, i) => ({
     id: `grocery-farm-${i + 1}`,
     type: 'property' as const,
-    name: 'Food & Grocery',
+    name: 'Food',
     buildCost: 4,
     buildIncome: 2,
     influence: 1,
@@ -713,7 +713,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(6).fill(null).map((_, i) => ({
     id: `grocery-city-${i + 1}`,
     type: 'property' as const,
-    name: 'Food & Grocery',
+    name: 'Food',
     buildCost: 4,
     buildIncome: 2,
     influence: 1,
@@ -785,7 +785,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(2).fill(null).map((_, i) => ({
     id: `tourism-riverfront-${i + 1}`,
     type: 'property' as const,
-    name: 'Arts & Entertainment',
+    name: 'Arts',
     buildCost: 6,
     buildIncome: 2,
     influence: 0,
@@ -799,7 +799,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(4).fill(null).map((_, i) => ({
     id: `tourism-mountain-${i + 1}`,
     type: 'property' as const,
-    name: 'Arts & Entertainment',
+    name: 'Arts',
     buildCost: 6,
     buildIncome: 2,
     influence: 0,
@@ -813,7 +813,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(1).fill(null).map((_, i) => ({
     id: `tourism-farm-${i + 1}`,
     type: 'property' as const,
-    name: 'Arts & Entertainment',
+    name: 'Arts',
     buildCost: 6,
     buildIncome: 2,
     influence: 0,
@@ -827,7 +827,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(2).fill(null).map((_, i) => ({
     id: `tourism-city-${i + 1}`,
     type: 'property' as const,
-    name: 'Arts & Entertainment',
+    name: 'Arts',
     buildCost: 6,
     buildIncome: 2,
     influence: 0,
@@ -842,7 +842,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(1).fill(null).map((_, i) => ({
     id: `food-riverfront-${i + 1}`,
     type: 'property' as const,
-    name: 'Food & Grocery',
+    name: 'Food',
     buildCost: 4,
     buildIncome: 2,
     influence: 1,
@@ -856,7 +856,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(3).fill(null).map((_, i) => ({
     id: `food-mountain-${i + 1}`,
     type: 'property' as const,
-    name: 'Food & Grocery',
+    name: 'Food',
     buildCost: 4,
     buildIncome: 2,
     influence: 1,
@@ -870,7 +870,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(4).fill(null).map((_, i) => ({
     id: `food-railway-${i + 1}`,
     type: 'property' as const,
-    name: 'Food & Grocery',
+    name: 'Food',
     buildCost: 4,
     buildIncome: 2,
     influence: 1,
@@ -884,7 +884,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(8).fill(null).map((_, i) => ({
     id: `food-farm-${i + 1}`,
     type: 'property' as const,
-    name: 'Food & Grocery',
+    name: 'Food',
     buildCost: 4,
     buildIncome: 2,
     influence: 1,
@@ -898,7 +898,7 @@ export const propertyCards: PropertyCard[] = [
   ...Array(4).fill(null).map((_, i) => ({
     id: `food-city-${i + 1}`,
     type: 'property' as const,
-    name: 'Food & Grocery',
+    name: 'Food',
     buildCost: 4,
     buildIncome: 2,
     influence: 1,

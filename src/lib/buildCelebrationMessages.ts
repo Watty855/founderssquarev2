@@ -55,7 +55,7 @@ export function getBuildCelebrationMessage(
       return 'City block beautified!'
     case 'Commercial':
       return 'Shops and offices fashioned!'
-    case 'Industry & Mining':
+    case 'Industry':
       return 'Industry founded to strengthen infrastructure!'
     case 'Freight':
       return 'Freight and distribution organized!'
@@ -63,9 +63,9 @@ export function getBuildCelebrationMessage(
       return 'Extra space established!'
     case 'Power':
       return 'Power grid engineered!'
-    case 'Food & Grocery':
+    case 'Food':
       return 'Food access coordinated!'
-    case 'Arts & Entertainment':
+    case 'Arts':
       return 'Entertainment established!'
     default:
       return null

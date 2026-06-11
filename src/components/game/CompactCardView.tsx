@@ -216,12 +216,15 @@ export function CompactCardView({
 
           {/* Card type label */}
           <div style={{
-            padding: '8px 10px 0',
+            padding: propCard ? '12px 10px 0' : '8px 10px 0',
             fontSize: 8,
             fontWeight: 600,
             letterSpacing: '0.1em',
             color: style.topAccent,
-            opacity: 0.8,
+            opacity: 0.85,
+            textAlign: 'center',
+            position: 'relative',
+            zIndex: 1,
           }}>
             {style.label}
           </div>
