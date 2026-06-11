@@ -9,3 +9,4 @@ ios/App/build/
 android/.gradle/
 android/app/build/
 android/build/
+tsconfig.tsbuildinfo

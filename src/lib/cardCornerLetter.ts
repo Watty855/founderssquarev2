@@ -34,3 +34,28 @@ export function getPropertyCornerLetter(card: Pick<PropertyCard, 'name' | 'type'
   if (card.type === 'anchor') return null
   return NAME_TO_LETTER[card.name] ?? null
 }
+
+/**
+ * Anchor tenet notations shown on all four corners (face-card style):
+ * CAT church affiliation · WAT anchor wild card · FAT farm bureau · PAT port authority ·
+ * AAT arts council · IAT influencer · TAT tourism office · MAT mafia · NAT news outlet ·
+ * RAT regulation bureau · UAT union.
+ */
+const ANCHOR_NAME_TO_NOTATION: Record<string, string> = {
+  'Church Affiliation': 'CAT',
+  'Anchor Wild Card': 'WAT',
+  'Farm Bureau': 'FAT',
+  'Port Authority': 'PAT',
+  'Arts Council': 'AAT',
+  Influencer: 'IAT',
+  'Tourism Office': 'TAT',
+  Mafia: 'MAT',
+  'News Outlet': 'NAT',
+  'Regulation Bureau': 'RAT',
+  Union: 'UAT',
+}
+
+export function getAnchorCornerNotation(card: Pick<PropertyCard, 'name' | 'type'>): string | null {
+  if (card.type !== 'anchor') return null
+  return ANCHOR_NAME_TO_NOTATION[card.name] ?? null
+}

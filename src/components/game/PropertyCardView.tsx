@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from 'react'
 import { PropertyCard } from '@/lib/cardTypes'
-import { getPropertyCornerLetter } from '@/lib/cardCornerLetter'
+import { getPropertyCornerLetter, getAnchorCornerNotation } from '@/lib/cardCornerLetter'
 
 interface PropertyCardViewProps {
   card: PropertyCard
@@ -29,20 +29,24 @@ export function PropertyCardView({ card, className, onClick }: PropertyCardViewP
   const color = getCategoryColor(card.category)
   const panelBackground = isAnchor ? ANCHOR_CARD_BG : '#0d1a2e'
   const cornerLetter = getPropertyCornerLetter(card)
+  const anchorNotation = getAnchorCornerNotation(card)
+  const cornerText = anchorNotation ?? cornerLetter
 
-  const cornerStyle = (side: 'left' | 'right'): CSSProperties => ({
+  const cornerStyle = (side: 'left' | 'right', place: 'top' | 'bottom' = 'top'): CSSProperties => ({
     position: 'absolute',
-    top: 10,
+    [place]: 10,
     [side]: 12,
-    fontSize: 20,
+    fontSize: cornerText && cornerText.length > 2 ? 13 : 20,
     fontWeight: 800,
     fontFamily: "'Cinzel', 'Space Grotesk', serif",
     lineHeight: 1,
     color,
     textShadow: '0 1px 6px rgba(0,0,0,0.6)',
-    letterSpacing: cornerLetter && cornerLetter.length > 1 ? '-0.02em' : undefined,
+    letterSpacing: cornerText && cornerText.length > 1 ? '-0.02em' : undefined,
+    transform: place === 'bottom' ? 'rotate(180deg)' : undefined,
     userSelect: 'none' as const,
     pointerEvents: 'none' as const,
+    zIndex: 2,
   })
 
   return (
@@ -67,11 +71,17 @@ export function PropertyCardView({ card, className, onClick }: PropertyCardViewP
       {/* Top accent bar */}
       <div style={{ height: 4, backgroundColor: color }} />
 
-      {/* Face-card corner letters */}
-      {cornerLetter ? (
+      {/* Face-card corner letters — anchors carry their notation on all four corners */}
+      {cornerText ? (
         <>
-          <span style={cornerStyle('left')}>{cornerLetter}</span>
-          <span style={cornerStyle('right')}>{cornerLetter}</span>
+          <span style={cornerStyle('left')}>{cornerText}</span>
+          <span style={cornerStyle('right')}>{cornerText}</span>
+          {anchorNotation ? (
+            <>
+              <span style={cornerStyle('left', 'bottom')}>{anchorNotation}</span>
+              <span style={cornerStyle('right', 'bottom')}>{anchorNotation}</span>
+            </>
+          ) : null}
         </>
       ) : null}
 
@@ -127,9 +137,9 @@ export function PropertyCardView({ card, className, onClick }: PropertyCardViewP
         </div>
       </div>
 
-      {/* Bottom stats */}
+      {/* Bottom stats — extra side padding clears the anchor corner notations */}
       <div style={{
-        padding: '12px 20px',
+        padding: anchorNotation ? '12px 48px' : '12px 20px',
         backgroundColor: 'rgba(0,0,0,0.3)',
         display: 'flex',
         justifyContent: 'space-between',

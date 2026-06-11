@@ -1,8 +1,9 @@
 'use client'
 
+import type { CSSProperties } from 'react'
 import { PropertyCard, ActionCard } from '@/lib/cardTypes'
 import { getPropertyHandDisplayName } from '@/lib/civicFlexProperty'
-import { getPropertyCornerLetter } from '@/lib/cardCornerLetter'
+import { getPropertyCornerLetter, getAnchorCornerNotation } from '@/lib/cardCornerLetter'
 import {
   HoverCard,
   HoverCardContent,
@@ -180,27 +181,38 @@ export function CompactCardView({
             backgroundColor: style.topAccent,
           }} />
 
-          {/* Face-card corner letters */}
-          {propCard && getPropertyCornerLetter(propCard) ? (
-            <>
-              <span style={{
-                position: 'absolute', top: 7, left: 7, fontSize: 12, fontWeight: 800,
-                fontFamily: "'Cinzel', 'Space Grotesk', serif", lineHeight: 1,
-                color: style.topAccent, textShadow: '0 1px 4px rgba(0,0,0,0.7)',
-                userSelect: 'none', pointerEvents: 'none',
-              }}>
-                {getPropertyCornerLetter(propCard)}
-              </span>
-              <span style={{
-                position: 'absolute', top: 7, right: 7, fontSize: 12, fontWeight: 800,
-                fontFamily: "'Cinzel', 'Space Grotesk', serif", lineHeight: 1,
-                color: style.topAccent, textShadow: '0 1px 4px rgba(0,0,0,0.7)',
-                userSelect: 'none', pointerEvents: 'none',
-              }}>
-                {getPropertyCornerLetter(propCard)}
-              </span>
-            </>
-          ) : null}
+          {/* Face-card corner letters — anchors carry their notation on all four corners */}
+          {propCard && (getAnchorCornerNotation(propCard) ?? getPropertyCornerLetter(propCard)) ? (() => {
+            const anchorNotation = getAnchorCornerNotation(propCard)
+            const text = anchorNotation ?? getPropertyCornerLetter(propCard)
+            const corner = (side: 'left' | 'right', place: 'top' | 'bottom'): CSSProperties => ({
+              position: 'absolute',
+              [place]: place === 'top' ? 7 : 5,
+              [side]: 7,
+              fontSize: text && text.length > 2 ? 8 : 12,
+              fontWeight: 800,
+              fontFamily: "'Cinzel', 'Space Grotesk', serif",
+              lineHeight: 1,
+              color: style.topAccent,
+              textShadow: '0 1px 4px rgba(0,0,0,0.7)',
+              transform: place === 'bottom' ? 'rotate(180deg)' : undefined,
+              userSelect: 'none',
+              pointerEvents: 'none',
+              zIndex: 2,
+            })
+            return (
+              <>
+                <span style={corner('left', 'top')}>{text}</span>
+                <span style={corner('right', 'top')}>{text}</span>
+                {anchorNotation ? (
+                  <>
+                    <span style={corner('left', 'bottom')}>{anchorNotation}</span>
+                    <span style={corner('right', 'bottom')}>{anchorNotation}</span>
+                  </>
+                ) : null}
+              </>
+            )
+          })() : null}
 
           {/* Card type label */}
           <div style={{
@@ -297,10 +309,10 @@ export function CompactCardView({
             )}
           </div>
 
-          {/* Bottom stats */}
+          {/* Bottom stats — extra side padding clears the anchor corner notations */}
           <div style={{
             backgroundColor: 'rgba(0,0,0,0.4)',
-            padding: '6px 10px',
+            padding: propCard && getAnchorCornerNotation(propCard) ? '6px 28px' : '6px 10px',
             display: 'flex',
             flexWrap: actCard ? 'wrap' : 'nowrap',
             justifyContent: 'space-between',
