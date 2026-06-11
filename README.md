@@ -4,16 +4,17 @@ A strategic city-building tabletop game — rebuilt as a mobile-ready app.
 
 v2 ports the complete rules engine and board from `founders-square-glow` onto a
 **Vite + React + TypeScript** web core wrapped with **Capacitor** for native
-iOS and Android builds. PartyKit and Colyseus have been removed entirely; all
-play is on-device today, with a clean seam left for a future online backend.
+iOS and Android builds. PartyKit and Colyseus have been removed entirely;
+live online play now runs on **Supabase Realtime** with the host device as the
+rules authority — see [MOBILE_APP.md](./MOBILE_APP.md).
 
 ## Game modes
 
 - **Single player** — play against AI founders (bots).
 - **Pass & play multiplayer** — turn-based multiplayer around one device, ideal for mobile.
-- **Online** — coming soon. The old PartyKit/Colyseus transports were removed;
-  `src/lib/useOnlineBoardSync.ts` documents the adapter seam a future backend
-  (e.g. Supabase Realtime) can re-implement without touching game logic.
+- **Online (live)** — room-code lobbies over Supabase Realtime: everyone sees the
+  board update live as moves are played, on web and in the mobile apps. Setup
+  takes ~5 minutes — see [MOBILE_APP.md](./MOBILE_APP.md).
 
 ## What's new in v2
 
@@ -61,4 +62,5 @@ npm run cap:android    # build web bundle, sync, open Android Studio
 - `src/lib/` — rules engine: cards, board, placement, game engine, bots
 - `src/components/game/` — board, hand, dialogs, setup wizard
 - `src/lib/soundEffects.ts` — synthesized sound design
-- `src/lib/useOnlineBoardSync.ts` — local stub / future online adapter seam
+- `src/lib/useOnlineBoardSync.ts` — live board sync over Supabase Realtime
+- `src/lib/onlineRoomAuthority.ts` — host-side rules authority for online play
