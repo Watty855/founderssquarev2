@@ -19,7 +19,8 @@ import { CaretLeft, SignIn } from '@phosphor-icons/react'
 const inputClass =
   'w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-sky-400/60 focus:bg-white/10'
 
-const JOIN_TIMEOUT_MS = 10_000
+const JOIN_TIMEOUT_MS = 45_000
+const JOIN_RETRY_MS = 2_000
 
 /**
  * Guest entry point: connects to the room's board channel, asks the host
@@ -40,16 +41,25 @@ export function JoinOnlineGame({
 
   const channelRef = useRef<RealtimeChannel | null>(null)
   const timeoutRef = useRef<number | null>(null)
+  const retryRef = useRef<number | null>(null)
   const publicRef = useRef<PublicGameState | null>(null)
   const handRef = useRef<PrivateHandPayload | null>(null)
   const doneRef = useRef(false)
+  const myIdRef = useRef<string | null>(null)
+
+  const clearJoinTimers = () => {
+    if (timeoutRef.current != null) window.clearTimeout(timeoutRef.current)
+    if (retryRef.current != null) window.clearInterval(retryRef.current)
+    timeoutRef.current = null
+    retryRef.current = null
+  }
 
   useEffect(() => {
     return () => {
+      clearJoinTimers()
       const client = getRealtimeClient()
       if (channelRef.current && client) void client.removeChannel(channelRef.current)
       channelRef.current = null
-      if (timeoutRef.current != null) window.clearTimeout(timeoutRef.current)
     }
   }, [])
 
@@ -58,7 +68,7 @@ export function JoinOnlineGame({
     const pub = publicRef.current
     if (!pub) return
     doneRef.current = true
-    if (timeoutRef.current != null) window.clearTimeout(timeoutRef.current)
+    clearJoinTimers()
 
     const hand = handRef.current
     const viewerId = hand?.playerId ?? null
@@ -76,12 +86,21 @@ export function JoinOnlineGame({
     })
   }
 
+  const requestSnapshot = (ch: RealtimeChannel, from: string) => {
+    void ch.send({
+      type: 'broadcast',
+      event: 'board',
+      payload: { kind: 'game_request', from },
+    })
+  }
+
   const startJoin = () => {
     const client = getRealtimeClient()
     const roomId = normalizeRoomCode(roomCode)
     const name = displayName.trim()
     if (!client || !roomId || !name) return
 
+    clearJoinTimers()
     setError(null)
     setPhase('joining')
     doneRef.current = false
@@ -89,6 +108,7 @@ export function JoinOnlineGame({
     handRef.current = null
 
     const myId = getDeviceConnectionId()
+    myIdRef.current = myId
     const ch = client.channel(boardTopic(roomId), { config: { broadcast: { self: false } } })
     channelRef.current = ch
 
@@ -106,12 +126,13 @@ export function JoinOnlineGame({
 
     ch.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        void ch.send({
-          type: 'broadcast',
-          event: 'board',
-          payload: { kind: 'game_request', from: myId },
-        })
+        requestSnapshot(ch, myId)
+        retryRef.current = window.setInterval(() => {
+          if (doneRef.current) return
+          requestSnapshot(ch, myIdRef.current ?? myId)
+        }, JOIN_RETRY_MS)
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        clearJoinTimers()
         setError('Could not reach the room. Check your connection and try again.')
         setPhase('form')
       }
@@ -119,10 +140,13 @@ export function JoinOnlineGame({
 
     timeoutRef.current = window.setTimeout(() => {
       if (doneRef.current) return
+      clearJoinTimers()
       const client2 = getRealtimeClient()
       if (channelRef.current && client2) void client2.removeChannel(channelRef.current)
       channelRef.current = null
-      setError('No live table found for that code. Ask the host to finish setup first, then try again.')
+      setError(
+        'No live table found for that room code. On the host computer: finish table setup and click Start game, then try again. Double-check the room code matches exactly.'
+      )
       setPhase('form')
     }, JOIN_TIMEOUT_MS)
   }
@@ -157,7 +181,8 @@ export function JoinOnlineGame({
       <div className="w-full max-w-md rounded-2xl border border-white/15 bg-black/60 px-8 py-9 shadow-[0_0_60px_rgba(0,0,0,0.6)] backdrop-blur-md">
         <h2 className="m-0 mb-2 text-center text-xl font-semibold text-slate-100">Join online game</h2>
         <p className="m-0 mb-6 text-center text-sm leading-relaxed text-slate-400">
-          Enter the host’s room code and the name they seated you under.
+          Enter the host’s room code and the name they seated you under. The host must have clicked{' '}
+          <span className="text-slate-200">Start game</span> before you join.
         </p>
         {error && (
           <p className="m-0 mb-4 rounded-xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">

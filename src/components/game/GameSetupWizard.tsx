@@ -10,6 +10,7 @@ import {
   seatPlanToPlayers,
 } from '@/lib/onlineSeatPlan'
 import type { PartyBoardSyncMeta } from '@/lib/partyBoardSync'
+import { getDeviceConnectionId, normalizeRoomCode } from '@/lib/realtimeClient'
 import { usePartySeatPlanRoom } from '@/lib/usePartySeatPlanRoom'
 import { PlayerSetup } from '@/components/game/PlayerSetup'
 import { MultiplayerLobby } from '@/components/game/MultiplayerLobby'
@@ -718,14 +719,14 @@ function LobbyScreen({
         ? `PartyKit room "${onlineSession.roomId}".`
         : ''
 
+    const hostConnectionId =
+      myPartyId ?? onlineSession?.connectionId ?? getDeviceConnectionId()
+
     const partyBoardMeta: PartyBoardSyncMeta | undefined =
-      mode === 'online' &&
-      onlineSession?.roomId &&
-      party.status === 'connected' &&
-      myPartyId
+      mode === 'online' && onlineSession?.roomId
         ? {
-            roomId: onlineSession.roomId,
-            myConnectionId: myPartyId,
+            roomId: normalizeRoomCode(onlineSession.roomId),
+            myConnectionId: hostConnectionId,
             displayName: (humanName.trim() || onlineSession.displayName || 'Founder').slice(0, 40),
           }
         : undefined
@@ -735,8 +736,12 @@ function LobbyScreen({
       onStart(players, partyBoardMeta)
     }
 
-    if (mode === 'online' && onlineSession && party.status === 'connected' && myPartyId) {
+    if (mode === 'online' && onlineSession) {
       if (onlineSeatLayout === 'room') {
+        if (party.status !== 'connected' || !hostConnectionId) {
+          toast.error('Room table needs a live connection — wait a moment or use Manual seats.')
+          return
+        }
         const sp = party.seatPlan?.seats
         if (!sp || sp.length < 2) {
           toast.error('No room table yet — publish one from Manual or Party roster, or wait for the host.')
@@ -750,6 +755,10 @@ function LobbyScreen({
         return
       }
       if (onlineSeatLayout === 'roster') {
+        if (party.status !== 'connected' || !hostConnectionId) {
+          toast.error('Party roster needs a live connection — wait a moment or use Manual seats.')
+          return
+        }
         const seats = rosterPlusBotsToSeatPlan(party.roster, rosterBotCount)
         if (!seats) {
           toast.error('Need 2–6 founders total (Party roster + bots).')
@@ -762,7 +771,7 @@ function LobbyScreen({
         commitPlayers(seatPlanToPlayers(seats), 'Seats built from the Party roster (optional bots fill empty chairs).')
         return
       }
-      const seats = manualLayoutToSeatPlan(myPartyId, humanName, humanColor, aiSlots)
+      const seats = manualLayoutToSeatPlan(hostConnectionId, humanName, humanColor, aiSlots)
       if (!seatPlanColorsUnique(seats)) {
         toast.error('Each founder needs a unique color.')
         return

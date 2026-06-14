@@ -22,6 +22,10 @@ export function createAuthorityStore(): OnlineAuthorityStore {
   return { gameRev: 0, gameHostId: null, gameStateJson: null }
 }
 
+export function authorityIsLive(store: OnlineAuthorityStore): boolean {
+  return store.gameHostId != null && store.gameStateJson != null
+}
+
 export function authorityLoadState(store: OnlineAuthorityStore): GameState | null {
   if (!store.gameStateJson) return null
   try {

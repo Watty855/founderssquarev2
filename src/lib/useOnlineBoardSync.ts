@@ -15,11 +15,14 @@ import {
   authorityClearGame,
   authorityHydrateForClient,
   authorityInitGame,
+  authorityIsLive,
+  authorityLoadState,
   createAuthorityStore,
   type AuthorityOutbound,
   type OnlineAuthorityStore,
 } from '@/lib/onlineRoomAuthority'
-import { boardTopic, getDeviceConnectionId, getRealtimeClient } from '@/lib/realtimeClient'
+import { toPublicGameState } from '@/lib/onlinePublicState'
+import { boardTopic, getDeviceConnectionId, getRealtimeClient, normalizeRoomCode } from '@/lib/realtimeClient'
 
 export type SendActionOptions = { skipOptimistic?: boolean }
 
@@ -293,7 +296,9 @@ export function useOnlineBoardSync(params: {
     [setGameState, deliverOutbound, rollbackAction, sendWire]
   )
 
-  const configKey = config ? `${config.roomId}|${config.role}|${config.displayName}` : ''
+  const configKey = config
+    ? `${normalizeRoomCode(config.roomId)}|${config.role}|${config.displayName}`
+    : ''
 
   useEffect(() => {
     hostInitSentRef.current = false
@@ -316,7 +321,8 @@ export function useOnlineBoardSync(params: {
     }
 
     const myId = getDeviceConnectionId()
-    const ch = client.channel(boardTopic(cfg.roomId), {
+    const room = normalizeRoomCode(cfg.roomId)
+    const ch = client.channel(boardTopic(room), {
       config: { broadcast: { self: false } },
     })
     channelRef.current = ch
@@ -335,6 +341,19 @@ export function useOnlineBoardSync(params: {
             event: 'board',
             payload: { kind: 'game_request', from: myId } satisfies BoardWire,
           })
+        } else if (cfgRef.current?.role === 'host' && authorityIsLive(authorityRef.current)) {
+          const gs = authorityLoadState(authorityRef.current)
+          if (gs) {
+            void ch.send({
+              type: 'broadcast',
+              event: 'board',
+              payload: {
+                kind: 'public_state',
+                rev: authorityRef.current.gameRev,
+                state: toPublicGameState(gs),
+              } satisfies BoardWire,
+            })
+          }
         }
       }
     })
