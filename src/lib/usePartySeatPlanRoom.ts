@@ -12,6 +12,7 @@ export type SeatPlanBroadcast = {
 type LobbyWire =
   | { kind: 'seat_plan'; revision: number; seats: SeatPlanEntry[]; updatedByConnectionId: string | null }
   | { kind: 'seat_plan_request'; from: string }
+  | { kind: 'game_starting'; hostName?: string }
 
 type PresencePayload = {
   displayName: string
@@ -37,6 +38,7 @@ export function usePartySeatPlanRoom(opts: {
   const [roster, setRoster] = useState<LobbyPlayer[]>([])
   const [seatPlan, setSeatPlan] = useState<SeatPlanBroadcast | null>(null)
   const [myConnectionId, setMyConnectionId] = useState<string | null>(null)
+  const [hostStarting, setHostStarting] = useState(false)
 
   const channelRef = useRef<RealtimeChannel | null>(null)
   const seatPlanRef = useRef<SeatPlanBroadcast | null>(null)
@@ -102,6 +104,10 @@ export function usePartySeatPlanRoom(opts: {
             payload: { kind: 'seat_plan', ...current } satisfies LobbyWire,
           })
         }
+        return
+      }
+      if (msg.kind === 'game_starting') {
+        setHostStarting(true)
       }
     })
 
@@ -167,5 +173,24 @@ export function usePartySeatPlanRoom(opts: {
     })
   }, [])
 
-  return { status, roster, seatPlan, myConnectionId, proposeSeatPlan, requestSeatPlan }
+  const signalGameStarting = useCallback((hostName?: string) => {
+    const ch = channelRef.current
+    if (!ch) return
+    void ch.send({
+      type: 'broadcast',
+      event: 'lobby',
+      payload: { kind: 'game_starting', hostName } satisfies LobbyWire,
+    })
+  }, [])
+
+  return {
+    status,
+    roster,
+    seatPlan,
+    myConnectionId,
+    hostStarting,
+    proposeSeatPlan,
+    requestSeatPlan,
+    signalGameStarting,
+  }
 }

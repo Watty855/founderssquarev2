@@ -6,7 +6,6 @@ import { Player, Plot, GameState, PlayerScore } from '@/lib/types'
 import { createInitialBoard } from '@/lib/boardData'
 import { createActionDeck, createPropertyDeck, drawCards, drawFromDeckWithDiscardReshuffle } from '@/lib/deckUtils'
 import { GameSetupWizard } from '@/components/game/GameSetupWizard'
-import { JoinOnlineGame } from '@/components/game/JoinOnlineGame'
 import { GameOpeningSequence } from '@/components/game/GameOpeningSequence'
 import {
   OpeningProTipOverlay,
@@ -344,7 +343,6 @@ function AppInner() {
   const [gameState, setGameState] = useGameState<GameState>('founders-square-game', initialGameState, {
     persist: partyBoardConfig?.role !== 'guest',
   })
-  const [joinGateActive, setJoinGateActive] = useState(false)
   const [guestOnlineHintDismissed, setGuestOnlineHintDismissed] = useState(() => {
     if (typeof sessionStorage === 'undefined') return false
     try {
@@ -1097,6 +1095,11 @@ function AppInner() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState])
+
+  const handleGuestJoined = useCallback((gs: GameState, cfg: PartyBoardSyncConfig) => {
+    setGameState(gs)
+    setPartyBoardConfig(cfg)
+  }, [])
 
   const handleSetupComplete = (players: Player[], partyBoard?: PartyBoardSyncMeta) => {
     if (partyBoard) {
@@ -4949,27 +4952,10 @@ function AppInner() {
     return () => window.clearTimeout(id)
   }, [aiPlayerReady, aiWakeKey])
 
-  if (!setupReady && joinGateActive) {
-    return (
-      <>
-        <JoinOnlineGame
-          onJoined={(gs, cfg) => {
-            const seat = resolveGuestSeatForRemap(gs, cfg.displayName)
-            setGameState(seat ? redactGameStateForGuestView(gs, seat.id) : gs)
-            setPartyBoardConfig(cfg)
-            setJoinGateActive(false)
-          }}
-          onCancel={() => setJoinGateActive(false)}
-        />
-        <Toaster />
-      </>
-    )
-  }
-
   if (!setupReady || currentPlayerMaybe == null) {
     return (
       <>
-        <GameSetupWizard onComplete={handleSetupComplete} onRequestJoinOnline={() => setJoinGateActive(true)} />
+        <GameSetupWizard onComplete={handleSetupComplete} onGuestJoined={handleGuestJoined} />
         <Toaster />
       </>
     )

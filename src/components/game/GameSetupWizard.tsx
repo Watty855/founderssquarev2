@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Player, PLAYER_COLORS } from '@/lib/types'
+import { Player, PLAYER_COLORS, type GameState } from '@/lib/types'
 import type { HelloProfile, SeatPlanEntry } from '@/lib/partyLobbyTypes'
 import {
   manualLayoutToSeatPlan,
@@ -9,11 +9,12 @@ import {
   seatPlanColorsUnique,
   seatPlanToPlayers,
 } from '@/lib/onlineSeatPlan'
-import type { PartyBoardSyncMeta } from '@/lib/partyBoardSync'
+import type { PartyBoardSyncMeta, PartyBoardSyncConfig } from '@/lib/partyBoardSync'
 import { getDeviceConnectionId, normalizeRoomCode } from '@/lib/realtimeClient'
 import { usePartySeatPlanRoom } from '@/lib/usePartySeatPlanRoom'
 import { PlayerSetup } from '@/components/game/PlayerSetup'
-import { MultiplayerLobby } from '@/components/game/MultiplayerLobby'
+import { MultiplayerLobby, type OnlineLobbyRole } from '@/components/game/MultiplayerLobby'
+import { GuestWaitingRoom } from '@/components/game/GuestWaitingRoom'
 import {
   CaretLeft,
   Play,
@@ -37,7 +38,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 
-export type SetupWizardPhase = 'opening' | 'mode' | 'multiplayer' | 'lobby' | 'local'
+export type SetupWizardPhase = 'opening' | 'mode' | 'multiplayer' | 'lobby' | 'guest-waiting' | 'local'
 
 type GameMode = 'single' | 'online' | 'local'
 
@@ -281,9 +282,9 @@ function OpeningScreen({
           ) : null}
           <p style={{ margin: 0, textAlign: 'center', fontSize: 13, color: '#94a3b8', lineHeight: 1.45 }}>
             {onJoinFriendsGame ? (
-              <>Same site as solo — no app. Host picks Online and publishes seats; joining founders use Join game so each device plays its own founder while the grid syncs through PartyKit.</>
+              <>Open the Founders Square app, enter the host&apos;s room code, choose <strong style={{ color: '#e2e8f0' }}>Join and wait</strong> — you&apos;ll enter automatically when the host starts.</>
             ) : (
-              <>Same site as solo — no app. Share a room code with friends after you connect.</>
+              <>Share a room code with friends after you connect.</>
             )}
           </p>
         </div>
@@ -318,12 +319,12 @@ function OpeningScreen({
 function ModeSelectScreen({
   onBack,
   onPick,
-  onRequestJoinOnline,
+  onJoinOnlineAsGuest,
   deviceOnly,
 }: {
   onBack: () => void
   onPick: (m: GameMode) => void
-  onRequestJoinOnline?: () => void
+  onJoinOnlineAsGuest?: () => void
   /** True after "Play on this device" — hide Online (that path uses Play online on the title screen). */
   deviceOnly?: boolean
 }) {
@@ -463,16 +464,16 @@ function ModeSelectScreen({
                   >
                     <Globe size={56} weight="duotone" color="#64748b" />
                   </button>
-                  {onRequestJoinOnline ? (
+                  {onJoinOnlineAsGuest ? (
                     <button
                       type="button"
                       onClick={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
-                        onRequestJoinOnline()
+                        onJoinOnlineAsGuest()
                       }}
-                      aria-label="Join online game as seated player"
-                      title="Same room — play your founder seat on this device"
+                      aria-label="Join friend's online table"
+                      title="Enter room code and wait for the host to start"
                       style={{
                         position: 'absolute',
                         bottom: 10,
@@ -620,6 +621,12 @@ function LobbyScreen({
   const [onlineSeatLayout, setOnlineSeatLayout] = useState<OnlineSeatLayout>('manual')
   const [rosterBotCount, setRosterBotCount] = useState(0)
 
+  useEffect(() => {
+    if (partyEnabled && party.roster.length >= 2 && onlineSeatLayout === 'manual') {
+      setOnlineSeatLayout('roster')
+    }
+  }, [partyEnabled, party.roster.length, onlineSeatLayout])
+
   const minRosterBots = partyEnabled ? Math.max(0, 2 - party.roster.length) : 0
   const maxRosterBots = partyEnabled ? Math.max(0, 6 - party.roster.length) : 0
 
@@ -732,7 +739,10 @@ function LobbyScreen({
         : undefined
 
     const commitPlayers = (players: Player[], detail: string) => {
-      if (mode === 'online') toast.info(`${roomNote} ${detail}`.trim())
+      if (mode === 'online') {
+        party.signalGameStarting(humanName.trim() || onlineSession?.displayName)
+        toast.info(`${roomNote} ${detail}`.trim())
+      }
       onStart(players, partyBoardMeta)
     }
 
@@ -768,6 +778,7 @@ function LobbyScreen({
           toast.error('Each founder needs a unique color.')
           return
         }
+        party.proposeSeatPlan(seats)
         commitPlayers(seatPlanToPlayers(seats), 'Seats built from the Party roster (optional bots fill empty chairs).')
         return
       }
@@ -1548,20 +1559,22 @@ function RulesDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
 
 export function GameSetupWizard({
   onComplete,
-  onRequestJoinOnline,
+  onGuestJoined,
 }: {
   onComplete: (players: Player[], partyBoard?: PartyBoardSyncMeta) => void
-  onRequestJoinOnline?: () => void
+  onGuestJoined?: (state: GameState, cfg: PartyBoardSyncConfig) => void
 }) {
   const [phase, setPhase] = useState<SetupWizardPhase>('opening')
   const [lobbyMode, setLobbyMode] = useState<'single' | 'online'>('single')
   /** After "Play on this device", mode picker hides Online (use Play online on title screen). */
   const [modeScreenDeviceOnly, setModeScreenDeviceOnly] = useState(false)
+  const [lobbySuggestedRole, setLobbySuggestedRole] = useState<OnlineLobbyRole | undefined>(undefined)
   const [onlineSession, setOnlineSession] = useState<{
     roomId: string
     displayName: string
     connectionId?: string
     profile?: HelloProfile
+    role?: OnlineLobbyRole
   } | null>(null)
 
   return (
@@ -1579,13 +1592,24 @@ export function GameSetupWizard({
               setModeScreenDeviceOnly(false)
               setLobbyMode('online')
               setOnlineSession(null)
+              setLobbySuggestedRole('host')
               setPhase('multiplayer')
             }}
             onNewGame={() => {
               setModeScreenDeviceOnly(true)
               setPhase('mode')
             }}
-            onJoinFriendsGame={onRequestJoinOnline}
+            onJoinFriendsGame={
+              onGuestJoined
+                ? () => {
+                    setModeScreenDeviceOnly(false)
+                    setLobbyMode('online')
+                    setOnlineSession(null)
+                    setLobbySuggestedRole('guest')
+                    setPhase('multiplayer')
+                  }
+                : undefined
+            }
           />
         </motion.div>
       )}
@@ -1603,7 +1627,16 @@ export function GameSetupWizard({
               setModeScreenDeviceOnly(false)
               setPhase('opening')
             }}
-            onRequestJoinOnline={modeScreenDeviceOnly ? undefined : onRequestJoinOnline}
+            onJoinOnlineAsGuest={
+              onGuestJoined
+                ? () => {
+                    setLobbyMode('online')
+                    setOnlineSession(null)
+                    setLobbySuggestedRole('guest')
+                    setPhase('multiplayer')
+                  }
+                : undefined
+            }
             onPick={(m) => {
               if (m === 'local') {
                 setPhase('local')
@@ -1629,14 +1662,34 @@ export function GameSetupWizard({
           transition={{ duration: 0.2 }}
         >
           <MultiplayerLobby
+            suggestedRole={lobbySuggestedRole}
             onBack={() => {
               setOnlineSession(null)
+              setLobbySuggestedRole(undefined)
               setModeScreenDeviceOnly(false)
               setPhase('opening')
             }}
             onSessionReady={(meta) => {
               setOnlineSession(meta)
-              setPhase('lobby')
+              setPhase(meta.role === 'guest' ? 'guest-waiting' : 'lobby')
+            }}
+          />
+        </motion.div>
+      )}
+      {phase === 'guest-waiting' && onlineSession?.role === 'guest' && onGuestJoined && (
+        <motion.div
+          key="guest-waiting"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <GuestWaitingRoom
+            session={{ ...onlineSession, role: 'guest' }}
+            onGameStarted={(state, cfg) => onGuestJoined(state, cfg)}
+            onBack={() => {
+              setOnlineSession(null)
+              setPhase('multiplayer')
             }}
           />
         </motion.div>

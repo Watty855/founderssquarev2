@@ -7,16 +7,23 @@ import {
   isOnlineConfigured,
   normalizeRoomCode,
 } from '@/lib/realtimeClient'
-import { ArrowsClockwise, CaretLeft, Play, UsersThree } from '@phosphor-icons/react'
+import { ArrowsClockwise, CaretLeft, Crown, Hourglass, UsersThree } from '@phosphor-icons/react'
+
+export type OnlineLobbyRole = 'host' | 'guest'
+
+export type OnlineSessionReadyMeta = {
+  roomId: string
+  displayName: string
+  connectionId: string
+  profile: HelloProfile
+  role: OnlineLobbyRole
+}
 
 interface MultiplayerLobbyProps {
   onBack: () => void
-  onSessionReady: (opts: {
-    roomId: string
-    displayName: string
-    connectionId: string
-    profile: HelloProfile
-  }) => void
+  /** When set, the post-enter screen highlights host vs join (from title screen). */
+  suggestedRole?: OnlineLobbyRole
+  onSessionReady: (opts: OnlineSessionReadyMeta) => void
 }
 
 /** Kept for compatibility with older lobby links. */
@@ -26,11 +33,10 @@ const inputClass =
   'w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition focus:border-sky-400/60 focus:bg-white/10'
 
 /**
- * Online room lobby over Supabase Realtime. Everyone enters the same room code,
- * sees the live roster via presence, then the host continues into table setup
- * where roster members are seated.
+ * Online room lobby over Supabase Realtime. Everyone enters the same room code
+ * and sees the live roster. Hosts configure the table; guests wait until Start.
  */
-export function MultiplayerLobby({ onBack, onSessionReady }: MultiplayerLobbyProps) {
+export function MultiplayerLobby({ onBack, suggestedRole, onSessionReady }: MultiplayerLobbyProps) {
   const [displayName, setDisplayName] = useState('')
   const [roomCode, setRoomCode] = useState('')
   const [joined, setJoined] = useState(false)
@@ -42,6 +48,16 @@ export function MultiplayerLobby({ onBack, onSessionReady }: MultiplayerLobbyPro
     enabled: joined && roomId.length > 0,
   })
 
+  const enterSession = (role: OnlineLobbyRole) => {
+    onSessionReady({
+      roomId,
+      displayName: displayName.trim(),
+      connectionId: party.myConnectionId ?? getDeviceConnectionId(),
+      profile: {},
+      role,
+    })
+  }
+
   if (!isOnlineConfigured()) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-[#0a0a0f] p-6">
@@ -50,8 +66,7 @@ export function MultiplayerLobby({ onBack, onSessionReady }: MultiplayerLobbyPro
           <p className="m-0 mb-7 text-sm leading-relaxed text-slate-400">
             Live multiplayer uses Supabase Realtime. Add <span className="text-sky-200">VITE_SUPABASE_URL</span>{' '}
             and <span className="text-sky-200">VITE_SUPABASE_ANON_KEY</span> to your{' '}
-            <span className="text-sky-200">.env</span> (see .env.example), then restart. Pass-and-play and
-            single player work without it.
+            <span className="text-sky-200">.env</span> (see .env.example), then restart.
           </p>
           <button
             type="button"
@@ -67,6 +82,7 @@ export function MultiplayerLobby({ onBack, onSessionReady }: MultiplayerLobbyPro
   }
 
   const canEnter = displayName.trim().length > 0 && roomId.length >= 3
+  const connected = party.status === 'connected'
 
   if (!joined) {
     return (
@@ -74,7 +90,9 @@ export function MultiplayerLobby({ onBack, onSessionReady }: MultiplayerLobbyPro
         <div className="w-full max-w-md rounded-2xl border border-white/15 bg-black/60 px-8 py-9 shadow-[0_0_60px_rgba(0,0,0,0.6)] backdrop-blur-md">
           <h2 className="m-0 mb-2 text-center text-xl font-semibold text-slate-100">Online room</h2>
           <p className="m-0 mb-6 text-center text-sm leading-relaxed text-slate-400">
-            Share one room code — everyone who enters it sees the table live.
+            {suggestedRole === 'guest'
+              ? 'Enter the host’s room code and your name — you’ll wait in the room until they start.'
+              : 'Share one room code. Hosts set up the table; guests join and wait before Start game.'}
           </p>
           <label className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
             Your name
@@ -140,11 +158,7 @@ export function MultiplayerLobby({ onBack, onSessionReady }: MultiplayerLobbyPro
         <p className="m-0 mb-5 text-center text-2xl font-bold tracking-[0.25em] text-sky-200">{roomId}</p>
         <div className="mb-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
           <p className="m-0 mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-            {party.status === 'connected'
-              ? `In the room (${party.roster.length})`
-              : party.status === 'error'
-                ? 'Connection problem — retrying…'
-                : 'Connecting…'}
+            {connected ? `In the room (${party.roster.length})` : party.status === 'error' ? 'Connection problem…' : 'Connecting…'}
           </p>
           <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
             {party.roster.map((p) => (
@@ -159,36 +173,38 @@ export function MultiplayerLobby({ onBack, onSessionReady }: MultiplayerLobbyPro
             {party.roster.length === 0 && <li className="text-sm text-slate-500">Waiting for players…</li>}
           </ul>
         </div>
-        <p className="m-0 mb-6 text-center text-xs leading-relaxed text-slate-500">
-          The host continues to table setup and seats everyone here. Guests can also use “Join online
-          game” from the title screen once the host’s table is live.
+        <p className="m-0 mb-5 text-center text-xs leading-relaxed text-slate-500">
+          <strong className="text-slate-300">Guests</strong> should join here before the host starts. The host seats
+          everyone from the Party roster, then clicks Start game.
         </p>
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3">
           <button
             type="button"
-            onClick={() => setJoined(false)}
-            className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-300 transition hover:bg-white/10"
+            disabled={!connected}
+            onClick={() => enterSession('guest')}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-sky-400/35 bg-sky-500/15 px-6 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-sky-100 transition enabled:hover:border-sky-400/55 enabled:hover:bg-sky-500/25 disabled:opacity-40"
           >
-            <CaretLeft size={14} weight="bold" />
-            Back
+            <Hourglass size={16} weight="bold" />
+            Join and wait
           </button>
           <button
             type="button"
-            disabled={party.status !== 'connected'}
-            onClick={() =>
-              onSessionReady({
-                roomId,
-                displayName: displayName.trim(),
-                connectionId: party.myConnectionId ?? getDeviceConnectionId(),
-                profile: {},
-              })
-            }
-            className="inline-flex items-center gap-2 rounded-full border border-emerald-400/35 bg-emerald-500/15 px-6 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-100 transition enabled:hover:border-emerald-400/55 enabled:hover:bg-emerald-500/25 disabled:opacity-40"
+            disabled={!connected}
+            onClick={() => enterSession('host')}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-emerald-400/35 bg-emerald-500/15 px-6 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-100 transition enabled:hover:border-emerald-400/55 enabled:hover:bg-emerald-500/25 disabled:opacity-40"
           >
-            <Play size={14} weight="bold" />
-            Continue to setup
+            <Crown size={16} weight="bold" />
+            Host this table
           </button>
         </div>
+        <button
+          type="button"
+          onClick={() => setJoined(false)}
+          className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-slate-300 transition hover:bg-white/10"
+        >
+          <CaretLeft size={14} weight="bold" />
+          Back
+        </button>
       </div>
     </div>
   )

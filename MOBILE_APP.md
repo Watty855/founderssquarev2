@@ -62,11 +62,14 @@ instructions while single player and pass-and-play remain fully playable.
 
 ## Playing online
 
-1. **Host**: Title screen → Online → enter a name, generate a room code, share it.
-2. Friends enter the same room code in the lobby — the roster updates live.
-3. Host continues to table setup, seats the roster, and starts the game.
-4. **Guests**: Title screen → *Join online game* → same room code + the seat
-   name the host gave them. The board hydrates instantly and stays live.
+1. **Guest (any device / app):** Title → **Join friend's game** → room code → **Join and wait**.
+   You enter automatically when the host clicks **Start game** — no post-start join step.
+2. **Host:** Title → **Play online** → room code → **Host this table** → use **Party roster**
+   seats → **Start game**.
+3. Everyone must be in the room **before** Start so the host can seat them from the roster.
+
+Native apps (iPhone, iPad, Android, Mac via Catalyst) use the same flow — see
+[APP_DISTRIBUTION.md](./APP_DISTRIBUTION.md).
 
 ## Mobile production pipeline
 

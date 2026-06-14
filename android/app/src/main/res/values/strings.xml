@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Founders Square</string>
+    <string name="title_activity_main">Founders Square</string>
+    <string name="package_name">com.founderssquare.game</string>
+    <string name="custom_url_scheme">com.founderssquare.game</string>
+</resources>

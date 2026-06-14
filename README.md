@@ -12,9 +12,9 @@ rules authority — see [MOBILE_APP.md](./MOBILE_APP.md).
 
 - **Single player** — play against AI founders (bots).
 - **Pass & play multiplayer** — turn-based multiplayer around one device, ideal for mobile.
-- **Online (live)** — room-code lobbies over Supabase Realtime: everyone sees the
-  board update live as moves are played, on web and in the mobile apps. Setup
-  takes ~5 minutes — see [MOBILE_APP.md](./MOBILE_APP.md).
+- **Online (live)** — room-code lobbies over Supabase Realtime: guests **join and wait**
+  before Start game, then auto-enter when the host starts. Works in the app on
+  phone, iPad, Android, Mac, and PC — see [APP_DISTRIBUTION.md](./APP_DISTRIBUTION.md).
 
 ## What's new in v2
 
