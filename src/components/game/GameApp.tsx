@@ -5897,6 +5897,8 @@ function AppInner() {
               hiddenInstanceIds={hiddenInstanceIds}
               propertyDeckHasCards={safeGameState.propertyDeck.length > 0}
               actionDeckHasCards={safeGameState.actionDeck.length > 0}
+              plots={safeGameState.plots}
+              crossingTheLineActive={safeGameState.crossingTheLineActive}
             />
           </div>
         </div>

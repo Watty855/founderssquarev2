@@ -1,7 +1,8 @@
 import type { CardInstance, PropertyCard } from '@/lib/cardTypes'
 import type { Player, GameState } from '@/lib/types'
-import { propertyCards, actionCards, ANCHOR_WILD_CARD_EMULATE_IDS, CIVIC_VARIANT_PROPERTY_IDS } from '@/lib/cardData'
+import { propertyCards, actionCards, ANCHOR_WILD_CARD_EMULATE_IDS } from '@/lib/cardData'
 import { isCivicFlexHandCard } from '@/lib/civicFlexProperty'
+import { getAvailableCivicVariantIds } from '@/lib/lotCategory'
 import { resolvePropertyPlacementTemplate } from '@/lib/placementTemplate'
 import { getValidPlotsForProperty } from '@/lib/placementRules'
 import { getHousingBuildCost, isHousingPropertyCard } from '@/lib/housingEconomics'
@@ -206,7 +207,7 @@ export function trySimpleAiMainPhase(
       card.id === 'anchor-wild-card'
         ? (ANCHOR_WILD_CARD_EMULATE_IDS[0] as string)
         : isCivicFlexHandCard(card)
-          ? (CIVIC_VARIANT_PROPERTY_IDS[0] as string)
+          ? (getAvailableCivicVariantIds(gs.plots, gs.crossingTheLineActive)[0] as string | undefined)
           : undefined
     const emu = ui.placementWildEmulatePropertyId ?? defaultEmulate
     const resolved = resolvePropertyPlacementTemplate(card, emu)
@@ -264,7 +265,7 @@ export function trySimpleAiMainPhase(
         c.id === 'anchor-wild-card'
           ? (ANCHOR_WILD_CARD_EMULATE_IDS[0] as string)
           : isCivicFlexHandCard(c)
-            ? (CIVIC_VARIANT_PROPERTY_IDS[0] as string)
+            ? (getAvailableCivicVariantIds(gs.plots, gs.crossingTheLineActive)[0] as string | undefined)
             : undefined
       const template = resolvePropertyPlacementTemplate(c, wildEmu)
       if (!template) return null
@@ -289,7 +290,7 @@ export function trySimpleAiMainPhase(
       pc?.id === 'anchor-wild-card'
         ? (ANCHOR_WILD_CARD_EMULATE_IDS[0] as string)
         : pc && isCivicFlexHandCard(pc)
-          ? (CIVIC_VARIANT_PROPERTY_IDS[0] as string)
+          ? (getAvailableCivicVariantIds(gs.plots, gs.crossingTheLineActive)[0] as string | undefined)
           : undefined
     h.handlePlayCards(inst.instanceId, [], [], {
       skipTaxBuildPrompt: true,

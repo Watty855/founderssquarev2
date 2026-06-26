@@ -2,7 +2,7 @@ import type { PropertyCard } from './cardTypes'
 
 /**
  * Face-card style corner letters shown top-left / top-right on property cards:
- * C civic · A arts/museum/tourism/fairgrounds · T hotel · P park · Co commercial ·
+ * C civic · E entertainment/arts · T hotel · P park · M commercial ·
  * H housing · I industry/mining · D freight/distribution · S storage/warehouse ·
  * F food/grocery · O fuel/power.
  */
@@ -12,12 +12,10 @@ const NAME_TO_LETTER: Record<string, string> = {
   'City Hall': 'C',
   Courthouse: 'C',
   Police: 'C',
-  Arts: 'A',
-  Museum: 'A',
-  Tourism: 'A',
+  Arts: 'E',
   Hotel: 'T',
   Park: 'P',
-  Commercial: 'Co',
+  Commercial: 'M',
   Housing: 'H',
   Industry: 'I',
   Mining: 'I',

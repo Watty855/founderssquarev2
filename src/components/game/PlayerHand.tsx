@@ -2,12 +2,13 @@
 
 import { Player, Plot } from '@/lib/types'
 import { PropertyCard, ActionCard, CardInstance } from '@/lib/cardTypes'
-import { propertyCards, actionCards, ANCHOR_WILD_CARD_EMULATE_IDS, CIVIC_VARIANT_PROPERTY_IDS } from '@/lib/cardData'
+import { propertyCards, actionCards, ANCHOR_WILD_CARD_EMULATE_IDS } from '@/lib/cardData'
 import {
   getCivicVariantShortRule,
   getPropertyHandDisplayName,
   isCivicFlexHandCard,
 } from '@/lib/civicFlexProperty'
+import { getAvailableCivicVariantIds } from '@/lib/lotCategory'
 import { needsEmulateChoiceBeforePlacement } from '@/lib/placementTemplate'
 import { CompactCardView } from '@/components/game/CompactCardView'
 import {
@@ -17,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useFlightAnchorRef } from '@/hooks/use-flight-anchors'
 import { DeckPile } from '@/components/game/DeckPile'
@@ -88,6 +89,9 @@ interface PlayerHandProps {
   /** Whether the underlying decks still have cards. Drives the empty placeholder on each pile. */
   propertyDeckHasCards?: boolean
   actionDeckHasCards?: boolean
+  /** Board lots — used to filter civic flex options to vacant C cells on the board. */
+  plots?: Plot[]
+  crossingTheLineActive?: boolean
 }
 
 /** Stable anchor key for a single card slot in any hand — both for source rect (discards out) and target rect (current player draws in). */
@@ -195,6 +199,8 @@ export function PlayerHand({
   hiddenInstanceIds,
   propertyDeckHasCards = true,
   actionDeckHasCards = true,
+  plots = [],
+  crossingTheLineActive = false,
 }: PlayerHandProps) {
   const setPropertyTargetAnchor = useFlightAnchorRef(handTargetAnchorKey(player.id, 'property'))
   const setActionTargetAnchor = useFlightAnchorRef(handTargetAnchorKey(player.id, 'action'))
@@ -228,6 +234,11 @@ export function PlayerHand({
   const propertyHandCards = propertyCardsList.map((c) => ({ ...c, cardType: 'property' as const }))
   const actionHandCards = actionCardsList.map((c) => ({ ...c, cardType: 'action' as const }))
 
+  const availableCivicVariantIds = useMemo(
+    () => getAvailableCivicVariantIds(plots, crossingTheLineActive),
+    [plots, crossingTheLineActive]
+  )
+
   useEffect(() => {
     if (!cardDialog?.open || cardDialog.type !== 'property') return
     const inst = player?.propertyCards?.find((i) => i.instanceId === cardDialog.instanceId)
@@ -237,9 +248,10 @@ export function PlayerHand({
       setWildCardEmulateId(null)
     }
     if (def && isCivicFlexHandCard(def)) {
-      setCivicVariantId(null)
+      const available = getAvailableCivicVariantIds(plots, crossingTheLineActive)
+      setCivicVariantId(available.length === 1 ? available[0] : null)
     }
-  }, [cardDialog?.open, cardDialog?.instanceId, cardDialog?.type, player?.propertyCards])
+  }, [cardDialog?.open, cardDialog?.instanceId, cardDialog?.type, player?.propertyCards, plots, crossingTheLineActive])
 
   const handleCardClick = (instanceId: string, type: 'property' | 'action') => {
     if (!handInteractionsActive) return
@@ -1107,36 +1119,44 @@ export function PlayerHand({
                 ) : isCivicFlexHandCard(currentCard as PropertyCard) ? (
                   <>
                     <p style={{ fontSize: 12, color: '#8888a0', marginBottom: 8, lineHeight: 1.45 }}>
-                      Select which civic building this card becomes. Valid build locations update for your choice.
+                      Choose which civic building this card becomes. Only options with vacant C lots on the board are shown.
                     </p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-                      {CIVIC_VARIANT_PROPERTY_IDS.map((variantId) => {
-                        const variant = propertyCards.find((c) => c.id === variantId)
-                        if (!variant) return null
-                        const sel = civicVariantId === variantId
-                        return (
-                          <button
-                            key={variantId}
-                            type="button"
-                            onClick={() => setCivicVariantId(variantId)}
-                            style={{
-                              padding: '10px 12px',
-                              borderRadius: 8,
-                              border: sel ? '2px solid #0070cc' : '1px solid rgba(255,255,255,0.12)',
-                              backgroundColor: sel ? 'rgba(0,112,204,0.12)' : 'transparent',
-                              color: '#e8e8f0',
-                              fontSize: 11,
-                              textAlign: 'left',
-                              cursor: 'pointer',
-                              lineHeight: 1.35,
-                            }}
-                          >
-                            <div style={{ fontWeight: 600, marginBottom: 4 }}>{variant.name}</div>
-                            <div style={{ color: '#8888a0', fontSize: 10 }}>{getCivicVariantShortRule(variantId)}</div>
-                          </button>
-                        )
-                      })}
-                    </div>
+                    {availableCivicVariantIds.length === 0 ? (
+                      <p style={{ fontSize: 12, color: '#f87171', marginBottom: 8 }}>
+                        No vacant civic (C) lots on the board match any civic building right now.
+                      </p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                        {availableCivicVariantIds.map((variantId) => {
+                          const variant = propertyCards.find((c) => c.id === variantId)
+                          if (!variant) return null
+                          const sel = civicVariantId === variantId
+                          return (
+                            <button
+                              key={variantId}
+                              type="button"
+                              onClick={() => setCivicVariantId(variantId)}
+                              style={{
+                                padding: '10px 12px',
+                                borderRadius: 8,
+                                border: sel ? '2px solid #0070cc' : '1px solid rgba(0,112,204,0.45)',
+                                backgroundColor: sel ? 'rgba(0,112,204,0.12)' : 'rgba(0,112,204,0.06)',
+                                color: '#e8e8f0',
+                                fontSize: 11,
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                                lineHeight: 1.35,
+                              }}
+                            >
+                              <div style={{ fontWeight: 600, marginBottom: 4 }}>{variant.name}</div>
+                              <div style={{ color: '#8888a0', fontSize: 10 }}>
+                                {getCivicVariantShortRule(variantId, plots)}
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={handleBuildCivicFlex}

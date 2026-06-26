@@ -16,11 +16,19 @@ export interface Player {
   peerHandCounts?: { actions: number; properties: number }
 }
 
+import type { LotCategoryLetter } from './lotCategory'
+
+export type CivicVariantId = 'city-hall' | 'courthouse' | 'police' | 'civic-center'
+
 export interface Plot {
   row: number
   col: string
   type: 'city' | 'street' | 'cathedral' | 'border'
   building?: string
+  /** Board zoning letter from the physical lot label, e.g. M commercial, D distribution, C civic. */
+  lotCategory?: LotCategoryLetter
+  /** Which civic building model this C lot accepts (Hope Hospital, City Hall, etc.). */
+  civicVariantId?: CivicVariantId
   claimedBy?: number
   builtProperty?: string
   /** Housing built as high-density (5+ stories): higher cost/income/end value; −1 takeover influence per such lot on the district. */

@@ -1,6 +1,11 @@
 import { Plot } from './types'
 import { PropertyCard } from './cardTypes'
 import { getPlotDistricts } from './districts'
+import {
+  civicVariantIdForCivicCard,
+  getCardLotLetter,
+  isCivicPropertyCard,
+} from './lotCategory'
 
 /** Union anchor tenet lots only (C11, K3, S11, K19). */
 const UNION_DESIGNATED_ANCHOR_COORDS = new Set(['K3', 'K19', 'C11', 'S11'])
@@ -96,7 +101,7 @@ export function canPlaceProperty(
     if (buildingName === 'Union') {
       return card.id === 'union' && UNION_DESIGNATED_ANCHOR_COORDS.has(key)
     }
-    if (buildingName !== 'Anchor') {
+    if (buildingName !== 'Anchor' && buildingName !== 'Anchor Tenet') {
       return false
     }
     const coords = anchorBuildCoordsForCardId(card.id)
@@ -108,6 +113,18 @@ export function canPlaceProperty(
     if (!onPlot.includes(card.district)) {
       return false
     }
+  }
+
+  if (isCivicPropertyCard(card)) {
+    if (plot.lotCategory !== 'C') return false
+    const requiredVariant = civicVariantIdForCivicCard(card.id)
+    if (plot.civicVariantId && plot.civicVariantId !== requiredVariant) return false
+    return true
+  }
+
+  const cardLetter = getCardLotLetter(card)
+  if (plot.lotCategory && cardLetter) {
+    return plot.lotCategory === cardLetter
   }
 
   for (const allowedLocation of card.buildLocations) {

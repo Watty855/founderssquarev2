@@ -30,14 +30,28 @@ cp .env.example .env   # add VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY
 Env vars are **baked in at build time** — set production Supabase keys before `npm run build`.
 
 ### iOS + iPad + Mac Catalyst
-- macOS with **Xcode 15+**
+- macOS with **Xcode 15+** installed from the **Mac App Store** (Command Line Tools alone are not enough)
 - [Apple Developer Program](https://developer.apple.com/programs/) ($99/year)
+- **CocoaPods** (installed on this machine to `~/.gem/ruby/2.6.0/bin` — add to your shell `PATH`)
+
+Add CocoaPods to your `~/.zshrc` (once):
+
+```bash
+export PATH="$HOME/.gem/ruby/2.6.0/bin:$PATH"
+```
+
+After installing Xcode from the App Store, point `xcode-select` at it (once):
+
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
 
 ```bash
 npm run build
-npx cap add ios          # first time only — creates ios/
-npx cap sync ios
-npx cap open ios
+npm run cap:add:ios       # first time only — creates ios/ (already done in repo)
+export PATH="$HOME/.gem/ruby/2.6.0/bin:$PATH"
+npx cap sync ios          # runs pod install (needs full Xcode)
+npm run cap:ios           # sync + open Xcode
 ```
 
 In Xcode:

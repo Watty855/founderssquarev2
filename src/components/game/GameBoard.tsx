@@ -5,6 +5,7 @@ import { Plot, Player, COLUMNS } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { getPlotDistricts, DISTRICTS } from '@/lib/districts'
 import { propertyCards } from '@/lib/cardData'
+import { getPlotBoardLetter } from '@/lib/lotCategory'
 
 /** Unified light blueprint tint for every named zoning district (lighter than border “River” cells ~#0e3560). */
 const DISTRICT_ZONE_STYLE = {
@@ -77,39 +78,6 @@ const BORDER_STYLES: Record<string, { bg: string; pattern?: string; accent: stri
   'River': { bg: '#0e3560', pattern: 'river', accent: '#4a9ad0' },
   'Farmland': { bg: '#1e4020', pattern: 'farmland', accent: '#5aaa5a' },
   'Railway': { bg: '#35354a', pattern: 'railway', accent: '#b0b0cc' },
-}
-
-// Building type → emoji/icon for visual variety
-function getBuildingIcon(building: string): string {
-  const b = building.toLowerCase()
-  if (b.includes('hotel') || b.includes('lodge')) return '🏨'
-  if (b.includes('housing')) return '🏠'
-  if (b.includes('park')) return '🌳'
-  if (b.includes('church')) return '⛪'
-  if (b.includes('civic') || b.includes('city hall') || b.includes('courthouse') || b.includes('police')) return '🏛'
-  if (b.includes('museum') || b.includes('arts')) return '🎨'
-  if (b.includes('grocery') || b.includes('market') || b.includes('farmer')) return '🛒'
-  if (b.includes('mining') || b.includes('quarry') || b.includes('gravel') || b.includes('silver') || b.includes('copper')) return '⛏'
-  if (b.includes('industry') || b.includes('mill') || b.includes('timber')) return '🏭'
-  if (b.includes('freight') || b.includes('distribution') || b.includes('warehouse') || b.includes('storage') || b.includes('materials')) return '📦'
-  if (b.includes('train') || b.includes('terminal')) return '🚂'
-  if (b.includes('marina') || b.includes('harbor') || b.includes('dock') || b.includes('fish')) return '⚓'
-  if (b.includes('power') || b.includes('fuel')) return '⚡'
-  if (b.includes('tourism') || b.includes('fairground')) return '🎡'
-  if (b.includes('dining') || b.includes('food') || b.includes('dairy') || b.includes('grain') || b.includes('farm process') || b.includes('co-op')) return '🍽'
-  if (b.includes('commercial') || b.includes('mixed') || b.includes('equip') || b.includes('trade')) return '🏪'
-  if (b.includes('anchor') || b.includes('union')) return '⭐'
-  if (b.includes('mafia')) return '🎩'
-  if (b.includes('influencer')) return '📣'
-  if (b.includes('media')) return '📰'
-  if (b.includes('news outlet')) return '📡'
-  if (b.includes('port authority')) return '⚓'
-  if (b.includes('arts council')) return '🎨'
-  if (b.includes('tourism')) return '🎡'
-  if (b.includes('farm bureau') || b.includes('farm co-op') || b.includes('co-op')) return '🌾'
-  if (b.includes('regulation')) return '📋'
-  if (b.includes('wild card')) return '🃏'
-  return ''
 }
 
 export function GameBoard({
@@ -412,7 +380,8 @@ export function GameBoard({
           const districtList = isCity ? getPlotDistricts(plot.row, plot.col) : []
           const districtStyle = districtList.length > 0 ? DISTRICT_ZONE_STYLE : null
           const borderStyle = isBorder && plot.building ? BORDER_STYLES[plot.building] : null
-          const isAnchor = plot.building === 'Anchor' || plot.building === 'Union'
+          const isAnchor =
+            plot.building === 'Anchor' || plot.building === 'Anchor Tenet' || plot.building === 'Union'
           const isClaimed = plot.claimedBy !== undefined
           const builtPropertyCard = plot.builtProperty
             ? propertyCards.find((c) => c.id === plot.builtProperty)
@@ -421,15 +390,8 @@ export function GameBoard({
             isAnchor && builtPropertyCard?.type === 'anchor' ? builtPropertyCard.name : null
           const plotDisplayTitle =
             anchorTenetTitle ?? (isCity && plot.building ? plot.building : '')
-          const displayIcon =
-            isCity && plot.building
-              ? isClaimed && anchorTenetTitle && builtPropertyCard?.type === 'anchor'
-                ? getBuildingIcon(builtPropertyCard.name) || '⭐'
-                : !isClaimed
-                  ? getBuildingIcon(plot.building)
-                  : ''
-              : ''
-          const icon = displayIcon
+          const lotLetter =
+            isCity && plot.building ? getPlotBoardLetter(plot, builtPropertyCard) : null
           const highDensityHousingLot =
             isClaimed &&
             plot.housingHighDensity === true &&
@@ -668,15 +630,22 @@ export function GameBoard({
                 }
               }}
             >
-              {/* Building icon (unclaimed lot, or claimed anchor tenet with type-specific icon) */}
-              {icon && (
-                <span style={{
-                  fontSize: plot.building === 'Anchor' || plot.building === 'Union' ? 10 : 11,
-                  lineHeight: 1,
-                  opacity: 0.85,
-                  filter: 'grayscale(0.3)',
-                }}>
-                  {icon}
+              {/* Lot category letter (matches property card corner letters from the board CSV) */}
+              {lotLetter && (
+                <span
+                  style={{
+                    fontSize: lotLetter.length > 1 ? 6 : 8,
+                    fontWeight: 400,
+                    letterSpacing: '0.04em',
+                    lineHeight: 1,
+                    opacity: isClaimed ? 0.85 : 0.65,
+                    color: isClaimed
+                      ? 'rgba(255,255,255,0.75)'
+                      : districtStyle?.text || 'rgba(255,255,255,0.45)',
+                    fontFamily: 'var(--font-jetbrains-mono), monospace',
+                  }}
+                >
+                  {lotLetter}
                 </span>
               )}
 
@@ -689,7 +658,7 @@ export function GameBoard({
                       : anchorTenetTitle
                         ? 6.5
                         : 7,
-                  fontWeight: 500,
+                  fontWeight: 700,
                   lineHeight: 1.1,
                   color: isClaimed ? 'rgba(255,255,255,0.85)' : (districtStyle?.text || 'rgba(255,255,255,0.5)'),
                   textAlign: 'center',
