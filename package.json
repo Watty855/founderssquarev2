@@ -10,6 +10,8 @@
     "cap:sync": "npm run build && npx cap sync",
     "cap:ios": "npm run cap:sync && npx cap open ios",
     "cap:android": "npm run cap:sync && npx cap open android",
+    "cap:archive:ios": "npm run cap:sync && cd ios/App && xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath build/FoundersSquare.xcarchive archive -allowProvisioningUpdates",
+    "cap:export:ios": "cd ios/App && xcodebuild -exportArchive -archivePath build/FoundersSquare.xcarchive -exportPath build/AppStoreExport -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates",
     "cap:add:ios": "npm run build && npx cap add ios",
     "cap:add:android": "npm run build && npx cap add android"
   },

@@ -3,6 +3,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, type CSSProperties } from 'react'
 import { useGameState } from '@/hooks/use-game-state'
 import { Player, Plot, GameState, PlayerScore } from '@/lib/types'
+import { attachUndoSnapshotIfTurnAction, canUndoLastAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
 import { createInitialBoard } from '@/lib/boardData'
 import { createActionDeck, createPropertyDeck, drawCards, drawFromDeckWithDiscardReshuffle } from '@/lib/deckUtils'
 import { GameSetupWizard } from '@/components/game/GameSetupWizard'
@@ -24,7 +25,7 @@ import { CardFlightLayer, type CardFlight } from '@/components/game/CardFlightLa
 import { FlightAnchorProvider, useFlightRectGetter, type FlightRect } from '@/hooks/use-flight-anchors'
 import { DiscardDialog } from '@/components/dialogs/DiscardDialog'
 import { GameEndDialog } from '@/components/dialogs/GameEndDialog'
-import { UndoBuildDialog } from '@/components/dialogs/UndoBuildDialog'
+import { UndoLastActionDialog } from '@/components/dialogs/UndoLastActionDialog'
 import { InvestmentOrphanDialog } from '@/components/dialogs/InvestmentOrphanDialog'
 import {
   AlertDialog,
@@ -423,10 +424,15 @@ function AppInner() {
 
   const patchGameState = useCallback(
     (updater: React.SetStateAction<GameState>) => {
+      const wrap: React.SetStateAction<GameState> = (prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : updater
+        if (next === prev) return prev
+        return attachUndoSnapshotIfTurnAction(prev, next)
+      }
       if (isOnlineActor) {
-        setGameStateWithOnlineCommit(updater)
+        setGameStateWithOnlineCommit(wrap)
       } else {
-        setGameState(updater)
+        setGameState(wrap)
       }
     },
     [isOnlineActor, setGameStateWithOnlineCommit, setGameState]
@@ -555,13 +561,7 @@ function AppInner() {
     open: boolean
     numToDiscard: number
   }>({ open: false, numToDiscard: 0 })
-  const [undoBuildDialogState, setUndoBuildDialogState] = useState<{
-    open: boolean
-    row: number | null
-    col: string | null
-    propertyName: string
-    buildCost: number
-  }>({ open: false, row: null, col: null, propertyName: '', buildCost: 0 })
+  const [undoActionDialogOpen, setUndoActionDialogOpen] = useState(false)
   const [rollDieDialogState, setRollDieDialogState] = useState<{
     open: boolean
     mode:
@@ -618,7 +618,7 @@ function AppInner() {
   const aiCpRef = useRef<Player | null>(null)
   const aiHooksRef = useRef<SimpleAiTurnHandlers>({
     handleEndTurn: () => {},
-    handleUndoBuildCancel: () => {},
+    handleUndoLastActionCancel: () => {},
     handleActionCriteriaBank: () => {},
     handleCancelTakeoverSelect: () => {},
     handleCancelScandalSelect: () => {},
@@ -2439,7 +2439,10 @@ function AppInner() {
         }, 500)
       }
 
-      return withReplenishedActionHand(stateWithTrigger, current.currentPlayerIndex)
+      return attachUndoSnapshotIfTurnAction(
+        current,
+        withReplenishedActionHand(stateWithTrigger, current.currentPlayerIndex)
+      )
     })
   }
 
@@ -2543,6 +2546,7 @@ function AppInner() {
         incomeResolvedThisTurn: false,
         crossingTheLineActive: false,
         playedPropertyCardThisTurn: undefined,
+        undoLastAction: undefined,
       }
 
       if (totalActionCards > 8) {
@@ -3598,7 +3602,7 @@ function AppInner() {
       })
       resetIncomeDialog()
     } else {
-      setGameState((current) => {
+      patchGameState((current) => {
       const currentPlayer = current.players[current.currentPlayerIndex]
       const ownerIdResolved = currentPlayer.id
       const stillPendingTax = (current.pendingIncomeTaxPlayerIds ?? []).includes(ownerIdResolved)
@@ -3780,92 +3784,29 @@ function AppInner() {
     if (discardPropertySelectMode.active) return
     if (removeInvestorsSelectMode.active) return
 
-    if (safeGameState.lastBuiltProperty &&
-        safeGameState.lastBuiltProperty.row === row &&
-        safeGameState.lastBuiltProperty.col === col) {
-      const propertyCard = propertyCards.find(c => c.id === safeGameState.lastBuiltProperty?.propertyId)
-      const propertyName =
-        safeGameState.lastBuiltProperty.undoTitle ?? propertyCard?.name ?? 'Property'
-      if (propertyCard || safeGameState.lastBuiltProperty.undoTitle) {
-        setUndoBuildDialogState({
-          open: true,
-          row,
-          col,
-          propertyName,
-          buildCost: safeGameState.lastBuiltProperty.buildCost
-        })
-      }
+    if (
+      safeGameState.lastBuiltProperty &&
+      safeGameState.lastBuiltProperty.row === row &&
+      safeGameState.lastBuiltProperty.col === col &&
+      canUndoLastAction(safeGameState, { handInteractionsActive, isSpectator })
+    ) {
+      setUndoActionDialogOpen(true)
     }
   }
 
-  const handleUndoBuild = () => {
-    if (!undoBuildDialogState.row || !undoBuildDialogState.col) return
-
+  const handleUndoLastAction = () => {
+    const label = safeGameState.undoLastAction?.label ?? 'Last action'
     patchGameState((current) => {
-      if (!current.lastBuiltProperty) return current
-
-      const { row, col, buildCost } = current.lastBuiltProperty
-
-      const plotIndex = current.plots.findIndex(p => p.row === row && p.col === col)
-      if (plotIndex === -1) return current
-
-      const plot = current.plots[plotIndex]
-
-      const newPlots = [...current.plots]
-      newPlots[plotIndex] = {
-        ...plot,
-        builtProperty: undefined,
-        claimedBy: undefined,
-        housingHighDensity: undefined,
-        investmentStripes: undefined,
-      }
-
-      const currentPlayer = current.players[current.currentPlayerIndex]
-      const updatedMoney = currentPlayer.money + buildCost
-
-      const undonePropertyInstanceId = current.playedPropertyCardThisTurn
-      let restoredPropertyCard = null
-
-      if (undonePropertyInstanceId) {
-        const discardedCard = current.propertyDiscard.find(c => c.instanceId === undonePropertyInstanceId)
-        if (discardedCard) {
-          restoredPropertyCard = discardedCard
-        }
-      }
-
-      const updatedPropertyCards = restoredPropertyCard
-        ? [...currentPlayer.propertyCards, restoredPropertyCard]
-        : currentPlayer.propertyCards
-
-      const updatedPropertyDiscard = restoredPropertyCard
-        ? current.propertyDiscard.filter(c => c.instanceId !== undonePropertyInstanceId)
-        : current.propertyDiscard
-
-      const updatedPlayers = current.players.map((p, idx) =>
-        idx === current.currentPlayerIndex
-          ? { ...p, money: updatedMoney, propertyCards: updatedPropertyCards }
-          : p
-      )
-
-      toast.success(`Undid build at ${col}${row}! Refunded $${buildCost}M`)
-
-      return {
-        ...current,
-        players: updatedPlayers,
-        plots: newPlots,
-        propertyDiscard: updatedPropertyDiscard,
-        propertiesBuiltThisTurn: 0,
-        turnActionsConsumed: Math.max(0, (current.turnActionsConsumed ?? 0) - 1),
-        playedPropertyCardThisTurn: undefined,
-        lastBuiltProperty: undefined
-      }
+      const restored = restoreUndoSnapshot(current)
+      if (restored === current) return current
+      toast.success(`Undid: ${label}`)
+      return restored
     })
-
-    setUndoBuildDialogState({ open: false, row: null, col: null, propertyName: '', buildCost: 0 })
+    setUndoActionDialogOpen(false)
   }
 
-  const handleUndoBuildCancel = () => {
-    setUndoBuildDialogState({ open: false, row: null, col: null, propertyName: '', buildCost: 0 })
+  const handleUndoLastActionCancel = () => {
+    setUndoActionDialogOpen(false)
   }
 
   const finalizeCouncilFreezeAttackFailure = useCallback((instanceId: string, source: 'accept' | 'auto' = 'accept') => {
@@ -4850,7 +4791,7 @@ function AppInner() {
   aiCpRef.current = currentPlayerMaybe ?? null
   aiHooksRef.current = {
     handleEndTurn,
-    handleUndoBuildCancel,
+    handleUndoLastActionCancel,
     handleActionCriteriaBank,
     handleCancelTakeoverSelect,
     handleCancelScandalSelect,
@@ -4881,7 +4822,7 @@ function AppInner() {
     handlePlotSelect,
   }
   aiUiRef.current = {
-    undoBuildDialogOpen: undoBuildDialogState.open,
+    undoActionDialogOpen,
     boardNoticeActive: boardNotice != null,
     showNewCardsAnimation: !!safeGameState.showNewCardsAnimation,
     taxBuildPromptOpen: taxBuildPrompt.open,
@@ -4918,7 +4859,7 @@ function AppInner() {
     rollDieDialogState.open ? 1 : 0,
     incomeDialogState.open ? 1 : 0,
     safeGameState.showNewCardsAnimation ? 1 : 0,
-    undoBuildDialogState.open ? 1 : 0,
+    undoActionDialogOpen ? 1 : 0,
     boardNotice != null ? 1 : 0,
     taxBuildPrompt.open ? 1 : 0,
     discardPropertyConfirmOpen ? 1 : 0,
@@ -4975,6 +4916,14 @@ function AppInner() {
     !isSpectator &&
     handRailPlayerIndex === safeGameState.currentPlayerIndex &&
     actingPlayerSeat?.isAi !== true
+
+  const undoLastActionAvailable = canUndoLastAction(safeGameState, {
+    handInteractionsActive,
+    isSpectator,
+  })
+
+  const boardHudIconButtonClass =
+    'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#a8b0c8] transition-colors hover:border-[#c9a85c]/45 hover:bg-[#1a1a24] hover:text-[#f5ecd7] disabled:opacity-35 disabled:pointer-events-none disabled:hover:border-white/12 disabled:hover:bg-white/[0.04] disabled:hover:text-[#a8b0c8]'
 
   const calculatePlayerStats = (player: Player) => {
     const ownedPlots = safeGameState.plots.filter(p => p.claimedBy === player.id && p.builtProperty)
@@ -5626,16 +5575,37 @@ function AppInner() {
             }}>
               Players
             </span>
-            <div style={isSpectator ? { pointerEvents: 'auto' } : undefined}>
-            <button
-              type="button"
-              aria-label="Open quick rules"
-              title="Quick rules"
-              onClick={() => setRulesQuickOpen(true)}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#a8b0c8] transition-colors hover:border-[#5ac8fa]/40 hover:bg-[#1a1a24] hover:text-[#e0e8ff]"
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                ...(isSpectator ? { pointerEvents: 'auto' } : undefined),
+              }}
             >
-              <BookOpen size={20} weight="duotone" />
-            </button>
+              <button
+                type="button"
+                aria-label="Undo last action"
+                title={
+                  undoLastActionAvailable
+                    ? `Undo: ${safeGameState.undoLastAction?.label ?? 'last action'}`
+                    : 'No action to undo this turn'
+                }
+                disabled={!undoLastActionAvailable}
+                onClick={() => setUndoActionDialogOpen(true)}
+                className={boardHudIconButtonClass}
+              >
+                <ArrowCounterClockwise size={20} weight="duotone" />
+              </button>
+              <button
+                type="button"
+                aria-label="Open quick rules"
+                title="Quick rules"
+                onClick={() => setRulesQuickOpen(true)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#a8b0c8] transition-colors hover:border-[#5ac8fa]/40 hover:bg-[#1a1a24] hover:text-[#e0e8ff]"
+              >
+                <BookOpen size={20} weight="duotone" />
+              </button>
             </div>
           </div>
           {safeGameState.players.map((player, index) => {
@@ -5997,14 +5967,12 @@ function AppInner() {
           onNewGame={handleNewGame}
         />
       )}
-      {undoBuildDialogState.open && undoBuildDialogState.row && undoBuildDialogState.col && (
-        <UndoBuildDialog
-          open={undoBuildDialogState.open}
-          propertyName={undoBuildDialogState.propertyName}
-          plotLocation={`${undoBuildDialogState.col}${undoBuildDialogState.row}`}
-          buildCost={undoBuildDialogState.buildCost}
-          onConfirm={handleUndoBuild}
-          onCancel={handleUndoBuildCancel}
+      {undoActionDialogOpen && safeGameState.undoLastAction && (
+        <UndoLastActionDialog
+          open={undoActionDialogOpen}
+          actionLabel={safeGameState.undoLastAction.label}
+          onConfirm={handleUndoLastAction}
+          onCancel={handleUndoLastActionCancel}
         />
       )}
       {rollDieDialogState.open && (

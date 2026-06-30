@@ -63,6 +63,7 @@ export function applyEndTurn(state: GameState): ApplyGameActionResult {
     incomeResolvedThisTurn: false,
     crossingTheLineActive: false,
     playedPropertyCardThisTurn: undefined,
+    undoLastAction: undefined,
   }
 
   const events: GameEvent[] = []

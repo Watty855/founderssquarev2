@@ -1,0 +1,8 @@
+ios/
+android/
+assets/app-store/
+node_modules/
+.git/
+*.xcarchive
+ios/App/build/
+ios/App/Pods/

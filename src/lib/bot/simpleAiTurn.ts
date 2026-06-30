@@ -19,7 +19,7 @@ export type AiPlayOptions = {
 
 export interface SimpleAiTurnHandlers {
   handleEndTurn: () => void
-  handleUndoBuildCancel: () => void
+  handleUndoLastActionCancel: () => void
   handleActionCriteriaBank: () => void
   handleCancelTakeoverSelect: () => void
   handleCancelScandalSelect: () => void
@@ -40,7 +40,7 @@ export interface SimpleAiTurnHandlers {
 }
 
 export interface SimpleAiTurnUi {
-  undoBuildDialogOpen: boolean
+  undoActionDialogOpen: boolean
   boardNoticeActive: boolean
   showNewCardsAnimation: boolean
   taxBuildPromptOpen: boolean
@@ -139,8 +139,8 @@ export function trySimpleAiMainPhase(
     return false
   }
 
-  if (ui.undoBuildDialogOpen) {
-    h.handleUndoBuildCancel()
+  if (ui.undoActionDialogOpen) {
+    h.handleUndoLastActionCancel()
     return true
   }
 

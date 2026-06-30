@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type CSSProperties } from 'react'
 import { Player, PLAYER_COLORS, type GameState } from '@/lib/types'
 import type { HelloProfile, SeatPlanEntry } from '@/lib/partyLobbyTypes'
 import {
@@ -69,248 +69,151 @@ function OpeningScreen({
   /** Join online flow from the Online card (“Join game”) — hydrate from host snapshot + PartyKit seat id. */
   onJoinFriendsGame?: () => void
 }) {
+  const gold = '#c9a85c'
+  const goldLight = '#e8d4a0'
+  const goldDark = '#8a6b2e'
+  const navy = '#1a2d4a'
+  const navyDeep = '#0f1a2e'
+  const cream = '#f5ecd7'
+  const panelBg = 'rgba(32, 22, 14, 0.88)'
+
+  const actionBtnBase: CSSProperties = {
+    width: '100%',
+    height: 38,
+    borderRadius: 5,
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    fontFamily: 'Georgia, "Times New Roman", serif',
+    transition: 'filter 0.15s ease, transform 0.15s ease',
+    whiteSpace: 'nowrap',
+    padding: '0 8px',
+  }
+
   return (
     <div
       style={{
         position: 'fixed',
         inset: 0,
         zIndex: 9999,
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'linear-gradient(180deg, #87a7c4 0%, #b8c9d9 38%, #8a9098 100%)',
         overflow: 'hidden',
+        backgroundColor: navyDeep,
       }}
     >
-      {/* Sky / building mass */}
-      <div
+      {/* Full-width cover art — center framing keeps family + player bar visible */}
+      <img
+        src="/founders-square-cover.png"
+        alt="Founders Square — Strategy Game. Build your legacy."
         style={{
-          flex: 1,
-          position: 'relative',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'flex-end',
-          paddingBottom: 'min(18vh, 140px)',
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          objectPosition: 'center center',
         }}
-      >
-        {/* City hall pediment silhouette */}
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '22%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: 'min(72vw, 520px)',
-            height: '120px',
-            background: 'linear-gradient(180deg, #6d737c 0%, #4a4f56 100%)',
-            clipPath: 'polygon(50% 0%, 100% 100%, 0% 100%)',
-            opacity: 0.95,
-          }}
-        />
-        {/* Columns */}
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '12%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            gap: 'clamp(6px, 1.5vw, 16px)',
-            alignItems: 'flex-end',
-          }}
-        >
-          {Array.from({ length: 9 }).map((_, i) => (
-            <div
-              key={i}
-              style={{
-                width: 'clamp(14px, 3vw, 28px)',
-                height: `clamp(${120 + (i % 3) * 8}px, 22vh, 200px)`,
-                borderRadius: '4px 4px 0 0',
-                background: 'linear-gradient(90deg, #e8eaed 0%, #b9bec6 45%, #8f959e 100%)',
-                boxShadow: 'inset -2px 0 0 rgba(255,255,255,0.35), 2px 0 12px rgba(0,0,0,0.15)',
-              }}
-            />
-          ))}
-        </div>
-        {/* Steps */}
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: '12%',
-            minHeight: 72,
-            background: 'linear-gradient(180deg, #7d848e 0%, #5c626a 100%)',
-            borderTop: '3px solid rgba(255,255,255,0.12)',
-          }}
-        />
-        {/* Founders on steps — simple conversation group */}
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '13%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            gap: 20,
-            alignItems: 'flex-end',
-          }}
-        >
-          {[
-            { bg: '#c73e3e', h: 52 },
-            { bg: '#2d6a8f', h: 58 },
-            { bg: '#2f7d4f', h: 54 },
-            { bg: '#8f6b2d', h: 50 },
-          ].map((f, idx) => (
-            <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-              <div
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: '50%',
-                  backgroundColor: '#d4a574',
-                  border: '2px solid rgba(0,0,0,0.15)',
-                }}
-              />
-              <div
-                style={{
-                  width: 48,
-                  height: f.h,
-                  backgroundColor: f.bg,
-                  borderRadius: '8px 8px 0 0',
-                  opacity: 0.92,
-                  boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
-                }}
-              />
-            </div>
-          ))}
-        </div>
-        <h1
-          style={{
-            position: 'relative',
-            zIndex: 2,
-            margin: 0,
-            marginBottom: 8,
-            fontSize: 'clamp(1.75rem, 4vw, 2.75rem)',
-            fontWeight: 300,
-            letterSpacing: '0.06em',
-            color: 'rgba(15,23,42,0.88)',
-            textAlign: 'center',
-            textShadow: '0 1px 0 rgba(255,255,255,0.35)',
-          }}
-        >
-          Founders Square
-        </h1>
-      </div>
+      />
 
-      {/* Bottom bar — play online first */}
+      {/* Light right-edge vignette only — leaves center artwork clear */}
       <div
         style={{
-          flexShrink: 0,
-          padding: '20px 24px calc(20px + env(safe-area-inset-bottom, 0))',
-          background: 'linear-gradient(180deg, rgba(15,23,42,0.92) 0%, #0f172a 100%)',
-          borderTop: '1px solid rgba(255,255,255,0.08)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 12,
+          position: 'absolute',
+          inset: 0,
+          background:
+            'linear-gradient(90deg, transparent 0%, transparent 55%, rgba(15,20,32,0.25) 78%, rgba(20,14,10,0.55) 100%)',
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* Action panel — right margin, compact */}
+      <div
+        style={{
+          position: 'absolute',
+          right: 'max(10px, env(safe-area-inset-right))',
+          top: '50%',
+          transform: 'translateY(-42%)',
+          width: 'clamp(148px, 22vw, 200px)',
+          paddingBottom: 'env(safe-area-inset-bottom, 0)',
+          boxSizing: 'border-box',
         }}
       >
         <div
           style={{
-            width: '100%',
-            maxWidth: 420,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-            padding: 14,
-            borderRadius: 16,
-            border: '1px solid rgba(56,189,248,0.28)',
-            background: 'rgba(15,23,42,0.45)',
-            boxSizing: 'border-box',
+            padding: '10px 10px 12px',
+            borderRadius: 8,
+            border: `1px solid ${goldDark}`,
+            background: panelBg,
+            boxShadow: `inset 0 1px 0 ${goldLight}33, 0 4px 20px rgba(0,0,0,0.4)`,
           }}
         >
-          <button
-            type="button"
-            onClick={onPlayOnline}
+          <div
             style={{
-              width: '100%',
-              height: 56,
-              borderRadius: 9999,
-              border: 'none',
-              background: 'linear-gradient(180deg, #0f6ebe 0%, #085a9e 100%)',
-              color: '#fff',
-              fontSize: 16,
-              fontWeight: 600,
-              letterSpacing: '0.06em',
-              cursor: 'pointer',
-              boxShadow: '0 8px 24px rgba(0,112,204,0.35)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 10,
+              height: 2,
+              marginBottom: 10,
+              background: `linear-gradient(90deg, transparent, ${gold}, ${goldLight}, transparent)`,
+              opacity: 0.85,
             }}
-          >
-            <Globe size={24} weight="duotone" />
-            Play online
-          </button>
-          {onJoinFriendsGame ? (
+          />
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <button
               type="button"
-              onClick={onJoinFriendsGame}
+              onClick={onPlayOnline}
               style={{
-                width: '100%',
-                height: 48,
-                borderRadius: 9999,
-                border: '1px solid rgba(125,211,252,0.45)',
-                background: 'rgba(8,105,174,0.25)',
-                color: '#e0f2fe',
-                fontSize: 14,
-                fontWeight: 600,
-                letterSpacing: '0.05em',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
+                ...actionBtnBase,
+                height: 40,
+                border: `1px solid ${goldLight}`,
+                background: `linear-gradient(180deg, ${goldLight} 0%, ${gold} 45%, ${goldDark} 100%)`,
+                color: navyDeep,
+                boxShadow: `0 3px 10px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.35)`,
               }}
             >
-              <PlugsConnected size={22} weight="duotone" />
-              Join friend&apos;s game
+              <Globe size={16} weight="duotone" color={navyDeep} />
+              Play online
             </button>
-          ) : null}
-          <p style={{ margin: 0, textAlign: 'center', fontSize: 13, color: '#94a3b8', lineHeight: 1.45 }}>
+
             {onJoinFriendsGame ? (
-              <>Open the Founders Square app, enter the host&apos;s room code, choose <strong style={{ color: '#e2e8f0' }}>Join and wait</strong> — you&apos;ll enter automatically when the host starts.</>
-            ) : (
-              <>Share a room code with friends after you connect.</>
-            )}
-          </p>
+              <button
+                type="button"
+                onClick={onJoinFriendsGame}
+                style={{
+                  ...actionBtnBase,
+                  fontSize: 9,
+                  letterSpacing: '0.08em',
+                  border: `1px solid ${gold}`,
+                  background: `linear-gradient(180deg, ${navy} 0%, ${navyDeep} 100%)`,
+                  color: cream,
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
+                }}
+              >
+                <PlugsConnected size={15} weight="duotone" color={goldLight} />
+                Join friend&apos;s game
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={onNewGame}
+              style={{
+                ...actionBtnBase,
+                fontSize: 9,
+                letterSpacing: '0.08em',
+                border: `1px solid ${goldDark}`,
+                background: 'rgba(26, 45, 74, 0.55)',
+                color: goldLight,
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+              }}
+            >
+              Play on this device
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={onNewGame}
-          style={{
-            width: '100%',
-            maxWidth: 420,
-            height: 48,
-            borderRadius: 9999,
-            border: '1px solid rgba(148,163,184,0.35)',
-            background: 'rgba(15,23,42,0.5)',
-            color: '#e2e8f0',
-            fontSize: 14,
-            fontWeight: 600,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase' as const,
-            cursor: 'pointer',
-          }}
-        >
-          Play on this device
-        </button>
-        <p style={{ margin: 0, maxWidth: 420, textAlign: 'center', fontSize: 12, color: '#64748b', lineHeight: 1.4 }}>
-          Solo vs AI, or pass-and-play around one device
-        </p>
       </div>
     </div>
   )

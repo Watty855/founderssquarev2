@@ -68,6 +68,8 @@ export interface GameState {
   endGameTriggerPlayerId?: number
   /** Coordinate of the qualifying 9-sequential placement that triggered the end (for highlight). */
   endGameTriggerLocation?: { row: number; col: string }
+  /** Snapshot before the current founder's last turn-consuming action (build or action card). */
+  undoLastAction?: import('./undoLastAction').UndoLastAction
   /** Counts down through the final round. Initialised to `players.length + 1` when the trigger
    *  fires (the +1 absorbs the triggerer's current turn end). Each `handleEndTurn` decrements;
    *  reaching 0 commits `gameEnded = true`. */

@@ -5,6 +5,7 @@ build/
 *.log
 .env
 .env.local
+.env.*.local
 .tools/
 ios/App/Pods/
 ios/App/build/
@@ -12,3 +13,4 @@ android/.gradle/
 android/app/build/
 android/build/
 tsconfig.tsbuildinfo
+.vercel

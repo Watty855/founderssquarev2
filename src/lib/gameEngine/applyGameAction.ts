@@ -3,6 +3,7 @@ import type { GameAction, ApplyGameActionResult } from '@/lib/onlineGameActions'
 import { findHostSeatIndexForConnection, mergeRelayedGuestSnapshot } from '@/lib/partyBoardView'
 import { parsePartyGameState } from '@/lib/partyBoardSync'
 import { applyEndTurn, applyAnimationFlagsClear } from '@/lib/gameEngine/applyEndTurn'
+import { attachUndoSnapshotIfTurnAction } from '@/lib/undoLastAction'
 import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
 
@@ -45,13 +46,23 @@ export function applyGameAction(
     case 'build_at': {
       const turnErr = assertActorTurn(state, ctx)
       if (turnErr) return turnErr
-      return applyBuildAt(state, action)
+      const result = applyBuildAt(state, action)
+      if (!result.ok) return result
+      return {
+        ...result,
+        state: attachUndoSnapshotIfTurnAction(state, result.state),
+      }
     }
 
     case 'income_complete': {
       const turnErr = assertActorTurn(state, ctx)
       if (turnErr) return turnErr
-      return applyIncomeComplete(state, action)
+      const result = applyIncomeComplete(state, action)
+      if (!result.ok) return result
+      return {
+        ...result,
+        state: attachUndoSnapshotIfTurnAction(state, result.state),
+      }
     }
 
     case 'animation_flags_clear':
