@@ -50,10 +50,24 @@ export function mergePublicAndPrivateHand(
   viewerPlayerId: number | null,
   hand: PrivateHandPayload | null
 ): GameState {
+  return mergePublicAndPrivateHands(pub, viewerPlayerId, hand ? [hand] : [])
+}
+
+/**
+ * Merge every private hand this device is entitled to (its own seat, plus AI
+ * seats when this device is the host driving them) into the public snapshot.
+ */
+export function mergePublicAndPrivateHands(
+  pub: PublicGameState,
+  viewerPlayerId: number | null,
+  hands: PrivateHandPayload[]
+): GameState {
   const { newCardsDrawnPlayerId, showNewCardsAnimation, players: pubPlayers, ...rest } = pub
+  const handsById = new Map(hands.map((h) => [h.playerId, h]))
   const players: Player[] = pubPlayers.map((pp) => {
     const { peerHandCounts, ...base } = pp
-    if (viewerPlayerId != null && pp.id === viewerPlayerId && hand) {
+    const hand = handsById.get(pp.id)
+    if (hand && (pp.isAi === true || (viewerPlayerId != null && pp.id === viewerPlayerId))) {
       return {
         ...base,
         actionCards: hand.actionCards,
@@ -68,15 +82,16 @@ export function mergePublicAndPrivateHand(
     }
   })
 
+  const viewerHand = viewerPlayerId != null ? handsById.get(viewerPlayerId) : undefined
   const viewerGetsDraw =
     viewerPlayerId != null &&
     newCardsDrawnPlayerId === viewerPlayerId &&
-    hand?.newCardsDrawn != null
+    viewerHand?.newCardsDrawn != null
 
   return {
     ...rest,
     players,
-    newCardsDrawn: viewerGetsDraw ? hand!.newCardsDrawn : undefined,
+    newCardsDrawn: viewerGetsDraw ? viewerHand!.newCardsDrawn : undefined,
     showNewCardsAnimation: viewerGetsDraw ? showNewCardsAnimation : false,
   }
 }

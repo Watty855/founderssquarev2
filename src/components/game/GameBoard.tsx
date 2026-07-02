@@ -924,9 +924,9 @@ export function GameBoard({
                 alignItems: 'stretch',
                 justifyContent: 'stretch',
                 padding: '1px',
-                zIndex: 42,
+                zIndex: 46,
                 overflow: 'hidden',
-                pointerEvents: 'none',
+                pointerEvents: 'auto',
               }}
             >
               {openingProTip}

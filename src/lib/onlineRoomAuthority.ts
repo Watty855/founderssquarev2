@@ -127,6 +127,22 @@ export function authorityBroadcastAfterState(
       })
     }
   }
+  // The host device drives AI seats, so it needs their real hands locally.
+  if (store.gameHostId) {
+    for (let idx = 0; idx < gs.players.length; idx++) {
+      if (!gs.players[idx]?.isAi) continue
+      const hand = buildPrivateHandForPlayer(gs, idx, { includeAi: true })
+      if (hand) {
+        out.push({
+          target: 'client',
+          sessionId: store.gameHostId,
+          type: 'private_hand',
+          rev: store.gameRev,
+          hand,
+        })
+      }
+    }
+  }
   return out
 }
 
@@ -152,7 +168,10 @@ export function authorityApplyGameAction(
   if (!gs) {
     return { ok: false, error: 'No active game in this room.', code: 'no_game' }
   }
-  const result = applyGameAction(gs, action, { senderConnectionId: senderSessionId })
+  const result = applyGameAction(gs, action, {
+    senderConnectionId: senderSessionId,
+    senderIsHost: senderSessionId === store.gameHostId,
+  })
   if (!result.ok) {
     return { ok: false, error: result.error, code: result.code }
   }

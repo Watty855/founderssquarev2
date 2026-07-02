@@ -41,6 +41,8 @@ export type GameAction =
     }
   | { type: 'commit_actor_state'; state: GameState }
   | { type: 'animation_flags_clear' }
+  /** Resolve an excess-hand discard after end_turn reported discard_required, then advance the turn. */
+  | { type: 'discard_action_cards'; instanceIds: string[] }
 
 export type GameEvent =
   | { type: 'discard_required'; numToDiscard: number }

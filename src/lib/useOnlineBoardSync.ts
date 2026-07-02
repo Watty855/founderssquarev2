@@ -6,7 +6,7 @@ import type { PartyBoardSyncConfig } from '@/lib/partyBoardSync'
 import type { GameAction, GameEvent } from '@/lib/onlineGameActions'
 import { applyGameAction } from '@/lib/gameEngine/applyGameAction'
 import {
-  mergePublicAndPrivateHand,
+  mergePublicAndPrivateHands,
   type PrivateHandPayload,
   type PublicGameState,
 } from '@/lib/onlinePublicState'
@@ -73,7 +73,8 @@ export function useOnlineBoardSync(params: {
   const hostInitSentRef = useRef(false)
   const lastRevRef = useRef(0)
   const latestPublicRef = useRef<PublicGameState | null>(null)
-  const latestHandRef = useRef<PrivateHandPayload | null>(null)
+  /** Hands this device may hold: its own seat plus AI seats when hosting. */
+  const latestHandsRef = useRef<Map<number, PrivateHandPayload>>(new Map())
   const pendingRollbackRef = useRef<Map<string, GameState>>(new Map())
   const authorityRef = useRef<OnlineAuthorityStore>(createAuthorityStore())
   const gameStateRef = useRef(gameState)
@@ -99,8 +100,19 @@ export function useOnlineBoardSync(params: {
   const applyMergedView = useCallback(() => {
     const pub = latestPublicRef.current
     if (!pub) return
-    const merged = mergePublicAndPrivateHand(pub, resolveViewerId(), latestHandRef.current)
-    setGameState(merged)
+    const merged = mergePublicAndPrivateHands(
+      pub,
+      resolveViewerId(),
+      [...latestHandsRef.current.values()]
+    )
+    // The opening narration is a per-device intro; once this device dismissed
+    // it, don't let an authoritative snapshot (seeded before dismissal) bring
+    // it back — it would also re-block the host's AI turn driver.
+    setGameState((prev) =>
+      prev.openingNarrationComplete === true && merged.openingNarrationComplete !== true
+        ? { ...merged, openingNarrationComplete: true }
+        : merged
+    )
     onSnapshotAppliedRef.current?.()
   }, [setGameState, resolveViewerId])
 
@@ -117,7 +129,7 @@ export function useOnlineBoardSync(params: {
 
   const ingestPrivateHand = useCallback(
     (hand: PrivateHandPayload) => {
-      latestHandRef.current = hand
+      latestHandsRef.current.set(hand.playerId, hand)
       applyMergedView()
     },
     [applyMergedView]
@@ -243,7 +255,7 @@ export function useOnlineBoardSync(params: {
         case 'game_cleared':
           lastRevRef.current = 0
           latestPublicRef.current = null
-          latestHandRef.current = null
+          latestHandsRef.current.clear()
           return
       }
     },
@@ -274,7 +286,10 @@ export function useOnlineBoardSync(params: {
       pendingRollbackRef.current.set(actionId, gameStateRef.current)
 
       if (!opts?.skipOptimistic) {
-        const optimistic = applyGameAction(gameStateRef.current, action, { senderConnectionId: connId })
+        const optimistic = applyGameAction(gameStateRef.current, action, {
+          senderConnectionId: connId,
+          senderIsHost: cfgRef.current?.role === 'host',
+        })
         if (optimistic.ok) {
           setGameState(optimistic.state)
           onGameEventsRef.current?.(optimistic.events)
@@ -304,7 +319,7 @@ export function useOnlineBoardSync(params: {
     hostInitSentRef.current = false
     lastRevRef.current = 0
     latestPublicRef.current = null
-    latestHandRef.current = null
+    latestHandsRef.current.clear()
     pendingRollbackRef.current.clear()
     authorityRef.current = createAuthorityStore()
     setBoardPartyConnectionId(null)

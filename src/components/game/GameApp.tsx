@@ -744,7 +744,17 @@ function AppInner() {
           sendActionRef.current({ type: 'animation_flags_clear' }, { skipOptimistic: true })
         }, 2000)
       } else if (e.type === 'discard_required') {
-        setDiscardDialogState({ open: true, numToDiscard: e.numToDiscard })
+        // Only the device controlling the acting seat resolves the discard:
+        // the seated human's device, or the host when a bot is acting.
+        const acting = gameState.players[gameState.currentPlayerIndex]
+        const controlsActingSeat =
+          !partyBoardConfig ||
+          (acting?.isAi === true
+            ? partyBoardConfig.role === 'host'
+            : acting != null && partyBoardSeatPlayer != null && acting.id === partyBoardSeatPlayer.id)
+        if (controlsActingSeat) {
+          setDiscardDialogState({ open: true, numToDiscard: e.numToDiscard })
+        }
       } else if (e.type === 'game_over') {
         toast.success('Final Round complete — game over!')
       } else if (e.type === 'build_celebration') {
@@ -787,6 +797,14 @@ function AppInner() {
   const motivationalFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showOpeningProTip, setShowOpeningProTip] = useState(false)
   const openingProTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const dismissOpeningProTip = useCallback(() => {
+    setShowOpeningProTip(false)
+    if (openingProTipTimerRef.current !== null) {
+      clearTimeout(openingProTipTimerRef.current)
+      openingProTipTimerRef.current = null
+    }
+  }, [])
 
   /** At the start of each seat’s turn during the final round, show the strip briefly so the board stays clear for play. */
   const FINAL_TURN_BANNER_VISIBLE_MS = 5000
@@ -838,7 +856,7 @@ function AppInner() {
     }
     openingProTipTimerRef.current = setTimeout(() => {
       openingProTipTimerRef.current = null
-      setShowOpeningProTip(false)
+      dismissOpeningProTip()
     }, OPENING_PRO_TIP_DURATION_MS)
     return () => {
       if (openingProTipTimerRef.current !== null) {
@@ -846,7 +864,7 @@ function AppInner() {
         openingProTipTimerRef.current = null
       }
     }
-  }, [showOpeningProTip])
+  }, [showOpeningProTip, dismissOpeningProTip])
 
   /** Lot placement: Escape cancels (replaces removed hand-rail Cancel). */
   useEffect(() => {
@@ -1135,11 +1153,7 @@ function AppInner() {
       index === 0 ? { ...player, actionCards: [...player.actionCards, ...initialActionCards] } : player
     )
 
-    setShowOpeningProTip(false)
-    if (openingProTipTimerRef.current !== null) {
-      clearTimeout(openingProTipTimerRef.current)
-      openingProTipTimerRef.current = null
-    }
+    dismissOpeningProTip()
 
     setGameState((current) => {
       return {
@@ -2618,6 +2632,16 @@ function AppInner() {
   }
 
   const handleDiscardComplete = (discardedInstanceIds: string[]) => {
+    if (isOnlineActor) {
+      // Online: the engine removes the cards and re-runs end turn, so decks and
+      // the next player's draw resolve on the authority's full state.
+      setDiscardDialogState({ open: false, numToDiscard: 0 })
+      toast.success(
+        `Discarded ${discardedInstanceIds.length} action card${discardedInstanceIds.length > 1 ? 's' : ''}`
+      )
+      sendAction({ type: 'discard_action_cards', instanceIds: discardedInstanceIds })
+      return
+    }
     patchGameState((current) => {
       const currentPlayer = current.players[current.currentPlayerIndex]
 
@@ -4914,6 +4938,7 @@ function AppInner() {
   const actingPlayerSeat = safeGameState.players[safeGameState.currentPlayerIndex]
   const handInteractionsActive =
     !isSpectator &&
+    !showOpeningProTip &&
     handRailPlayerIndex === safeGameState.currentPlayerIndex &&
     actingPlayerSeat?.isAi !== true
 
@@ -5435,7 +5460,7 @@ function AppInner() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
             onClick={handleEndTurn}
-            disabled={isSpectator || currentPlayer.isAi === true}
+            disabled={isSpectator || currentPlayer.isAi === true || showOpeningProTip}
             className="btn-ps"
             style={{
               height: 34,
@@ -5446,8 +5471,8 @@ function AppInner() {
               color: '#f0f0f5',
               fontSize: 12,
               fontWeight: 500,
-              cursor: isSpectator || currentPlayer.isAi === true ? 'not-allowed' : 'pointer',
-              opacity: isSpectator || currentPlayer.isAi === true ? 0.45 : 1,
+              cursor: isSpectator || currentPlayer.isAi === true || showOpeningProTip ? 'not-allowed' : 'pointer',
+              opacity: isSpectator || currentPlayer.isAi === true || showOpeningProTip ? 0.45 : 1,
             }}
           >
             End Turn
@@ -5563,6 +5588,9 @@ function AppInner() {
           overflowY: 'auto',
           borderRight: '1px solid rgba(255,255,255,0.08)',
           backgroundColor: '#0c0c12',
+          pointerEvents: showOpeningProTip ? 'none' : 'auto',
+          opacity: showOpeningProTip ? 0.55 : 1,
+          transition: 'opacity 200ms ease',
         }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
@@ -5692,6 +5720,17 @@ function AppInner() {
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
           {/* Board area */}
           <div className="relative flex-1 flex items-center justify-center overflow-auto p-6 min-h-0">
+            {showOpeningProTip ? (
+              <div
+                aria-hidden
+                className="absolute inset-0 z-[40]"
+                style={{ pointerEvents: 'auto' }}
+              />
+            ) : null}
+            <div
+              className="relative w-full flex justify-center"
+              style={{ zIndex: showOpeningProTip ? 45 : undefined }}
+            >
             <GameBoard
               plots={safeGameState.plots}
               players={safeGameState.players}
@@ -5760,13 +5799,16 @@ function AppInner() {
                 </div>
               }
               boardActionStrip={<RequiredActionBanner layout="boardStrip" action={requiredAction} />}
-              openingProTip={showOpeningProTip ? <OpeningProTipOverlay /> : null}
+              openingProTip={
+                showOpeningProTip ? <OpeningProTipOverlay onSkip={dismissOpeningProTip} /> : null
+              }
               onVacantLotHint={() =>
                 toast.info(
                   'Claim a lot by placing a property: click the card (or expand it), then click a highlighted lot. Play required action cards first (for example Crossing the Line where district rules apply).'
                 )
               }
             />
+            </div>
             {safeGameState.openingNarrationComplete === false ? (
               <GameOpeningSequence
                 onProceed={() => {
@@ -5817,7 +5859,15 @@ function AppInner() {
 
           {/* Bottom player hand. Each deck pile is rendered inside PlayerHand, flanking its matching
               section: [Property Deck] [Property Fan] [Action Fan] [Action Deck]. */}
-          <div className="flex-shrink-0 border-t border-white/8 bg-[#0e0e16] px-8 py-5">
+          <div
+            className="flex-shrink-0 border-t border-[#d8b75a40] px-8 py-5"
+            style={{
+              background: 'linear-gradient(180deg, #4a4028 0%, #362e1a 55%, #2a2414 100%)',
+              pointerEvents: showOpeningProTip ? 'none' : 'auto',
+              opacity: showOpeningProTip ? 0.55 : 1,
+              transition: 'opacity 200ms ease',
+            }}
+          >
             <PlayerHand
               player={handRailPlayer}
               opponents={safeGameState.players.filter((_, i) => i !== safeGameState.currentPlayerIndex)}

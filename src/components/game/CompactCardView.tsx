@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/hover-card'
 import { PropertyCardView } from '@/components/game/PropertyCardView'
 import { ActionCardView } from '@/components/game/ActionCardView'
+import { CardBackFace } from '@/components/game/CardBackFace'
 
 interface CompactCardViewProps {
   card: PropertyCard | ActionCard
@@ -64,48 +65,9 @@ function getCardStyle(card: PropertyCard | ActionCard): {
 
 /** In-hand slot backed like the draw flight — used when bot hands are hidden (solo vs AI). */
 function CompactCardSlotBack({ card }: { card: PropertyCard | ActionCard }) {
-  const style = getCardStyle(card)
+  const variant = card.type === 'property' || card.type === 'anchor' ? 'property' : 'action'
   return (
-    <div
-      style={{
-        position: 'relative',
-        width: 110,
-        height: 152,
-        borderRadius: 12,
-        overflow: 'hidden',
-        cursor: 'default',
-        border: '1px solid rgba(255,255,255,0.12)',
-        background: style.bg,
-        flexShrink: 0,
-        pointerEvents: 'none',
-      }}
-    >
-      <div style={{ height: 3, backgroundColor: style.topAccent }} />
-      <div
-        style={{
-          position: 'absolute',
-          inset: 8,
-          borderRadius: 8,
-          border: `1px dashed ${style.topAccent}55`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.18em',
-            color: style.topAccent,
-            textTransform: 'uppercase',
-            opacity: 0.9,
-          }}
-        >
-          FS
-        </span>
-      </div>
-    </div>
+    <CardBackFace variant={variant} width={110} height={152} />
   )
 }
 

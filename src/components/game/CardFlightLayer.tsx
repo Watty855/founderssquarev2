@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useEffect } from 'react'
 import { CardInstance, PropertyCard, ActionCard } from '@/lib/cardTypes'
 import type { FlightRect } from '@/hooks/use-flight-anchors'
+import { CardBackFace } from '@/components/game/CardBackFace'
 
 /**
  * One in-flight card. The source / target rects are *snapshotted* when the flight
@@ -60,47 +61,7 @@ function variantStyles(variant: 'property' | 'action'): { gradient: string; acce
 }
 
 function FlightBack({ variant, w, h }: { variant: 'property' | 'action'; w: number; h: number }) {
-  const v = variantStyles(variant)
-  return (
-    <div
-      style={{
-        width: w,
-        height: h,
-        borderRadius: Math.max(4, Math.min(12, w / 9)),
-        background: v.gradient,
-        border: `1px solid ${v.accent}55`,
-        position: 'relative',
-        overflow: 'hidden',
-        boxShadow: '0 10px 24px -10px rgba(0,0,0,0.65)',
-      }}
-    >
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: v.accent }} />
-      <div
-        style={{
-          position: 'absolute',
-          inset: 6,
-          borderRadius: 4,
-          border: `1px dashed ${v.accent}55`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <span
-          style={{
-            fontSize: Math.max(9, Math.min(16, w / 8)),
-            fontWeight: 700,
-            letterSpacing: '0.18em',
-            color: v.accent,
-            textTransform: 'uppercase',
-            opacity: 0.9,
-          }}
-        >
-          FS
-        </span>
-      </div>
-    </div>
-  )
+  return <CardBackFace variant={variant} width={w} height={h} />
 }
 
 function FlightFace({

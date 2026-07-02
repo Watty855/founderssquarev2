@@ -1,6 +1,7 @@
 'use client'
 
 import { ActionCard } from '@/lib/cardTypes'
+import { CardBackFace } from '@/components/game/CardBackFace'
 
 interface ActionCardViewProps {
   card?: ActionCard
@@ -22,34 +23,13 @@ function getCategoryColor(category: string): string {
 export function ActionCardView({ card, className, onClick, showBack = false }: ActionCardViewProps) {
   if (showBack || !card) {
     return (
-      <div
-        onClick={onClick}
+      <CardBackFace
+        variant="action"
+        width={240}
+        height={340}
         className={className}
-        style={{
-          width: 240,
-          height: 340,
-          borderRadius: 16,
-          overflow: 'hidden',
-          cursor: onClick ? 'pointer' : 'default',
-          backgroundColor: '#2a0e16',
-          border: '1px solid rgba(200,27,58,0.3)',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 12,
-          color: '#ffffff',
-        }}
-      >
-        <div style={{ height: 4, backgroundColor: '#c81b3a', position: 'absolute', top: 0, left: 0, right: 0 }} />
-        <div style={{ fontSize: 28, fontWeight: 300, letterSpacing: '0.15em', color: 'rgba(255,255,255,0.6)' }}>
-          ACTION
-        </div>
-        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.1em' }}>
-          Founders Square
-        </div>
-      </div>
+        onClick={onClick}
+      />
     )
   }
 

@@ -92,7 +92,11 @@ export function canPlaceProperty(
   const zoningLabel =
     buildingName === 'Mixed'
       ? 'Commercial'
-      : buildingName === 'Food'
+      : buildingName === 'B Bank'
+        ? 'Commercial'
+        : buildingName === 'Med Clinic'
+          ? 'Commercial'
+          : buildingName === 'Food'
         ? 'Dining'
         : buildingName
 

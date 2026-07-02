@@ -52,6 +52,33 @@ export function mergeRelayedGuestSnapshot(
   return { ...relayState, players }
 }
 
+/**
+ * Apply the host's relayed snapshot for an AI seat's turn. The host device only
+ * holds real hands for itself and the bots (humans are redacted in its view), so
+ * human hands always come from the authority state; AI seats trust the relay.
+ */
+export function mergeHostAiTurnSnapshot(
+  hostState: GameState,
+  relayState: GameState
+): GameState | null {
+  const relayActing = relayState.players[relayState.currentPlayerIndex]
+  if (!relayActing?.isAi) return null
+
+  const players = relayState.players.map((relayP, idx) => {
+    if (relayP.isAi) return relayP
+    const hostP = hostState.players[idx]
+    if (!hostP) return relayP
+    return {
+      ...relayP,
+      actionCards: hostP.actionCards,
+      propertyCards: hostP.propertyCards,
+      peerHandCounts: undefined,
+    }
+  })
+
+  return { ...relayState, players }
+}
+
 /** Strip other humans' hands before applying a broadcast snapshot on a joiner's device. */
 export function redactGameStateForGuestView(gs: GameState, viewerPlayerId: number): GameState {
   return {
