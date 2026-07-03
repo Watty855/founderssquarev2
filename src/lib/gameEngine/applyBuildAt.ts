@@ -138,7 +138,10 @@ export function applyBuildAt(state: GameState, params: BuildAtParams): ApplyGame
   const celebration = getBuildCelebrationMessage(placementTemplate, {
     housingHighDensity: highDensityPlacement,
   })
-  const title = celebration ?? `Built ${placementTemplate.name}!`
+  const title =
+    placementTemplate.type === 'anchor'
+      ? `⚓ ${placementTemplate.name} anchored!`
+      : celebration ?? `Built ${placementTemplate.name}!`
   events.push({
     type: 'build_celebration',
     title,

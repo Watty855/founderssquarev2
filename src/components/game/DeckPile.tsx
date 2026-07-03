@@ -13,8 +13,11 @@ import { CardBackFace } from '@/components/game/CardBackFace'
 export const PROPERTY_DECK_ANCHOR_KEY = 'property-deck'
 export const ACTION_DECK_ANCHOR_KEY = 'action-deck'
 
-const PILE_WIDTH = 110
-const PILE_HEIGHT = 152
+export const HAND_CARD_WIDTH = 110
+export const HAND_CARD_HEIGHT = 152
+
+const PILE_WIDTH = HAND_CARD_WIDTH
+const PILE_HEIGHT = HAND_CARD_HEIGHT
 
 function EmptyDeckPlaceholder({ variant }: { variant: 'property' | 'action' }) {
   const accent = variant === 'property' ? '#1e4a7a' : '#1e3a5a'

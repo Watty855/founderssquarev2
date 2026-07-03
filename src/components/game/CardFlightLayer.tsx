@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 import { CardInstance, PropertyCard, ActionCard } from '@/lib/cardTypes'
 import type { FlightRect } from '@/hooks/use-flight-anchors'
 import { CardBackFace } from '@/components/game/CardBackFace'
+import { HAND_CARD_HEIGHT, HAND_CARD_WIDTH } from '@/components/game/DeckPile'
 
 /**
  * One in-flight card. The source / target rects are *snapshotted* when the flight
@@ -32,6 +33,8 @@ export type CardFlight = {
   delayMs?: number
   /** Solo vs bots: discard animates as a face-down card so AI plays stay hidden. */
   concealedDiscard?: boolean
+  /** Per-flight override — mid-game replenish draws fly slower so the new card reads clearly. */
+  durationSec?: number
 }
 
 interface CardFlightLayerProps {
@@ -44,6 +47,26 @@ interface CardFlightLayerProps {
 }
 
 const DEFAULT_DURATION_SEC = 0.25
+
+/** Bottom-align a card-sized rect inside a measured anchor (slot or fan section). */
+function resolveDrawLanding(flight: CardFlight): { x: number; y: number } {
+  const target = flight.target ?? flight.source
+  const cardSized =
+    target.width <= HAND_CARD_WIDTH + 6 && target.height <= HAND_CARD_HEIGHT + 6
+  if (cardSized) return { x: target.left, y: target.top }
+  return {
+    x: target.left + (target.width - HAND_CARD_WIDTH) / 2,
+    y: target.top + target.height - HAND_CARD_HEIGHT,
+  }
+}
+
+function resolveDrawOrigin(flight: CardFlight): { x: number; y: number } {
+  const source = flight.source
+  return {
+    x: source.left + (source.width - HAND_CARD_WIDTH) / 2,
+    y: source.top + (source.height - HAND_CARD_HEIGHT) / 2,
+  }
+}
 
 function variantStyles(variant: 'property' | 'action'): { gradient: string; accent: string; tag: string } {
   if (variant === 'property') {
@@ -126,13 +149,14 @@ function FlightFace({
 
 function FlyingCard({
   flight,
-  durationSec,
+  durationSec: layerDurationSec,
   onDone,
 }: {
   flight: CardFlight
   durationSec: number
   onDone: (flightId: string, instanceId: string | null) => void
 }) {
+  const durationSec = flight.durationSec ?? layerDurationSec
   /** Safety net: framer-motion's onAnimationComplete is reliable, but if the layer unmounts
    *  for any reason mid-flight, this timeout still releases the hidden hand-card so the user
    *  isn't left with a missing card. */
@@ -149,42 +173,41 @@ function FlyingCard({
   const delaySec = (flight.delayMs ?? 0) / 1000
 
   if (flight.kind === 'draw') {
-    /** Draw: face-down card flies from the deck rect to the matching hand-section rect. */
-    const target = flight.target ?? flight.source
+    /** Draw: face-down card flies deck → hand at a fixed hand-card size (no scaling). */
+    const origin = resolveDrawOrigin(flight)
+    const landing = resolveDrawLanding(flight)
     return (
       <motion.div
         style={{
           position: 'fixed',
           left: 0,
           top: 0,
+          width: HAND_CARD_WIDTH,
+          height: HAND_CARD_HEIGHT,
           pointerEvents: 'none',
           zIndex: 90,
-          willChange: 'transform, width, height',
+          willChange: 'transform, opacity',
         }}
         initial={{
-          x: flight.source.left,
-          y: flight.source.top,
-          width: flight.source.width,
-          height: flight.source.height,
+          x: origin.x,
+          y: origin.y,
           opacity: 0,
         }}
         animate={{
-          x: target.left,
-          y: target.top,
-          width: target.width,
-          height: target.height,
+          x: landing.x,
+          y: landing.y,
           opacity: 1,
         }}
         exit={{ opacity: 0 }}
         transition={{
           duration: durationSec,
           delay: delaySec,
-          ease: 'easeOut',
-          opacity: { duration: 0.08, delay: delaySec },
+          ease: [0.22, 1, 0.36, 1],
+          opacity: { duration: 0.12, delay: delaySec },
         }}
         onAnimationComplete={() => onDone(flight.id, flight.instance?.instanceId ?? null)}
       >
-        <FlightBack variant={flight.cardType} w={target.width} h={target.height} />
+        <FlightBack variant={flight.cardType} w={HAND_CARD_WIDTH} h={HAND_CARD_HEIGHT} />
       </motion.div>
     )
   }

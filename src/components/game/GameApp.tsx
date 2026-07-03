@@ -53,6 +53,7 @@ import {
   playConstructionSound,
   playAnchorDropSound,
   playCrowdBooSound,
+  playCrowdCheerSound,
 } from '@/lib/soundEffects'
 import { trySimpleAiMainPhase } from '@/lib/bot/simpleAiTurn'
 import type { SimpleAiTurnHandlers, SimpleAiTurnUi } from '@/lib/bot/simpleAiTurn'
@@ -111,7 +112,7 @@ import {
 import { remapSeatPlanPartySocketIds, resolveGuestSeatForRemap } from '@/lib/partySeatIds'
 import { redactGameStateForGuestView } from '@/lib/partyBoardView'
 import { useOnlineBoardSync } from '@/lib/useOnlineBoardSync'
-import type { GameEvent } from '@/lib/onlineGameActions'
+import type { BoardFx, GameEvent } from '@/lib/onlineGameActions'
 
 // Statically imported in v2 (no SSR concerns in the Vite/Capacitor build).
 import { IncomeDialog } from '@/components/dialogs/IncomeDialog'
@@ -289,13 +290,17 @@ function applyFinalRoundCountdown(current: GameState): {
 let cardFlightCounter = 0
 const nextCardFlightId = (): string => `flight-${++cardFlightCounter}`
 
+/** Sentinel action-instance id for the online council-freeze defense dialog (card already spent). */
+const REMOTE_COUNCIL_FREEZE_DEFENSE_ID = 'remote-council-freeze-defense'
+
 /** Queue a face-down draw flight (deck → hand). Hand position should be the current player's hand-target rect. */
 function makeDrawFlight(
   inst: CardInstance,
   cardType: 'property' | 'action',
   source: FlightRect,
   target: FlightRect,
-  delayMs: number
+  delayMs: number,
+  durationSec?: number
 ): CardFlight {
   return {
     id: nextCardFlightId(),
@@ -305,7 +310,23 @@ function makeDrawFlight(
     source,
     target,
     delayMs,
+    durationSec,
   }
+}
+
+/** All hand deliveries (initial deal + mid-game draws) fly at hand-card size over 1 s. */
+const HAND_DRAW_DURATION_SEC = 1
+const HAND_DRAW_STAGGER_MS = 140
+const REPLENISH_DRAW_STAGGER_MS = 220
+
+/** Prefer the card's slot in the fan; fall back to the section anchor. */
+function resolveHandDrawTargetRect(
+  getRect: (key: string) => FlightRect | null,
+  playerId: number,
+  instanceId: string,
+  sectionRect: FlightRect | null
+): FlightRect | null {
+  return getRect(handCardAnchorKey(playerId, instanceId)) ?? sectionRect
 }
 
 /** One human versus one or more AI seats (solo on this device, not pass-and-play with multiple humans). */
@@ -364,6 +385,7 @@ function AppInner() {
 
   const onGuestSnapshotAppliedRef = useRef<() => void>(() => {})
   const onGameEventsRef = useRef<(events: GameEvent[]) => void>(() => {})
+  const onBoardFxRef = useRef<(fx: BoardFx) => void>(() => {})
 
   const resolveOnlineSeatPlayerId = useCallback(
     (gs: GameState, boardId: string | null): number | null => {
@@ -392,11 +414,14 @@ function AppInner() {
     resolveSeatPlayerId: resolveOnlineSeatPlayerId,
     onAuthoritySnapshotApplied: () => onGuestSnapshotAppliedRef.current(),
     onGameEvents: (events) => onGameEventsRef.current(events),
+    onFx: (fx) => onBoardFxRef.current(fx),
   })
 
-  const { boardPartyConnectionId, sendAction } = partyBoardSync
+  const { boardPartyConnectionId, sendAction, sendFx } = partyBoardSync
   const sendActionRef = useRef(sendAction)
   sendActionRef.current = sendAction
+  const sendFxRef = useRef(sendFx)
+  sendFxRef.current = sendFx
 
   const isOnlineActor = Boolean(partyBoardConfig && boardPartyConnectionId)
 
@@ -732,6 +757,21 @@ function AppInner() {
     }, 4000)
   }, [])
 
+  onBoardFxRef.current = (fx: BoardFx) => {
+    if (fx.sound === 'construction') playConstructionSound()
+    else if (fx.sound === 'anchor') playAnchorDropSound()
+    else if (fx.sound === 'income') playIncomeSound()
+    else if (fx.sound === 'boo') playCrowdBooSound()
+    else if (fx.sound === 'cheer') playCrowdCheerSound()
+    if (fx.notice) showBoardNotice(fx.notice.title, fx.notice.detail)
+  }
+
+  /** Play a table effect on this device and mirror it to every other device in the room. */
+  const broadcastBoardFx = (fx: BoardFx, opts?: { localEcho?: boolean }) => {
+    if (opts?.localEcho !== false) onBoardFxRef.current(fx)
+    if (isOnlineActor) sendFxRef.current(fx)
+  }
+
   onGameEventsRef.current = (events: GameEvent[]) => {
     for (const e of events) {
       if (e.type === 'toast') {
@@ -759,7 +799,22 @@ function AppInner() {
         toast.success('Final Round complete — game over!')
       } else if (e.type === 'build_celebration') {
         showBoardNotice(e.title, e.detail)
-        playConstructionSound()
+        if (e.title.includes('anchored')) playAnchorDropSound()
+        else playConstructionSound()
+      } else if (e.type === 'council_freeze_result') {
+        if (e.negated) {
+          showBoardNotice(
+            `${e.targetName} rolled a 6!`,
+            'City Council Freeze negated — they can build as usual.'
+          )
+          playCrowdCheerSound()
+        } else {
+          showBoardNotice(
+            `${e.targetName} rolled ${e.result} — the freeze holds.`,
+            'They cannot build properties until they finish their next turn.'
+          )
+          playCrowdBooSound()
+        }
       }
     }
   }
@@ -982,12 +1037,34 @@ function AppInner() {
       if (startingHand) {
         startingHand.propertyCards.forEach((inst) => {
           if (!propDeckRect || !propTargetRect) return
-          queued.push(makeDrawFlight(inst, 'property', propDeckRect, propTargetRect, staggerIdx++ * 100))
+          const targetRect = resolveHandDrawTargetRect(getFlightRect, currentPlayerId, inst.instanceId, propTargetRect)
+          if (!targetRect) return
+          queued.push(
+            makeDrawFlight(
+              inst,
+              'property',
+              propDeckRect,
+              targetRect,
+              staggerIdx++ * HAND_DRAW_STAGGER_MS,
+              HAND_DRAW_DURATION_SEC
+            )
+          )
           newlyHidden.push(inst.instanceId)
         })
         startingHand.actionCards.forEach((inst) => {
           if (!actDeckRect || !actTargetRect) return
-          queued.push(makeDrawFlight(inst, 'action', actDeckRect, actTargetRect, staggerIdx++ * 100))
+          const targetRect = resolveHandDrawTargetRect(getFlightRect, currentPlayerId, inst.instanceId, actTargetRect)
+          if (!targetRect) return
+          queued.push(
+            makeDrawFlight(
+              inst,
+              'action',
+              actDeckRect,
+              targetRect,
+              staggerIdx++ * HAND_DRAW_STAGGER_MS,
+              HAND_DRAW_DURATION_SEC
+            )
+          )
           newlyHidden.push(inst.instanceId)
         })
       }
@@ -1025,7 +1102,13 @@ function AppInner() {
         ? (partyBoardSeatPlayer?.id ?? resolveGuestSeatForRemap(cur, partyBoardConfig.displayName ?? '')?.id)
         : soloTableVersusBots
           ? cur.players.find((p) => p.isAi !== true)?.id
-          : (partyBoardSeatPlayer?.id ?? cur.players[cur.currentPlayerIndex]?.id)
+          : partyBoardConfig
+            ? // Online host: the rail is ALWAYS this device's seat — never follow the
+              // acting player, which would leak bot/rival hands as turns rotate.
+              (partyBoardSeatPlayer?.id ??
+                resolveGuestSeatForRemap(cur, partyBoardConfig.displayName ?? '')?.id ??
+                cur.players.find((p) => p.isAi !== true)?.id)
+            : cur.players[cur.currentPlayerIndex]?.id
 
     const newPropertyDiscards = cur.propertyDiscard.filter((c) => !prev.propertyDiscardIds.has(c.instanceId))
     const newActionDiscards = cur.actionDiscard.filter((c) => !prev.actionDiscardIds.has(c.instanceId))
@@ -1083,13 +1166,35 @@ function AppInner() {
       handRailFounder.propertyCards.forEach((inst) => {
         if (prevHand?.property.has(inst.instanceId)) return
         if (!propDeckRect || !propTargetRect) return
-        queued.push(makeDrawFlight(inst, 'property', propDeckRect, propTargetRect, drawStagger++ * 100))
+        const targetRect = resolveHandDrawTargetRect(getFlightRect, handRailFounder.id, inst.instanceId, propTargetRect)
+        if (!targetRect) return
+        queued.push(
+          makeDrawFlight(
+            inst,
+            'property',
+            propDeckRect,
+            targetRect,
+            drawStagger++ * REPLENISH_DRAW_STAGGER_MS,
+            HAND_DRAW_DURATION_SEC
+          )
+        )
         newlyHidden.push(inst.instanceId)
       })
       handRailFounder.actionCards.forEach((inst) => {
         if (prevHand?.action.has(inst.instanceId)) return
         if (!actDeckRect || !actTargetRect) return
-        queued.push(makeDrawFlight(inst, 'action', actDeckRect, actTargetRect, drawStagger++ * 100))
+        const targetRect = resolveHandDrawTargetRect(getFlightRect, handRailFounder.id, inst.instanceId, actTargetRect)
+        if (!targetRect) return
+        queued.push(
+          makeDrawFlight(
+            inst,
+            'action',
+            actDeckRect,
+            targetRect,
+            drawStagger++ * REPLENISH_DRAW_STAGGER_MS,
+            HAND_DRAW_DURATION_SEC
+          )
+        )
         newlyHidden.push(inst.instanceId)
       })
     }
@@ -1118,6 +1223,74 @@ function AppInner() {
     setGameState(gs)
     setPartyBoardConfig(cfg)
   }, [])
+
+  /**
+   * Online council-freeze handoff. When a pending defense appears in shared state,
+   * every device announces it; the device controlling the target seat (their own
+   * screen, or the host for a bot) opens the negate-roll dice dialog. When the
+   * defense resolves on another device, any stale local dialog is closed.
+   */
+  const pendingFreezeDefense = gameState.pendingCouncilFreezeDefense ?? null
+  const pendingFreezeKey = pendingFreezeDefense
+    ? `${pendingFreezeDefense.targetPlayerId}|${pendingFreezeDefense.attackerPlayerId}`
+    : ''
+  const announcedFreezeKeyRef = useRef('')
+  useEffect(() => {
+    const pending = gameState.pendingCouncilFreezeDefense
+    if (!pending) {
+      announcedFreezeKeyRef.current = ''
+      setRollDieDialogState((prev) =>
+        prev.open &&
+        prev.mode === 'council-freeze-defender' &&
+        prev.actionInstanceId === REMOTE_COUNCIL_FREEZE_DEFENSE_ID
+          ? { open: false, mode: 'roll-die', actionInstanceId: null }
+          : prev
+      )
+      return
+    }
+
+    if (announcedFreezeKeyRef.current !== pendingFreezeKey) {
+      announcedFreezeKeyRef.current = pendingFreezeKey
+      showBoardNotice(
+        `City Council Freeze on ${pending.targetName}!`,
+        `${pending.attackerName} succeeded — ${pending.targetName} must roll a 6 to negate the freeze.`
+      )
+    }
+
+    const defender = gameState.players.find((p) => p.id === pending.targetPlayerId)
+    const controlsDefender =
+      defender?.isAi === true
+        ? partyBoardConfig?.role === 'host'
+        : partyBoardSeatPlayer?.id === pending.targetPlayerId
+    if (!controlsDefender) return
+
+    setRollDieDialogState((prev) =>
+      prev.open
+        ? prev
+        : {
+            open: true,
+            mode: 'council-freeze-defender',
+            actionInstanceId: REMOTE_COUNCIL_FREEZE_DEFENSE_ID,
+            targetPlayerId: pending.targetPlayerId,
+            influenceBonus: 0,
+            influenceLabels: [],
+            councilFreezeAttackerRollsCompleted: undefined,
+            councilFreezeAttackerLastNatural: undefined,
+            councilFreezeFailAuto: false,
+            diceRetryNonce: 0,
+            takeoverContext: undefined,
+            rezoningContext: undefined,
+            scandalContext: undefined,
+            removeInvestorsContext: undefined,
+          }
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pendingFreezeKey,
+    rollDieDialogState.open,
+    partyBoardConfig?.role,
+    partyBoardSeatPlayer?.id,
+  ])
 
   const handleSetupComplete = (players: Player[], partyBoard?: PartyBoardSyncMeta) => {
     if (partyBoard) {
@@ -1179,6 +1352,7 @@ function AppInner() {
         actionsPlayedThisTurn: 0,
         lastBuiltProperty: undefined,
         councilFreezeBlockBuildForPlayerId: undefined,
+        pendingCouncilFreezeDefense: undefined,
         pendingIncomeTaxPlayerIds: [],
         gameEnded: undefined,
         winningSequence: undefined,
@@ -2118,11 +2292,13 @@ function AppInner() {
                 const actorId = currentPlayer.id
                 const otherIds = current.players.filter((p) => p.id !== actorId).map((p) => p.id)
                 pendingIncomeTaxPlayerIds = Array.from(new Set([...pendingIncomeTaxPlayerIds, ...otherIds]))
-                playCrowdBooSound()
-                showBoardNotice(
-                  'Taxation levied!',
-                  `${currentPlayer.name} sheltered their income — all other founders face a 50% city assessment.`
-                )
+                broadcastBoardFx({
+                  sound: 'boo',
+                  notice: {
+                    title: 'Taxation levied!',
+                    detail: `${currentPlayer.name} sheltered their income — all other founders face a 50% city assessment.`,
+                  },
+                })
                 return
               }
 
@@ -2249,9 +2425,7 @@ function AppInner() {
       }
 
       if (turnLimitReached(newTurnActionsConsumed)) {
-        setTimeout(() => {
-          handleEndTurn()
-        }, 500)
+        scheduleEndOfTurn()
       }
 
       return withReplenishedActionHand(newState, current.currentPlayerIndex)
@@ -2631,6 +2805,68 @@ function AppInner() {
     }, 2000)
   }
 
+  /**
+   * Auto-end guard. Once a founder consumes all 3 turn actions (a build + 2 actions, or
+   * 3 action cards), end the turn automatically after a short beat. Only one auto-end may
+   * be pending at a time so the many resolution paths and the idle-state fallback effect
+   * can never double-advance to the next player.
+   */
+  const autoEndTurnScheduledRef = useRef(false)
+  const scheduleEndOfTurn = () => {
+    if (autoEndTurnScheduledRef.current) return
+    autoEndTurnScheduledRef.current = true
+    window.setTimeout(() => {
+      autoEndTurnScheduledRef.current = false
+      handleEndTurn()
+    }, 500)
+  }
+
+  /**
+   * Idle-state safety net: if the acting founder has used all 3 actions and nothing is
+   * mid-resolution (no dialog, placement, selection, or pending freeze), end their turn.
+   * Guarded by scheduleEndOfTurn so it never races the per-action auto-end. AI seats end
+   * through their own driver, so this only nudges human seats this device controls.
+   */
+  const actingSeatForAutoEnd = safeGameState.players[safeGameState.currentPlayerIndex]
+  const localControlsActingSeat = !partyBoardConfig
+    ? actingSeatForAutoEnd?.isAi !== true
+    : actingSeatForAutoEnd?.isAi === true
+      ? partyBoardConfig.role === 'host'
+      : partyBoardSeatPlayer?.id === actingSeatForAutoEnd?.id
+  const boardIdleForAutoEnd =
+    !rollDieDialogState.open &&
+    !incomeDialogState.open &&
+    !discardDialogState.open &&
+    !placementMode.active &&
+    rezoningMode.phase === 'inactive' &&
+    taxBuildMode.phase === 'inactive' &&
+    !taxBuildPrompt.open &&
+    !takeoverSelectMode.active &&
+    !scandalSelectMode.active &&
+    !investmentSelectMode.active &&
+    !removeInvestorsSelectMode.active &&
+    !discardPropertySelectMode.active &&
+    safeGameState.pendingCouncilFreezeDefense == null &&
+    safeGameState.showNewCardsAnimation !== true
+  useEffect(() => {
+    if (!safeGameState.isSetupComplete || safeGameState.gameEnded) return
+    if (safeGameState.openingNarrationComplete === false) return
+    if (actingSeatForAutoEnd?.isAi === true && !partyBoardConfig) return
+    if (!localControlsActingSeat) return
+    if (!turnLimitReached(safeGameState.turnActionsConsumed)) return
+    if (!boardIdleForAutoEnd) return
+    scheduleEndOfTurn()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    safeGameState.turnActionsConsumed,
+    safeGameState.currentPlayerIndex,
+    safeGameState.isSetupComplete,
+    safeGameState.gameEnded,
+    safeGameState.openingNarrationComplete,
+    localControlsActingSeat,
+    boardIdleForAutoEnd,
+  ])
+
   const handleDiscardComplete = (discardedInstanceIds: string[]) => {
     if (isOnlineActor) {
       // Online: the engine removes the cards and re-runs end turn, so decks and
@@ -2834,7 +3070,7 @@ function AppInner() {
       }
 
       if (turnLimitReached(newTurnConsumed)) {
-        setTimeout(() => handleEndTurn(), 500)
+        scheduleEndOfTurn()
       }
 
       return withReplenishedActionHand(nextState, current.currentPlayerIndex)
@@ -2919,7 +3155,7 @@ function AppInner() {
       }
 
       if (turnLimitReached(newTurnActionsConsumed)) {
-        setTimeout(() => handleEndTurn(), 500)
+        scheduleEndOfTurn()
       }
 
       return withReplenishedActionHand(newState, cpIdx)
@@ -3016,7 +3252,7 @@ function AppInner() {
         turnActionsConsumed: newTurnActionsConsumed,
       }
       if (turnLimitReached(newTurnActionsConsumed)) {
-        setTimeout(() => handleEndTurn(), 500)
+        scheduleEndOfTurn()
       }
       return withReplenishedActionHand(newState, cpIdx)
     })
@@ -3230,7 +3466,7 @@ function AppInner() {
         turnActionsConsumed: newTurnActionsConsumed,
       }
       if (turnLimitReached(newTurnActionsConsumed)) {
-        setTimeout(() => handleEndTurn(), 500)
+        scheduleEndOfTurn()
       }
       return withReplenishedActionHand(newState, cpIdx)
     })
@@ -3531,7 +3767,7 @@ function AppInner() {
       )
 
       if (turnLimitReached(newConsumed)) {
-        setTimeout(() => handleEndTurn(), 500)
+        scheduleEndOfTurn()
       }
 
       return withReplenishedActionHand(nextState, cpIdx)
@@ -3544,6 +3780,19 @@ function AppInner() {
     incomeResolution: 'property-roll' | 'bank-income-card' = 'property-roll'
   ) => {
     if (!incomeDialogState.actionInstanceId) return
+
+    // The acting device's IncomeDialog already played the cash register locally;
+    // mirror it to the rest of the table so income lands with sound everywhere.
+    broadcastBoardFx(
+      {
+        sound: 'income',
+        notice: {
+          title: `${incomeDialogState.player?.name ?? 'A founder'} collected income`,
+          detail: `$${earnedIncome}M added to their treasury.`,
+        },
+      },
+      { localEcho: false }
+    )
 
     const consumedBefore = safeGameState.turnActionsConsumed ?? 0
     let effectiveDoubleIncomeId = doubleIncomeInstanceId
@@ -3852,7 +4101,7 @@ function AppInner() {
         turnActionsConsumed: newTurnActionsConsumed,
       }
       if (turnLimitReached(newTurnActionsConsumed)) {
-        setTimeout(() => handleEndTurn(), 500)
+        scheduleEndOfTurn()
       }
       return withReplenishedActionHand(newState, current.currentPlayerIndex)
     })
@@ -3956,7 +4205,7 @@ function AppInner() {
           turnActionsConsumed: newTurnActionsConsumed,
         }
         if (turnLimitReached(newTurnActionsConsumed)) {
-          setTimeout(() => handleEndTurn(), 500)
+          scheduleEndOfTurn()
         }
         return withReplenishedActionHand(newState, cpIdx)
       })
@@ -4003,7 +4252,7 @@ function AppInner() {
         turnActionsConsumed: newTurnActionsConsumed,
       }
       if (turnLimitReached(newTurnActionsConsumed)) {
-        setTimeout(() => handleEndTurn(), 500)
+        scheduleEndOfTurn()
       }
       return withReplenishedActionHand(newState, cpIdx)
     })
@@ -4038,6 +4287,60 @@ function AppInner() {
       if (success) {
         const detail = bonus > 0 ? ` ${natural} + ${bonus} (${labels.join(' & ')}) = ${total}` : ` ${natural}`
         toast.success(`Rolled${detail}. Success — target may roll a 6 to negate the freeze.`)
+
+        if (isOnlineActor) {
+          // Online: hand the negate roll to the target's own device. Spend the card
+          // now (this is still the attacker's turn, so the commit is accepted) and
+          // publish the pending defense; every device reacts to it from state.
+          const instanceId = dialog.actionInstanceId
+          const targetId = dialog.targetPlayerId
+          patchGameState((current) => {
+            const attacker = current.players[current.currentPlayerIndex]
+            const targetName =
+              current.players.find((p) => p.id === targetId)?.name ?? 'Target player'
+            const inst = attacker.actionCards.find((c) => c.instanceId === instanceId)
+            const updatedActionCards = attacker.actionCards.filter((c) => c.instanceId !== instanceId)
+            const actionDiscardPile = inst ? [...current.actionDiscard, inst] : [...current.actionDiscard]
+            const newState: GameState = {
+              ...current,
+              players: current.players.map((p, idx) =>
+                idx === current.currentPlayerIndex ? { ...p, actionCards: updatedActionCards } : p
+              ),
+              actionDiscard: actionDiscardPile,
+              actionsPlayedThisTurn: current.actionsPlayedThisTurn + 1,
+              turnActionsConsumed: (current.turnActionsConsumed ?? 0) + 1,
+              undoLastAction: undefined,
+              pendingCouncilFreezeDefense:
+                targetId != null
+                  ? {
+                      targetPlayerId: targetId,
+                      attackerPlayerId: attacker.id,
+                      attackerName: attacker.name,
+                      targetName,
+                    }
+                  : undefined,
+            }
+            return withReplenishedActionHand(newState, current.currentPlayerIndex)
+          })
+          setRollDieDialogState({
+            open: false,
+            mode: 'roll-die',
+            actionInstanceId: null,
+            targetPlayerId: undefined,
+            influenceBonus: undefined,
+            influenceLabels: undefined,
+            councilFreezeAttackerRollsCompleted: undefined,
+            councilFreezeAttackerLastNatural: undefined,
+            councilFreezeFailAuto: undefined,
+            diceRetryNonce: undefined,
+            takeoverContext: undefined,
+            rezoningContext: undefined,
+            scandalContext: undefined,
+            removeInvestorsContext: undefined,
+          })
+          return
+        }
+
         setRollDieDialogState({
           open: true,
           mode: 'council-freeze-defender',
@@ -4066,6 +4369,30 @@ function AppInner() {
     }
 
     if (dialog.mode === 'council-freeze-defender') {
+      if (safeGameState.pendingCouncilFreezeDefense) {
+        // Online handoff: the freeze card was already spent on the attacker's turn.
+        // Report this device's negate roll to the table authority; the shared
+        // council_freeze_result event announces the outcome on every screen.
+        sendAction({ type: 'council_freeze_defense', result })
+        setRollDieDialogState({
+          open: false,
+          mode: 'roll-die',
+          actionInstanceId: null,
+          targetPlayerId: undefined,
+          influenceBonus: undefined,
+          influenceLabels: undefined,
+          councilFreezeAttackerRollsCompleted: undefined,
+          councilFreezeAttackerLastNatural: undefined,
+          councilFreezeFailAuto: undefined,
+          diceRetryNonce: undefined,
+          takeoverContext: undefined,
+          rezoningContext: undefined,
+          scandalContext: undefined,
+          removeInvestorsContext: undefined,
+        })
+        return
+      }
+
       const negated = result === 6
       const targetId = dialog.targetPlayerId
       const instanceId = dialog.actionInstanceId!
@@ -4100,7 +4427,7 @@ function AppInner() {
         }
 
         if (turnLimitReached(newTurnActionsConsumed)) {
-          setTimeout(() => handleEndTurn(), 500)
+          scheduleEndOfTurn()
         }
 
         return withReplenishedActionHand(newState, current.currentPlayerIndex)
@@ -4408,7 +4735,7 @@ function AppInner() {
             turnActionsConsumed: nTurnConsumed,
           }
           if (turnLimitReached(nTurnConsumed)) {
-            setTimeout(() => handleEndTurn(), 500)
+            scheduleEndOfTurn()
           }
           return withReplenishedActionHand(ns, cpIdx)
         })
@@ -4487,7 +4814,7 @@ function AppInner() {
             turnActionsConsumed: nTurnConsumed,
           }
           if (turnLimitReached(nTurnConsumed)) {
-            setTimeout(() => handleEndTurn(), 500)
+            scheduleEndOfTurn()
           }
           return withReplenishedActionHand(ns, cpIdx)
         }
@@ -4516,13 +4843,14 @@ function AppInner() {
               }
             : pl
         )
-        if (card.type === 'anchor') playAnchorDropSound()
-        else playConstructionSound()
         {
           const celebration = getBuildCelebrationMessage(card, { housingHighDensity: highDensity })
           const title =
             card.type === 'anchor' ? `⚓ ${card.name} anchored!` : (celebration ?? `Built ${card.name}!`)
-          showBoardNotice(title, `Rezoning — ${ctx.col}${ctx.row} · $${buildCost}M`)
+          broadcastBoardFx({
+            sound: card.type === 'anchor' ? 'anchor' : 'construction',
+            notice: { title, detail: `Rezoning — ${ctx.col}${ctx.row} · $${buildCost}M` },
+          })
         }
         const newState: GameState = {
           ...current,
@@ -4553,7 +4881,7 @@ function AppInner() {
           }, 600)
         }
         if (turnLimitReached(newTurnConsumed)) {
-          setTimeout(() => handleEndTurn(), 500)
+          scheduleEndOfTurn()
         }
         return withReplenishedActionHand(stateWithTrigger, cpIdx)
       })
@@ -4678,7 +5006,7 @@ function AppInner() {
             turnActionsConsumed: newTurnConsumed,
           }
           if (turnLimitReached(newTurnConsumed)) {
-            setTimeout(() => handleEndTurn(), 500)
+            scheduleEndOfTurn()
           }
           return withReplenishedActionHand(newState, cpIdx)
         }
@@ -4719,7 +5047,7 @@ function AppInner() {
         }
 
         if (turnLimitReached(newTurnConsumed)) {
-          setTimeout(() => handleEndTurn(), 500)
+          scheduleEndOfTurn()
         }
 
         toast.success(
@@ -4927,12 +5255,17 @@ function AppInner() {
   }
 
   const currentPlayer = currentPlayerMaybe
-  /** Solo vs bots: bottom rail sticks to the human so they can evaluate off-turn; otherwise rail follows current seat. */
-  /** Solo vs bots pins the lone human as the rail; multiplayer / online pins the PartyKit seat for this browser. */
+  /** Solo vs bots pins the lone human as the rail; online pins this device's seat (never the acting
+   *  player, which would rotate the rail through bots and rivals); local pass-and-play follows turns. */
   const soloVersusBotsTable = isSinglePlayerVersusBots(safeGameState.players)
   const localHumanSeat = soloVersusBotsTable
     ? safeGameState.players.find((p) => p.isAi !== true) ?? currentPlayer
-    : partyBoardSeatPlayer ?? currentPlayer
+    : partyBoardConfig
+      ? partyBoardSeatPlayer ??
+        resolveGuestSeatForRemap(safeGameState, partyBoardConfig.displayName ?? '') ??
+        safeGameState.players.find((p) => p.isAi !== true) ??
+        currentPlayer
+      : currentPlayer
   const handRailPlayer = localHumanSeat
   const handRailPlayerIndex = safeGameState.players.findIndex((p) => p.id === handRailPlayer.id)
   const actingPlayerSeat = safeGameState.players[safeGameState.currentPlayerIndex]
@@ -5178,6 +5511,16 @@ function AppInner() {
             tone: 'info',
             ctaLabel: 'Roll in dialog',
           }
+      }
+    }
+    if (safeGameState.pendingCouncilFreezeDefense) {
+      const pending = safeGameState.pendingCouncilFreezeDefense
+      return {
+        id: 'cf-def-wait',
+        title: `City Council Freeze — ${pending.targetName} is rolling`,
+        detail: `${pending.attackerName}'s freeze succeeded. ${pending.targetName} rolls on their own screen — only a 6 negates it.`,
+        tone: 'danger',
+        ctaLabel: 'Waiting for their roll',
       }
     }
     if (incomeDialogState.open) {
@@ -5580,14 +5923,14 @@ function AppInner() {
         className="flex-1 flex overflow-hidden min-h-0"
         style={{ pointerEvents: isSpectator ? 'none' : 'auto' }}
       >
-        {/* Left player panel */}
+        {/* Left player panel — river blue with contrasting stat insets */}
         <aside style={{
           width: 264,
           flexShrink: 0,
           padding: 24,
           overflowY: 'auto',
-          borderRight: '1px solid rgba(255,255,255,0.08)',
-          backgroundColor: '#0c0c12',
+          borderRight: '1px solid rgba(74, 154, 208, 0.3)',
+          background: 'linear-gradient(180deg, #061a30 0%, #0f3a5e 52%, #071f39 100%)',
           pointerEvents: showOpeningProTip ? 'none' : 'auto',
           opacity: showOpeningProTip ? 0.55 : 1,
           transition: 'opacity 200ms ease',
@@ -5599,7 +5942,7 @@ function AppInner() {
               fontWeight: 600,
               letterSpacing: '0.14em',
               textTransform: 'uppercase' as const,
-              color: 'rgba(240,240,245,0.45)',
+              color: 'rgba(186, 230, 253, 0.72)',
             }}>
               Players
             </span>
@@ -5657,8 +6000,8 @@ function AppInner() {
                   padding: isActive ? 20 : 16,
                   borderRadius: 12,
                   borderLeft: `4px solid ${isActive ? player.color : 'transparent'}`,
-                  backgroundColor: isActive ? 'rgba(255,255,255,0.04)' : 'transparent',
-                  opacity: isActive ? 1 : 0.5,
+                  backgroundColor: isActive ? 'rgba(0, 0, 0, 0.14)' : 'transparent',
+                  opacity: isActive ? 1 : 0.72,
                   transition: 'all 300ms ease',
                   outline: 'none',
                   ...(isActive ? ({ '--player-color': player.color } as CSSProperties) : {}),
@@ -5675,9 +6018,12 @@ function AppInner() {
                   }} />
                   <p style={{
                     fontSize: isActive ? 14 : 12,
-                    fontWeight: 300,
+                    fontWeight: 700,
                     letterSpacing: '0.02em',
-                    color: isActive ? player.color : 'rgba(240,240,245,0.6)',
+                    color: isActive ? player.color : '#ffffff',
+                    textShadow: isActive
+                      ? `0 0 10px ${player.color}66`
+                      : '0 1px 3px rgba(0, 0, 0, 0.55)',
                     margin: 0,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -5689,6 +6035,11 @@ function AppInner() {
                 <div
                   style={{
                     marginTop: isActive ? 14 : 12,
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    backgroundColor: isActive ? 'rgba(0, 0, 0, 0.32)' : 'rgba(0, 0, 0, 0.2)',
+                    border: '1px solid rgba(74, 154, 208, 0.32)',
+                    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.07)',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 8,
@@ -5697,16 +6048,16 @@ function AppInner() {
                   aria-hidden
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: 'rgba(240,240,245,0.4)' }}>Cash</span>
-                    <span style={{ fontWeight: 500, color: 'rgba(240,240,245,0.85)', fontVariantNumeric: 'tabular-nums' }}>${player.money}M</span>
+                    <span style={{ color: 'rgba(186, 230, 253, 0.78)', fontWeight: 500 }}>Cash</span>
+                    <span style={{ fontWeight: 600, color: '#f0f9ff', fontVariantNumeric: 'tabular-nums' }}>${player.money}M</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: 'rgba(240,240,245,0.4)' }}>Property</span>
-                    <span style={{ fontWeight: 500, color: 'rgba(240,240,245,0.85)', fontVariantNumeric: 'tabular-nums' }}>${stats.propertyValue}M</span>
+                    <span style={{ color: 'rgba(186, 230, 253, 0.78)', fontWeight: 500 }}>Property</span>
+                    <span style={{ fontWeight: 600, color: '#f0f9ff', fontVariantNumeric: 'tabular-nums' }}>${stats.propertyValue}M</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: 'rgba(240,240,245,0.4)' }}>Income</span>
-                    <span style={{ fontWeight: 500, color: 'rgba(240,240,245,0.85)', fontVariantNumeric: 'tabular-nums' }}>${stats.income}M/turn</span>
+                    <span style={{ color: 'rgba(186, 230, 253, 0.78)', fontWeight: 500 }}>Income</span>
+                    <span style={{ fontWeight: 600, color: '#fef9c3', fontVariantNumeric: 'tabular-nums' }}>${stats.income}M/turn</span>
                   </div>
                 </div>
                 {showSidebarAnchors ? <SidebarHandFlightAnchors player={player} /> : null}

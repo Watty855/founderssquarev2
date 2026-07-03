@@ -96,6 +96,53 @@ export function applyGameAction(
       return applyEndTurn(discarded)
     }
 
+    case 'council_freeze_defense': {
+      const pending = state.pendingCouncilFreezeDefense
+      if (!pending) {
+        return { ok: false, error: 'No council-freeze defense is pending.', code: 'no_pending_defense' }
+      }
+      const defenderIdx = state.players.findIndex((p) => p.id === pending.targetPlayerId)
+      const defender = state.players[defenderIdx]
+      if (!defender) {
+        return { ok: false, error: 'Defender seat not found.', code: 'bad_defender' }
+      }
+      // Only the device controlling the defender seat may report the roll.
+      if (defender.isAi) {
+        if (!ctx.senderIsHost) {
+          return { ok: false, error: 'AI seats are driven by the host.', code: 'ai_seat' }
+        }
+      } else {
+        const senderIdx = findHostSeatIndexForConnection(state, ctx.senderConnectionId)
+        if (senderIdx !== defenderIdx) {
+          return { ok: false, error: 'Only the frozen founder rolls the defense die.', code: 'wrong_defender' }
+        }
+      }
+      const result = Math.round(action.result)
+      if (!(result >= 1 && result <= 6)) {
+        return { ok: false, error: 'Invalid die result.', code: 'bad_roll' }
+      }
+      const negated = result === 6
+      const next: GameState = {
+        ...state,
+        pendingCouncilFreezeDefense: undefined,
+        councilFreezeBlockBuildForPlayerId: negated
+          ? state.councilFreezeBlockBuildForPlayerId
+          : pending.targetPlayerId,
+      }
+      return {
+        ok: true,
+        state: next,
+        events: [
+          {
+            type: 'council_freeze_result',
+            targetName: pending.targetName,
+            result,
+            negated,
+          },
+        ],
+      }
+    }
+
     case 'play_cards':
       return {
         ok: false,

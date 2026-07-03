@@ -210,7 +210,7 @@ export const buildingData: Record<string, string> = {
   'T7': 'Cornelius’ Concrete',
   'T8': 'Tre Trucking',
   'T10': 'Steel Smelter',
-  'T11': 'Train terminal',
+  'T11': 'I Track\n(D)',
   'T12': 'Ike’s Iron Foundry',
   'T14': 'Gary’s Gas',
   'T15': 'Auto Mall',

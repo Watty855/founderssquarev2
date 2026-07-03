@@ -390,8 +390,12 @@ export function GameBoard({
             isAnchor && builtPropertyCard?.type === 'anchor' ? builtPropertyCard.name : null
           const plotDisplayTitle =
             anchorTenetTitle ?? (isCity && plot.building ? plot.building : '')
+          const buildingMultiline =
+            !anchorTenetTitle && isCity && plot.building != null && plot.building.includes('\n')
           const lotLetter =
-            isCity && plot.building ? getPlotBoardLetter(plot, builtPropertyCard) : null
+            isCity && plot.building && !buildingMultiline
+              ? getPlotBoardLetter(plot, builtPropertyCard)
+              : null
           const highDensityHousingLot =
             isClaimed &&
             plot.housingHighDensity === true &&
@@ -657,17 +661,19 @@ export function GameBoard({
                       ? 5.5
                       : anchorTenetTitle
                         ? 6.5
-                        : 7,
+                        : buildingMultiline
+                          ? 6.5
+                          : 7,
                   fontWeight: 700,
-                  lineHeight: 1.1,
+                  lineHeight: 1.15,
                   color: isClaimed ? 'rgba(255,255,255,0.85)' : (districtStyle?.text || 'rgba(255,255,255,0.5)'),
                   textAlign: 'center',
                   overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: anchorTenetTitle ? 'normal' : 'nowrap',
-                  display: '-webkit-box',
-                  WebkitLineClamp: anchorTenetTitle ? 2 : 1,
-                  WebkitBoxOrient: 'vertical' as const,
+                  textOverflow: buildingMultiline ? undefined : 'ellipsis',
+                  whiteSpace: anchorTenetTitle || buildingMultiline ? 'pre-line' : 'nowrap',
+                  display: buildingMultiline || anchorTenetTitle ? 'block' : '-webkit-box',
+                  WebkitLineClamp: buildingMultiline ? undefined : anchorTenetTitle ? 2 : 1,
+                  WebkitBoxOrient: buildingMultiline ? undefined : ('vertical' as const),
                   maxWidth: '100%',
                   padding: '0 2px',
                   fontFamily: 'var(--font-jetbrains-mono), monospace',

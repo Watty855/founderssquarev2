@@ -43,6 +43,8 @@ export type GameAction =
   | { type: 'animation_flags_clear' }
   /** Resolve an excess-hand discard after end_turn reported discard_required, then advance the turn. */
   | { type: 'discard_action_cards'; instanceIds: string[] }
+  /** The council-freeze target's device reports their negate roll (6 negates the freeze). */
+  | { type: 'council_freeze_defense'; result: number }
 
 export type GameEvent =
   | { type: 'discard_required'; numToDiscard: number }
@@ -50,6 +52,14 @@ export type GameEvent =
   | { type: 'game_over' }
   | { type: 'build_celebration'; title: string; detail: string }
   | { type: 'toast'; level: 'info' | 'success' | 'error'; message: string }
+  /** Council-freeze negate roll resolved — announced with sound on every device. */
+  | { type: 'council_freeze_result'; targetName: string; result: number; negated: boolean }
+
+/** Fire-and-forget effects (sounds / board notices) mirrored to every device on the board channel. */
+export type BoardFx = {
+  sound?: 'construction' | 'anchor' | 'income' | 'boo' | 'cheer'
+  notice?: { title: string; detail?: string }
+}
 
 export type ApplyGameActionResult =
   | { ok: true; state: GameState; events: GameEvent[] }

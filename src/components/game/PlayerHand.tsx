@@ -364,9 +364,13 @@ export function PlayerHand({
   ) : null
 
   const cardWidth = 110
-  const propertyGap = propertyHandCards.length > 6 ? 32 : propertyHandCards.length > 4 ? 44 : 56
+  /** Fan offset shrinks gently (3px per card past 5) instead of jumping between tiers,
+   *  so playing / drawing a card doesn't re-space the whole hand. Floor keeps crowded
+   *  hands readable on tablet widths (was 32px overlap for 7+ cards). */
+  const fanGap = (len: number) => Math.max(38, 52 - Math.max(0, len - 5) * 3)
+  const propertyGap = fanGap(propertyHandCards.length)
   const propertyFanWidth = propertyHandCards.length > 0 ? cardWidth + (propertyHandCards.length - 1) * propertyGap : 0
-  const actionGap = actionHandCards.length > 6 ? 32 : actionHandCards.length > 4 ? 44 : 56
+  const actionGap = fanGap(actionHandCards.length)
   const actionFanWidth = actionHandCards.length > 0 ? cardWidth + (actionHandCards.length - 1) * actionGap : 0
 
   return (

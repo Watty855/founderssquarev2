@@ -85,6 +85,17 @@ export interface GameState {
   /** When set, this player cannot build properties until they finish their next turn (City Council Freeze). */
   councilFreezeBlockBuildForPlayerId?: number
   /**
+   * Online games: a City Council Freeze attack succeeded and the target must roll to negate.
+   * The device controlling the target seat (or the host, for a bot) opens the defense
+   * dice dialog; every other device shows a waiting banner until the roll resolves.
+   */
+  pendingCouncilFreezeDefense?: {
+    targetPlayerId: number
+    attackerPlayerId: number
+    attackerName: string
+    targetName: string
+  }
+  /**
    * Player ids who must take a city income tax on their next Income card resolution:
    * they keep max(0, collected − floor(property income total × 50%)); flag clears after that resolution.
    * The founder who played Taxation is never added here.

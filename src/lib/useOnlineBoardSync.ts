@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import type { GameState } from '@/lib/types'
 import type { PartyBoardSyncConfig } from '@/lib/partyBoardSync'
-import type { GameAction, GameEvent } from '@/lib/onlineGameActions'
+import type { BoardFx, GameAction, GameEvent } from '@/lib/onlineGameActions'
 import { applyGameAction } from '@/lib/gameEngine/applyGameAction'
 import {
   mergePublicAndPrivateHands,
@@ -35,6 +35,7 @@ type BoardWire =
   | { kind: 'game_action'; from: string; actionId: string; action: GameAction }
   | { kind: 'game_request'; from: string }
   | { kind: 'game_cleared' }
+  | { kind: 'fx'; fx: BoardFx }
 
 /**
  * Live board sync over Supabase Realtime — replaces the PartyKit/Colyseus
@@ -57,6 +58,8 @@ export function useOnlineBoardSync(params: {
   resolveSeatPlayerId?: (gs: GameState, boardConnectionId: string | null) => number | null
   onAuthoritySnapshotApplied?: () => void
   onGameEvents?: (events: GameEvent[]) => void
+  /** Remote sound / notice effects broadcast by other devices at this table. */
+  onFx?: (fx: BoardFx) => void
 }) {
   const {
     config,
@@ -65,6 +68,7 @@ export function useOnlineBoardSync(params: {
     resolveSeatPlayerId,
     onAuthoritySnapshotApplied,
     onGameEvents,
+    onFx,
   } = params
 
   const [boardPartyConnectionId, setBoardPartyConnectionId] = useState<string | null>(null)
@@ -76,6 +80,8 @@ export function useOnlineBoardSync(params: {
   /** Hands this device may hold: its own seat plus AI seats when hosting. */
   const latestHandsRef = useRef<Map<number, PrivateHandPayload>>(new Map())
   const pendingRollbackRef = useRef<Map<string, GameState>>(new Map())
+  /** Action ids whose events already fired optimistically on this device — skip the authoritative echo. */
+  const optimisticEventsFiredRef = useRef<Set<string>>(new Set())
   const authorityRef = useRef<OnlineAuthorityStore>(createAuthorityStore())
   const gameStateRef = useRef(gameState)
   gameStateRef.current = gameState
@@ -89,6 +95,8 @@ export function useOnlineBoardSync(params: {
   onSnapshotAppliedRef.current = onAuthoritySnapshotApplied
   const onGameEventsRef = useRef(onGameEvents)
   onGameEventsRef.current = onGameEvents
+  const onFxRef = useRef(onFx)
+  onFxRef.current = onFx
 
   const cfgRef = useRef<PartyBoardSyncConfig | null>(null)
   cfgRef.current = config
@@ -143,6 +151,7 @@ export function useOnlineBoardSync(params: {
 
   const rollbackAction = useCallback(
     (actionId: string, error?: string) => {
+      optimisticEventsFiredRef.current.delete(actionId)
       const snap = pendingRollbackRef.current.get(actionId)
       if (!snap) return
       setGameState(snap)
@@ -177,7 +186,8 @@ export function useOnlineBoardSync(params: {
             })
             ingestPublicState(m.rev, m.state)
             pendingRollbackRef.current.clear()
-            if (m.events.length > 0) onGameEventsRef.current?.(m.events)
+            const alreadyFired = optimisticEventsFiredRef.current.delete(m.actionId)
+            if (m.events.length > 0 && !alreadyFired) onGameEventsRef.current?.(m.events)
           } else if (m.type === 'game_cleared') {
             sendWire({ kind: 'game_cleared' })
           }
@@ -224,8 +234,9 @@ export function useOnlineBoardSync(params: {
         case 'action_applied': {
           ingestPublicState(msg.rev, msg.state)
           pendingRollbackRef.current.clear()
+          const alreadyFired = optimisticEventsFiredRef.current.delete(msg.actionId)
           const events = msg.events ?? []
-          if (events.length > 0) onGameEventsRef.current?.(events)
+          if (events.length > 0 && !alreadyFired) onGameEventsRef.current?.(events)
           return
         }
         case 'action_rejected':
@@ -257,12 +268,23 @@ export function useOnlineBoardSync(params: {
           latestPublicRef.current = null
           latestHandsRef.current.clear()
           return
+        case 'fx':
+          if (msg.fx) onFxRef.current?.(msg.fx)
+          return
       }
     },
     [ingestPublicState, ingestPrivateHand, rollbackAction, deliverOutbound, sendWire]
   )
   const handleWireRef = useRef(handleWire)
   handleWireRef.current = handleWire
+
+  /** Mirror a local sound / notice effect to every other device (the sender plays it locally). */
+  const sendFx = useCallback(
+    (fx: BoardFx) => {
+      sendWire({ kind: 'fx', fx })
+    },
+    [sendWire]
+  )
 
   const sendGameClear = useCallback(() => {
     const cfg = cfgRef.current
@@ -292,7 +314,10 @@ export function useOnlineBoardSync(params: {
         })
         if (optimistic.ok) {
           setGameState(optimistic.state)
-          onGameEventsRef.current?.(optimistic.events)
+          if (optimistic.events.length > 0) {
+            optimisticEventsFiredRef.current.add(actionId)
+            onGameEventsRef.current?.(optimistic.events)
+          }
         }
       }
 
@@ -321,6 +346,7 @@ export function useOnlineBoardSync(params: {
     latestPublicRef.current = null
     latestHandsRef.current.clear()
     pendingRollbackRef.current.clear()
+    optimisticEventsFiredRef.current.clear()
     authorityRef.current = createAuthorityStore()
     setBoardPartyConnectionId(null)
 
@@ -406,6 +432,7 @@ export function useOnlineBoardSync(params: {
     sendGameClear,
     boardPartyConnectionId,
     sendAction,
+    sendFx,
     isOnline: config != null && getRealtimeClient() != null,
   }
 }
