@@ -435,9 +435,12 @@ export function GameBoard({
                   backgroundRepeat: 'no-repeat',
                 }
               : {
+                  // Fit the board area (not full viewport width) so phone layouts
+                  // with a players strip still show a readable board.
                   width: '100%',
                   maxWidth: 1400,
-                  maxHeight: 'min(calc(100vh - 180px), calc(100vw * 9 / 21))',
+                  maxHeight: '100%',
+                  height: 'auto',
                   aspectRatio: '21 / 9',
                 }),
             flexShrink: 0,

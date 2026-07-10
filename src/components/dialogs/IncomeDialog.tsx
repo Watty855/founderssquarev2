@@ -287,7 +287,7 @@ export function IncomeDialog({
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
       <DialogContent
-        className="max-w-[400px] [&>button:first-child]:hidden"
+        className="max-w-[400px] max-h-[min(90dvh,720px)] overflow-y-auto overscroll-contain [&>button:first-child]:hidden"
         style={{
           backgroundColor: '#141418',
           border: '1px solid rgba(255,255,255,0.1)',
@@ -371,8 +371,9 @@ export function IncomeDialog({
                     <div
                       id={containerId}
                       style={{
-                        width: 300,
-                        height: 200,
+                        width: 'min(300px, 100%)',
+                        height: 'min(200px, 28vh)',
+                        maxHeight: 200,
                         borderRadius: 10,
                         background: '#1a1a24',
                         position: 'relative',
@@ -813,8 +814,20 @@ export function IncomeDialog({
                     onClick={handleCollect}
                     className="btn-ps"
                     style={{
-                      height: 42, borderRadius: 10, backgroundColor: '#0070cc', color: '#fff',
-                      fontSize: 14, fontWeight: 600, border: '2px solid transparent', cursor: 'pointer',
+                      position: 'sticky',
+                      bottom: 0,
+                      zIndex: 2,
+                      height: 48,
+                      width: '100%',
+                      borderRadius: 10,
+                      backgroundColor: '#0070cc',
+                      color: '#fff',
+                      fontSize: 15,
+                      fontWeight: 700,
+                      border: '2px solid transparent',
+                      cursor: 'pointer',
+                      boxShadow: '0 -12px 24px #141418',
+                      marginTop: 4,
                     }}
                   >
                     Collect Income

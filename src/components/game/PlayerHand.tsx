@@ -47,6 +47,8 @@ interface PlayerHandProps {
   opponents?: Player[]
   /** When false, cards still render for review but cannot be clicked (e.g. solo human during AI turns). */
   handInteractionsActive: boolean
+  /** When true (phone layout), shrink fans and allow horizontal scroll. */
+  compact?: boolean
   onPlayCards: (
     propertyInstanceId: string | null,
     actionInstanceIds: string[],
@@ -168,6 +170,7 @@ export function PlayerHand({
   player,
   opponents = [],
   handInteractionsActive,
+  compact = false,
   onPlayCards,
   onEndTurn,
   placementMode,
@@ -363,11 +366,15 @@ export function PlayerHand({
       : actionCardsList.find(c => c.instance.instanceId === cardDialog.instanceId)
   ) : null
 
-  const cardWidth = 110
+  const cardWidth = compact ? 72 : 110
+  const fanHeight = compact ? 112 : 165
   /** Fan offset shrinks gently (3px per card past 5) instead of jumping between tiers,
    *  so playing / drawing a card doesn't re-space the whole hand. Floor keeps crowded
    *  hands readable on tablet widths (was 32px overlap for 7+ cards). */
-  const fanGap = (len: number) => Math.max(38, 52 - Math.max(0, len - 5) * 3)
+  const fanGap = (len: number) =>
+    compact
+      ? Math.max(26, 36 - Math.max(0, len - 5) * 2)
+      : Math.max(38, 52 - Math.max(0, len - 5) * 3)
   const propertyGap = fanGap(propertyHandCards.length)
   const propertyFanWidth = propertyHandCards.length > 0 ? cardWidth + (propertyHandCards.length - 1) * propertyGap : 0
   const actionGap = fanGap(actionHandCards.length)
@@ -776,7 +783,13 @@ export function PlayerHand({
           Each deck flanks its matching section so the draw flight is a short, readable hop.
           When inactive, pointers are disabled so preview hovers/dialogs can't fire while you browse layout. */}
       <div
-        style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 24 }}
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: compact ? 'flex-start' : 'center',
+          gap: compact ? 12 : 24,
+          minWidth: compact ? 'max-content' : undefined,
+        }}
         onMouseLeave={() => setHoveredIndex(null)}
       >
         <DeckPile variant="property" hasCards={propertyDeckHasCards} />
@@ -787,7 +800,7 @@ export function PlayerHand({
           style={{
             position: 'relative',
             width: propertyFanWidth,
-            height: 165,
+            height: fanHeight,
             pointerEvents: handInteractionsActive ? 'auto' : 'none',
           }}
         >
@@ -820,6 +833,7 @@ export function PlayerHand({
               >
                 <CompactCardView
                   card={card}
+                  compact={compact}
                   onClick={() => handleCardClick(card.instance.instanceId, 'property')}
                   selected={discardPropertySelectMode?.selectedPropertyInstanceIds.includes(card.instance.instanceId)}
                   discardPickable={discardPropertySelectMode?.active === true}
@@ -843,7 +857,7 @@ export function PlayerHand({
           style={{
             position: 'relative',
             width: actionFanWidth,
-            height: 165,
+            height: fanHeight,
             pointerEvents: handInteractionsActive ? 'auto' : 'none',
           }}
         >
@@ -876,6 +890,7 @@ export function PlayerHand({
               >
                 <CompactCardView
                   card={card}
+                  compact={compact}
                   onClick={() => handleCardClick(card.instance.instanceId, 'action')}
                   selected={false}
                 />

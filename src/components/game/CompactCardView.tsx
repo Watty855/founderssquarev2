@@ -25,6 +25,8 @@ interface CompactCardViewProps {
   discardPickable?: boolean
   /** Solo vs bots during AI turn — show deck-style back; no hover preview. */
   faceDown?: boolean
+  /** Phone hand rail — smaller face so the full fan fits. */
+  compact?: boolean
 }
 
 // Property cards: deep blue tones
@@ -64,10 +66,18 @@ function getCardStyle(card: PropertyCard | ActionCard): {
 }
 
 /** In-hand slot backed like the draw flight — used when bot hands are hidden (solo vs AI). */
-function CompactCardSlotBack({ card }: { card: PropertyCard | ActionCard }) {
+function CompactCardSlotBack({
+  card,
+  width = 110,
+  height = 152,
+}: {
+  card: PropertyCard | ActionCard
+  width?: number
+  height?: number
+}) {
   const variant = card.type === 'property' || card.type === 'anchor' ? 'property' : 'action'
   return (
-    <CardBackFace variant={variant} width={110} height={152} />
+    <CardBackFace variant={variant} width={width} height={height} />
   )
 }
 
@@ -79,10 +89,13 @@ export function CompactCardView({
   taxBuildPickable,
   discardPickable,
   faceDown,
+  compact = false,
 }: CompactCardViewProps) {
+  const cardW = compact ? 72 : 110
+  const cardH = compact ? 100 : 152
   const isProperty = card.type === 'property' || card.type === 'anchor'
   if (faceDown) {
-    return <CompactCardSlotBack card={card} />
+    return <CompactCardSlotBack card={card} width={cardW} height={cardH} />
   }
   const propCard = isProperty ? (card as PropertyCard) : null
   const actCard = !isProperty ? card as ActionCard : null
@@ -118,8 +131,8 @@ export function CompactCardView({
           onClick={onClick}
           style={{
             position: 'relative',
-            width: 110,
-            height: 152,
+            width: cardW,
+            height: cardH,
             borderRadius: 12,
             overflow: 'hidden',
             cursor: 'pointer',

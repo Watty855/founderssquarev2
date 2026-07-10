@@ -14,8 +14,10 @@ import {
 } from '@/components/game/OpeningProTipOverlay'
 import { MotivationalRoundBanner } from '@/components/game/MotivationalRoundBanner'
 import { GameBoard } from '@/components/game/GameBoard'
+import { BoardPinchZoom } from '@/components/game/BoardPinchZoom'
 import { PlayerInfo } from '@/components/game/PlayerInfo'
 import { PlayerHand, type PlayCardsOptions, handCardAnchorKey, handTargetAnchorKey } from '@/components/game/PlayerHand'
+import { useCompactGameLayout } from '@/hooks/use-compact-game-layout'
 import { SidebarHandFlightAnchors } from '@/components/game/SidebarHandFlightAnchors'
 import { RequiredActionBanner, type RequiredAction } from '@/components/game/RequiredActionBanner'
 import { FinalTurnBanner } from '@/components/game/FinalTurnBanner'
@@ -890,6 +892,7 @@ function AppInner() {
   const FINAL_TURN_BANNER_VISIBLE_MS = 5000
   const [showFinalTurnBanner, setShowFinalTurnBanner] = useState(false)
   const [rulesQuickOpen, setRulesQuickOpen] = useState(false)
+  const isCompactLayout = useCompactGameLayout()
 
   useEffect(() => {
     if (motivationalFlashTimerRef.current !== null) {
@@ -6161,19 +6164,19 @@ function AppInner() {
       {/* Header bar */}
       <header style={{
         flexShrink: 0,
-        height: 56,
-        padding: '0 32px',
+        height: isCompactLayout ? 44 : 56,
+        padding: isCompactLayout ? '0 12px' : '0 32px',
         backgroundColor: '#000000',
         borderBottom: '1px solid rgba(255,255,255,0.08)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: isCompactLayout ? 12 : 32 }}>
           <h1
             style={{
               fontFamily: "'Cinzel', 'Space Grotesk', serif",
-              fontSize: 'clamp(16px, 2.2vw, 22px)',
+              fontSize: isCompactLayout ? 13 : 'clamp(16px, 2.2vw, 22px)',
               fontWeight: 800,
               letterSpacing: '0.16em',
               textTransform: 'uppercase',
@@ -6184,19 +6187,19 @@ function AppInner() {
             Founders Square
           </h1>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: isCompactLayout ? 8 : 12 }}>
           <button
             onClick={handleEndTurn}
             disabled={isSpectator || currentPlayer.isAi === true || showOpeningProTip}
             className="btn-ps"
             style={{
-              height: 34,
-              padding: '0 20px',
+              height: isCompactLayout ? 30 : 34,
+              padding: isCompactLayout ? '0 12px' : '0 20px',
               borderRadius: 9999,
               border: '1px solid rgba(255,255,255,0.15)',
               backgroundColor: 'transparent',
               color: '#f0f0f5',
-              fontSize: 12,
+              fontSize: isCompactLayout ? 11 : 12,
               fontWeight: 500,
               cursor: isSpectator || currentPlayer.isAi === true || showOpeningProTip ? 'not-allowed' : 'pointer',
               opacity: isSpectator || currentPlayer.isAi === true || showOpeningProTip ? 0.45 : 1,
@@ -6209,13 +6212,13 @@ function AppInner() {
             data-board-sync-skip-lock
             className="btn-ps"
             style={{
-              height: 34,
-              padding: '0 20px',
+              height: isCompactLayout ? 30 : 34,
+              padding: isCompactLayout ? '0 12px' : '0 20px',
               borderRadius: 9999,
               border: '1px solid rgba(255,255,255,0.15)',
               backgroundColor: 'transparent',
               color: '#f0f0f5',
-              fontSize: 12,
+              fontSize: isCompactLayout ? 11 : 12,
               fontWeight: 500,
               cursor: 'pointer',
               display: 'flex',
@@ -6224,7 +6227,7 @@ function AppInner() {
             }}
           >
             <ArrowCounterClockwise size={13} weight="bold" />
-            New Game
+            {isCompactLayout ? 'New' : 'New Game'}
           </button>
         </div>
       </header>
@@ -6302,12 +6305,117 @@ function AppInner() {
       )}
       </div>
 
-      {/* Main content area */}
+      {/* Main content area — desktop: sidebar + board; phone: board-first column */}
       <div
-        className="flex-1 flex overflow-hidden min-h-0"
+        className={isCompactLayout ? 'flex-1 flex flex-col overflow-hidden min-h-0' : 'flex-1 flex overflow-hidden min-h-0'}
         style={{ pointerEvents: isSpectator ? 'none' : 'auto' }}
       >
-        {/* Left player panel — black chrome with soft charcoal insets */}
+        {/* Players — compact strip on phones; full sidebar on desktop */}
+        {isCompactLayout ? (
+          <div
+            style={{
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '6px 8px',
+              borderBottom: '1px solid rgba(255,255,255,0.08)',
+              background: 'linear-gradient(180deg, #0a0a0a 0%, #121212 100%)',
+              pointerEvents: showOpeningProTip ? 'none' : 'auto',
+              opacity: showOpeningProTip ? 0.55 : 1,
+              overflowX: 'auto',
+              WebkitOverflowScrolling: 'touch',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                flexShrink: 0,
+                ...(isSpectator ? { pointerEvents: 'auto' } : undefined),
+              }}
+            >
+              <button
+                type="button"
+                aria-label="Undo last action"
+                title={
+                  undoLastActionAvailable
+                    ? `Undo: ${safeGameState.undoLastAction?.label ?? 'last action'}`
+                    : 'No action to undo this turn'
+                }
+                disabled={!undoLastActionAvailable}
+                onClick={() => setUndoActionDialogOpen(true)}
+                className={boardHudIconButtonClass}
+                style={{ height: 32, width: 32 }}
+              >
+                <ArrowCounterClockwise size={16} weight="duotone" />
+              </button>
+              <button
+                type="button"
+                aria-label="Open quick rules"
+                title="Quick rules"
+                onClick={() => setRulesQuickOpen(true)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#a8b0c8]"
+              >
+                <BookOpen size={16} weight="duotone" />
+              </button>
+            </div>
+            {safeGameState.players.map((player, index) => {
+              const isActive = index === safeGameState.currentPlayerIndex
+              const stats = calculatePlayerStats(player)
+              return (
+                <div
+                  key={player.id}
+                  style={{
+                    flexShrink: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '5px 10px',
+                    borderRadius: 999,
+                    border: isActive ? `1.5px solid ${player.color}` : '1px solid rgba(255,255,255,0.1)',
+                    background: isActive ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
+                    boxShadow: isActive ? `0 0 12px ${player.color}44` : undefined,
+                    maxWidth: 200,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      backgroundColor: player.color,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: isActive ? player.color : '#f0f0f5',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      maxWidth: 72,
+                    }}
+                  >
+                    {player.name}
+                  </span>
+                  <span style={{ fontSize: 10, color: 'rgba(248,250,252,0.75)', fontVariantNumeric: 'tabular-nums' }}>
+                    ${player.money}M
+                  </span>
+                  {isActive ? (
+                    <span style={{ fontSize: 10, color: '#fef9c3', fontVariantNumeric: 'tabular-nums' }}>
+                      ${stats.income}M/t
+                    </span>
+                  ) : null}
+                  {player.id !== handRailPlayer.id ? <SidebarHandFlightAnchors player={player} /> : null}
+                </div>
+              )
+            })}
+          </div>
+        ) : (
         <aside style={{
           width: 264,
           flexShrink: 0,
@@ -6450,6 +6558,7 @@ function AppInner() {
           })}
           </div>
         </aside>
+        )}
 
         {/* Center board + bottom hand — black surround; cards sit at bottom of screen */}
         <div
@@ -6457,7 +6566,12 @@ function AppInner() {
           style={{ backgroundColor: '#000000' }}
         >
           {/* Board area */}
-          <div className="relative flex-1 flex items-center justify-center overflow-hidden px-3 pt-2 min-h-0">
+          <BoardPinchZoom
+            enabled={isCompactLayout}
+            className="relative flex-1 flex items-center justify-center overflow-hidden min-h-0"
+            style={{ padding: isCompactLayout ? '4px 4px 0' : undefined }}
+          >
+            <div className={isCompactLayout ? 'relative w-full h-full min-h-0 flex items-center justify-center px-1 pt-1' : 'relative flex-1 flex items-center justify-center overflow-hidden px-3 pt-2 min-h-0 w-full h-full'}>
             {showOpeningProTip ? (
               <div
                 aria-hidden
@@ -6593,22 +6707,26 @@ function AppInner() {
                 </div>
               </div>
             )}
-          </div>
+            </div>
+          </BoardPinchZoom>
 
           {/* Bottom hand rail — matches the integrated board layout */}
           <div
-            className="flex-shrink-0 border-t border-[#d8b75a40] px-8 py-5"
+            className={isCompactLayout ? 'flex-shrink-0 border-t border-[#d8b75a40] px-2 py-2' : 'flex-shrink-0 border-t border-[#d8b75a40] px-8 py-5'}
             style={{
               background: 'linear-gradient(180deg, #4a4028 0%, #362e1a 55%, #2a2414 100%)',
               pointerEvents: showOpeningProTip ? 'none' : 'auto',
               opacity: showOpeningProTip ? 0.55 : 1,
               transition: 'opacity 200ms ease',
+              overflowX: isCompactLayout ? 'auto' : undefined,
+              WebkitOverflowScrolling: isCompactLayout ? 'touch' : undefined,
             }}
           >
             <PlayerHand
               player={handRailPlayer}
               opponents={safeGameState.players.filter((_, i) => i !== safeGameState.currentPlayerIndex)}
               handInteractionsActive={handInteractionsActive}
+              compact={isCompactLayout}
               onPlayCards={handlePlayCards}
               onEndTurn={handleEndTurn}
               placementMode={placementMode}
