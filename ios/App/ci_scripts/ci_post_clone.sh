@@ -5,7 +5,8 @@ set -euo pipefail
 # resolve from ../../node_modules, so Node deps must exist before pod install.
 # Runs from ios/App/ci_scripts (cwd). Repo root is CI_PRIMARY_REPOSITORY_PATH.
 
-ROOT="${CI_PRIMARY_REPOSITORY_PATH:-$(cd "$(dirname "$0")/../../.." && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="${CI_PRIMARY_REPOSITORY_PATH:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 cd "$ROOT"
 
 echo "==> Installing Node (Capacitor pods path into node_modules)"
@@ -20,15 +21,21 @@ npm -v
 echo "==> npm ci"
 npm ci
 
-# Bake Vite env from Xcode Cloud environment variables (set in App Store Connect).
+# Prefer workflow/shared env vars from App Store Connect when present;
+# otherwise use committed public client config in ci_scripts/cloud.env.
+CLOUD_ENV="$SCRIPT_DIR/cloud.env"
 if [ -n "${VITE_SUPABASE_URL:-}" ] && [ -n "${VITE_SUPABASE_ANON_KEY:-}" ]; then
-  echo "==> Writing .env from Xcode Cloud secrets"
+  echo "==> Writing .env from Xcode Cloud environment variables"
   cat > .env <<ENV
 VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
 VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
 ENV
+elif [ -f "$CLOUD_ENV" ]; then
+  echo "==> Writing .env from ci_scripts/cloud.env"
+  cp "$CLOUD_ENV" .env
 else
-  echo "==> WARNING: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY not set in Xcode Cloud env; online multiplayer will be disabled in this build."
+  echo "==> ERROR: No Supabase env available for Cloud build." >&2
+  exit 1
 fi
 
 echo "==> Building web bundle + Capacitor sync"
