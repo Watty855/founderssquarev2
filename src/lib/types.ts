@@ -96,6 +96,33 @@ export interface GameState {
     targetName: string
   }
   /**
+   * Online games: a PvP action succeeded and the target must roll to counter.
+   * Scandal, hostile takeover, and police raid use this handoff so the defender's
+   * device (or host for a bot) opens the dice dialog.
+   */
+  pendingRebuttalRoll?: {
+    kind: 'scandal' | 'hostile-takeover' | 'police-raid'
+    targetPlayerId: number
+    attackerPlayerId: number
+    attackerName: string
+    targetName: string
+    actionInstanceId: string
+    scandalContext?: {
+      row: number
+      col: string
+      anchorCardId: string
+      anchorOwnerPlayerId: number
+    }
+    takeoverContext?: {
+      row: number
+      col: string
+      ownerPlayerId: number
+      payment120Million: number
+    }
+    policeRaidInfluenceBonus?: number
+    policeRaidInfluenceLabels?: string[]
+  }
+  /**
    * Player ids who must take a city income tax on their next Income card resolution:
    * they keep max(0, collected − floor(property income total × 50%)); flag clears after that resolution.
    * The founder who played Taxation is never added here.

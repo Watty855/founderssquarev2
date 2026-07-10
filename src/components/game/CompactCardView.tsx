@@ -224,7 +224,7 @@ export function CompactCardView({
                 {propCard.subtitle}
               </p>
             ) : null}
-            {propCard?.district && !propCard.subtitle ? (
+            {propCard?.district && propCard.category !== 'civic' && !propCard.subtitle ? (
               <p style={{
                 fontSize: 8,
                 color: 'rgba(255,255,255,0.4)',

@@ -109,7 +109,7 @@ export function PropertyCardView({ card, className, onClick }: PropertyCardViewP
             {card.subtitle}
           </div>
         ) : null}
-        {card.district && (
+        {card.district && card.category !== 'civic' && (
           <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: card.subtitle ? 6 : 4 }}>
             {card.district}
           </div>

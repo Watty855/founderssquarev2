@@ -1,5 +1,13 @@
 import type { CSSProperties } from 'react'
 
+/** Full illustrated Founders Square board (Mountain / River / Farmland / Railway frame). */
+export const BOARD_ART = {
+  src: '/board/founders-square-board.png',
+  /** Intrinsic pixel size of the artwork — used for aspect-ratio so the image is not stretched. */
+  width: 1672,
+  height: 941,
+} as const
+
 export const CARD_BACK_ART = {
   property: '/cards/property-back.png',
   action: '/cards/action-back.png',

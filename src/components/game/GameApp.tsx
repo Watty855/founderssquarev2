@@ -54,6 +54,7 @@ import {
   playAnchorDropSound,
   playCrowdBooSound,
   playCrowdCheerSound,
+  playInfluenceDwindleSound,
 } from '@/lib/soundEffects'
 import { trySimpleAiMainPhase } from '@/lib/bot/simpleAiTurn'
 import type { SimpleAiTurnHandlers, SimpleAiTurnUi } from '@/lib/bot/simpleAiTurn'
@@ -292,6 +293,9 @@ const nextCardFlightId = (): string => `flight-${++cardFlightCounter}`
 
 /** Sentinel action-instance id for the online council-freeze defense dialog (card already spent). */
 const REMOTE_COUNCIL_FREEZE_DEFENSE_ID = 'remote-council-freeze-defense'
+const REMOTE_REBUTTAL_ROLL_ID = 'remote-rebuttal-roll'
+/** Max cards animated from deck per state tick — matches turn replenish (2 action cards). */
+const MAX_DRAW_FLIGHTS_PER_TICK = 2
 
 /** Queue a face-down draw flight (deck → hand). Hand position should be the current player's hand-target rect. */
 function makeDrawFlight(
@@ -763,6 +767,7 @@ function AppInner() {
     else if (fx.sound === 'income') playIncomeSound()
     else if (fx.sound === 'boo') playCrowdBooSound()
     else if (fx.sound === 'cheer') playCrowdCheerSound()
+    else if (fx.sound === 'dwindle') playInfluenceDwindleSound()
     if (fx.notice) showBoardNotice(fx.notice.title, fx.notice.detail)
   }
 
@@ -814,6 +819,26 @@ function AppInner() {
             'They cannot build properties until they finish their next turn.'
           )
           playCrowdBooSound()
+        }
+      } else if (e.type === 'rebuttal_result') {
+        const kindLabel =
+          e.kind === 'scandal'
+            ? 'Scandal'
+            : e.kind === 'hostile-takeover'
+              ? 'Hostile Takeover'
+              : 'Police Raid on Mafia'
+        if (e.negated) {
+          showBoardNotice(
+            `${kindLabel}: ${e.targetName} rolled ${e.result} — blocked!`,
+            `${e.attackerName}'s play is repelled.`
+          )
+          playCrowdCheerSound()
+        } else {
+          showBoardNotice(
+            `${kindLabel}: ${e.targetName} rolled ${e.result} — ${e.attackerName} succeeds${e.plotLabel ? ` at ${e.plotLabel}` : ''}.`,
+            'Anchor influence is discontinued.'
+          )
+          playInfluenceDwindleSound()
         }
       }
     }
@@ -1013,70 +1038,8 @@ function AppInner() {
 
     const prev = prevFlightStateRef.current
     if (!prev) {
-      // First reconciliation post-setup: animate the starting player's *initial* hand onto the table.
-      const currentPlayerId = cur.players[cur.currentPlayerIndex]?.id
-      if (currentPlayerId == null) {
-        prevFlightStateRef.current = {
-          handByPlayer: curHandByPlayer,
-          propertyDiscardIds: curPropDiscardIds,
-          actionDiscardIds: curActDiscardIds,
-          isSetupComplete: cur.isSetupComplete,
-        }
-        return
-      }
-      const queued: CardFlight[] = []
-      const newlyHidden: string[] = []
-      let staggerIdx = 0
-
-      const propTargetRect = getFlightRect(handTargetAnchorKey(currentPlayerId, 'property'))
-      const actTargetRect = getFlightRect(handTargetAnchorKey(currentPlayerId, 'action'))
-      const propDeckRect = getFlightRect(PROPERTY_DECK_ANCHOR_KEY)
-      const actDeckRect = getFlightRect(ACTION_DECK_ANCHOR_KEY)
-
-      const startingHand = cur.players[cur.currentPlayerIndex]
-      if (startingHand) {
-        startingHand.propertyCards.forEach((inst) => {
-          if (!propDeckRect || !propTargetRect) return
-          const targetRect = resolveHandDrawTargetRect(getFlightRect, currentPlayerId, inst.instanceId, propTargetRect)
-          if (!targetRect) return
-          queued.push(
-            makeDrawFlight(
-              inst,
-              'property',
-              propDeckRect,
-              targetRect,
-              staggerIdx++ * HAND_DRAW_STAGGER_MS,
-              HAND_DRAW_DURATION_SEC
-            )
-          )
-          newlyHidden.push(inst.instanceId)
-        })
-        startingHand.actionCards.forEach((inst) => {
-          if (!actDeckRect || !actTargetRect) return
-          const targetRect = resolveHandDrawTargetRect(getFlightRect, currentPlayerId, inst.instanceId, actTargetRect)
-          if (!targetRect) return
-          queued.push(
-            makeDrawFlight(
-              inst,
-              'action',
-              actDeckRect,
-              targetRect,
-              staggerIdx++ * HAND_DRAW_STAGGER_MS,
-              HAND_DRAW_DURATION_SEC
-            )
-          )
-          newlyHidden.push(inst.instanceId)
-        })
-      }
-      if (queued.length > 0) {
-        setCardFlights((q) => [...q, ...queued])
-        setHiddenInstanceIds((s) => {
-          const next = new Set(s)
-          newlyHidden.forEach((id) => next.add(id))
-          return next
-        })
-      }
-
+      // First reconciliation post-setup: record the starting hand without animating
+      // every card (10 flights looked like a full reshuffle on screen).
       prevFlightStateRef.current = {
         handByPlayer: curHandByPlayer,
         propertyDiscardIds: curPropDiscardIds,
@@ -1163,8 +1126,17 @@ function AppInner() {
       const propDeckRect = getFlightRect(PROPERTY_DECK_ANCHOR_KEY)
       const actDeckRect = getFlightRect(ACTION_DECK_ANCHOR_KEY)
 
-      handRailFounder.propertyCards.forEach((inst) => {
-        if (prevHand?.property.has(inst.instanceId)) return
+      const newPropertyDraws = handRailFounder.propertyCards.filter(
+        (inst) => !prevHand?.property.has(inst.instanceId)
+      )
+      const newActionDraws = handRailFounder.actionCards.filter(
+        (inst) => !prevHand?.action.has(inst.instanceId)
+      )
+      // Only animate the cards drawn this tick (max 2 — matches turn replenish).
+      const propertyToAnimate = newPropertyDraws.slice(-MAX_DRAW_FLIGHTS_PER_TICK)
+      const actionToAnimate = newActionDraws.slice(-MAX_DRAW_FLIGHTS_PER_TICK)
+
+      propertyToAnimate.forEach((inst) => {
         if (!propDeckRect || !propTargetRect) return
         const targetRect = resolveHandDrawTargetRect(getFlightRect, handRailFounder.id, inst.instanceId, propTargetRect)
         if (!targetRect) return
@@ -1180,8 +1152,7 @@ function AppInner() {
         )
         newlyHidden.push(inst.instanceId)
       })
-      handRailFounder.actionCards.forEach((inst) => {
-        if (prevHand?.action.has(inst.instanceId)) return
+      actionToAnimate.forEach((inst) => {
         if (!actDeckRect || !actTargetRect) return
         const targetRect = resolveHandDrawTargetRect(getFlightRect, handRailFounder.id, inst.instanceId, actTargetRect)
         if (!targetRect) return
@@ -1291,6 +1262,146 @@ function AppInner() {
     partyBoardConfig?.role,
     partyBoardSeatPlayer?.id,
   ])
+
+  /** Online rebuttal handoff — scandal, hostile takeover, police raid defender rolls. */
+  const pendingRebuttal = gameState.pendingRebuttalRoll ?? null
+  const pendingRebuttalKey = pendingRebuttal
+    ? `${pendingRebuttal.kind}|${pendingRebuttal.targetPlayerId}|${pendingRebuttal.actionInstanceId}`
+    : ''
+  const announcedRebuttalKeyRef = useRef('')
+  useEffect(() => {
+    const pending = gameState.pendingRebuttalRoll
+    if (!pending) {
+      announcedRebuttalKeyRef.current = ''
+      setRollDieDialogState((prev) =>
+        prev.open &&
+        prev.mode.endsWith('-defender') &&
+        prev.actionInstanceId === REMOTE_REBUTTAL_ROLL_ID
+          ? { open: false, mode: 'roll-die', actionInstanceId: null }
+          : prev
+      )
+      return
+    }
+
+    if (announcedRebuttalKeyRef.current !== pendingRebuttalKey) {
+      announcedRebuttalKeyRef.current = pendingRebuttalKey
+      const kindTitle =
+        pending.kind === 'scandal'
+          ? 'Scandal'
+          : pending.kind === 'hostile-takeover'
+            ? 'Hostile Takeover'
+            : 'Police Raid on Mafia'
+      showBoardNotice(
+        `${kindTitle} — ${pending.targetName} must roll!`,
+        `${pending.attackerName} succeeded. ${pending.targetName} rolls on their own screen.`
+      )
+      broadcastBoardFx({ sound: 'cheer', notice: { title: `${kindTitle} defense roll`, detail: `${pending.targetName} is rolling.` } }, { localEcho: false })
+    }
+
+    const defender = gameState.players.find((p) => p.id === pending.targetPlayerId)
+    const controlsDefender =
+      defender?.isAi === true
+        ? partyBoardConfig?.role === 'host'
+        : partyBoardSeatPlayer?.id === pending.targetPlayerId
+    if (!controlsDefender) return
+
+    const defenderMode =
+      pending.kind === 'scandal'
+        ? 'scandal-defender'
+        : pending.kind === 'hostile-takeover'
+          ? 'hostile-takeover-defender'
+          : 'police-raid-defender'
+
+    setRollDieDialogState((prev) =>
+      prev.open
+        ? prev
+        : {
+            open: true,
+            mode: defenderMode,
+            actionInstanceId: REMOTE_REBUTTAL_ROLL_ID,
+            targetPlayerId: pending.targetPlayerId,
+            influenceBonus: pending.policeRaidInfluenceBonus ?? 0,
+            influenceLabels: pending.policeRaidInfluenceLabels ?? [],
+            scandalContext: pending.scandalContext,
+            takeoverContext: pending.takeoverContext,
+            councilFreezeAttackerRollsCompleted: undefined,
+            councilFreezeAttackerLastNatural: undefined,
+            councilFreezeFailAuto: false,
+            diceRetryNonce: 0,
+            rezoningContext: undefined,
+            removeInvestorsContext: undefined,
+          }
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pendingRebuttalKey,
+    rollDieDialogState.open,
+    partyBoardConfig?.role,
+    partyBoardSeatPlayer?.id,
+  ])
+
+  /** Mirror local dice-dialog drama to every device (attacker rolls, income, etc.). */
+  const announcedLocalDramaKeyRef = useRef('')
+  useEffect(() => {
+    if (!rollDieDialogState.open) {
+      announcedLocalDramaKeyRef.current = ''
+      return
+    }
+    const mode = rollDieDialogState.mode
+    const dramaModes = new Set([
+      'hostile-takeover-attacker',
+      'hostile-takeover-defender',
+      'scandal-attacker',
+      'scandal-defender',
+      'council-freeze-attacker',
+      'council-freeze-defender',
+      'police-raid-attacker',
+      'police-raid-defender',
+      'remove-investors',
+      'rezoning',
+    ])
+    if (!dramaModes.has(mode)) return
+    const key = `${mode}|${rollDieDialogState.diceRetryNonce ?? 0}|${rollDieDialogState.actionInstanceId ?? ''}`
+    if (announcedLocalDramaKeyRef.current === key) return
+    announcedLocalDramaKeyRef.current = key
+    const titles: Record<string, { title: string; detail: string }> = {
+      'hostile-takeover-attacker': { title: 'Hostile Takeover roll', detail: 'Attacker is rolling to seize a rival lot.' },
+      'hostile-takeover-defender': { title: 'Hostile Takeover defense', detail: 'Owner rolls — only a 6 blocks the takeover.' },
+      'scandal-attacker': { title: 'Scandal roll', detail: 'Attacker is rolling to discontinue anchor influence.' },
+      'scandal-defender': { title: 'Scandal defense', detail: 'Anchor owner rolls — only a 6 negates the scandal.' },
+      'council-freeze-attacker': { title: 'City Council Freeze', detail: 'Attacker is rolling to freeze a rival founder.' },
+      'council-freeze-defender': { title: 'Freeze defense roll', detail: 'Frozen founder rolls — only a 6 negates.' },
+      'police-raid-attacker': { title: 'Police Raid on Mafia', detail: 'Attacker is rolling against the Mafia.' },
+      'police-raid-defender': { title: 'Mafia counter roll', detail: 'Mafia owner rolls to repel the raid.' },
+      'remove-investors': { title: 'Remove Investors roll', detail: 'Attacker is rolling to clear investors from a lot.' },
+      'rezoning': { title: 'Rezoning roll', detail: 'Founder is rolling to rezone a vacant lot.' },
+    }
+    const copy = titles[mode]
+    if (copy) {
+      broadcastBoardFx({ notice: copy, sound: mode.includes('defender') ? 'cheer' : 'boo' }, { localEcho: false })
+    }
+  }, [rollDieDialogState.open, rollDieDialogState.mode, rollDieDialogState.diceRetryNonce, rollDieDialogState.actionInstanceId])
+
+  const announcedIncomeKeyRef = useRef('')
+  useEffect(() => {
+    if (!incomeDialogState.open) {
+      announcedIncomeKeyRef.current = ''
+      return
+    }
+    const key = `${incomeDialogState.player?.id ?? ''}|${incomeDialogState.actionInstanceId ?? ''}`
+    if (announcedIncomeKeyRef.current === key) return
+    announcedIncomeKeyRef.current = key
+    broadcastBoardFx(
+      {
+        notice: {
+          title: 'Income resolution',
+          detail: `${incomeDialogState.player?.name ?? 'A founder'} is rolling for income.`,
+        },
+        sound: 'income',
+      },
+      { localEcho: false }
+    )
+  }, [incomeDialogState.open, incomeDialogState.player?.id, incomeDialogState.actionInstanceId, incomeDialogState.player?.name])
 
   const handleSetupComplete = (players: Player[], partyBoard?: PartyBoardSyncMeta) => {
     if (partyBoard) {
@@ -2847,6 +2958,7 @@ function AppInner() {
     !removeInvestorsSelectMode.active &&
     !discardPropertySelectMode.active &&
     safeGameState.pendingCouncilFreezeDefense == null &&
+    safeGameState.pendingRebuttalRoll == null &&
     safeGameState.showNewCardsAnimation !== true
   useEffect(() => {
     if (!safeGameState.isSetupComplete || safeGameState.gameEnded) return
@@ -4508,6 +4620,52 @@ function AppInner() {
       } else {
         toast.success('Successful Take Over. The owner may roll once — only a 6 blocks the takeover.')
       }
+
+      if (isOnlineActor) {
+        const instanceId = dialog.actionInstanceId!
+        patchGameState((current) => {
+          const attacker = current.players[current.currentPlayerIndex]
+          const targetName =
+            current.players.find((p) => p.id === ctx.ownerPlayerId)?.name ?? 'Property owner'
+          return {
+            ...current,
+            pendingRebuttalRoll: {
+              kind: 'hostile-takeover',
+              targetPlayerId: ctx.ownerPlayerId,
+              attackerPlayerId: attacker.id,
+              attackerName: attacker.name,
+              targetName,
+              actionInstanceId: instanceId,
+              takeoverContext: ctx,
+            },
+          }
+        })
+        setRollDieDialogState({
+          open: false,
+          mode: 'roll-die',
+          actionInstanceId: null,
+          targetPlayerId: undefined,
+          influenceBonus: undefined,
+          influenceLabels: undefined,
+          councilFreezeAttackerRollsCompleted: undefined,
+          councilFreezeAttackerLastNatural: undefined,
+          councilFreezeFailAuto: undefined,
+          diceRetryNonce: undefined,
+          takeoverContext: undefined,
+          rezoningContext: undefined,
+          scandalContext: undefined,
+          removeInvestorsContext: undefined,
+        })
+        broadcastBoardFx({
+          notice: {
+            title: 'Hostile Takeover succeeds!',
+            detail: `${ctx.col}${ctx.row} owner must roll a 6 to block.`,
+          },
+          sound: 'boo',
+        })
+        return
+      }
+
       setRollDieDialogState({
         open: true,
         mode: 'hostile-takeover-defender',
@@ -4549,6 +4707,27 @@ function AppInner() {
         return
       }
       const { row, col, ownerPlayerId, payment120Million } = ctx
+
+      if (gameState.pendingRebuttalRoll?.kind === 'hostile-takeover') {
+        sendAction({ type: 'rebuttal_roll', result })
+        setRollDieDialogState({
+          open: false,
+          mode: 'roll-die',
+          actionInstanceId: null,
+          targetPlayerId: undefined,
+          influenceBonus: undefined,
+          influenceLabels: undefined,
+          councilFreezeAttackerRollsCompleted: undefined,
+          councilFreezeAttackerLastNatural: undefined,
+          councilFreezeFailAuto: undefined,
+          diceRetryNonce: undefined,
+          takeoverContext: undefined,
+          rezoningContext: undefined,
+          scandalContext: undefined,
+          removeInvestorsContext: undefined,
+        })
+        return
+      }
 
       if (blocked) {
         toast.success('Rolled 6 — takeover blocked. The property stays with its owner.')
@@ -4641,6 +4820,63 @@ function AppInner() {
       } else {
         toast.success('Scandal roll succeeds. The anchor owner may roll a 6 to negate.')
       }
+
+      if (isOnlineActor && ctx) {
+        const targetId = ctx.anchorOwnerPlayerId
+        patchGameState((current) => {
+          const attacker = current.players[current.currentPlayerIndex]
+          const targetName =
+            current.players.find((p) => p.id === targetId)?.name ?? 'Anchor owner'
+          const inst = attacker.actionCards.find((c) => c.instanceId === instanceId)
+          const updatedActionCards = attacker.actionCards.filter((c) => c.instanceId !== instanceId)
+          const actionDiscardPile = inst ? [...current.actionDiscard, inst] : [...current.actionDiscard]
+          const newState: GameState = {
+            ...current,
+            players: current.players.map((p, idx) =>
+              idx === current.currentPlayerIndex ? { ...p, actionCards: updatedActionCards } : p
+            ),
+            actionDiscard: actionDiscardPile,
+            actionsPlayedThisTurn: current.actionsPlayedThisTurn + 1,
+            turnActionsConsumed: (current.turnActionsConsumed ?? 0) + 1,
+            undoLastAction: undefined,
+            pendingRebuttalRoll: {
+              kind: 'scandal',
+              targetPlayerId: targetId,
+              attackerPlayerId: attacker.id,
+              attackerName: attacker.name,
+              targetName,
+              actionInstanceId: instanceId,
+              scandalContext: ctx,
+            },
+          }
+          return withReplenishedActionHand(newState, current.currentPlayerIndex)
+        })
+        setRollDieDialogState({
+          open: false,
+          mode: 'roll-die',
+          actionInstanceId: null,
+          targetPlayerId: undefined,
+          influenceBonus: undefined,
+          influenceLabels: undefined,
+          councilFreezeAttackerRollsCompleted: undefined,
+          councilFreezeAttackerLastNatural: undefined,
+          councilFreezeFailAuto: undefined,
+          diceRetryNonce: undefined,
+          takeoverContext: undefined,
+          rezoningContext: undefined,
+          scandalContext: undefined,
+          removeInvestorsContext: undefined,
+        })
+        broadcastBoardFx({
+          notice: {
+            title: 'Scandal succeeds!',
+            detail: `${ctx.col}${ctx.row} anchor owner must roll a 6 to negate.`,
+          },
+          sound: 'boo',
+        })
+        return
+      }
+
       setRollDieDialogState({
         open: true,
         mode: 'scandal-defender',
@@ -4667,6 +4903,26 @@ function AppInner() {
         finalizeScandalCardSpent(instanceId)
         return
       }
+      if (gameState.pendingRebuttalRoll?.kind === 'scandal') {
+        sendAction({ type: 'rebuttal_roll', result })
+        setRollDieDialogState({
+          open: false,
+          mode: 'roll-die',
+          actionInstanceId: null,
+          targetPlayerId: undefined,
+          influenceBonus: undefined,
+          influenceLabels: undefined,
+          councilFreezeAttackerRollsCompleted: undefined,
+          councilFreezeAttackerLastNatural: undefined,
+          councilFreezeFailAuto: undefined,
+          diceRetryNonce: undefined,
+          takeoverContext: undefined,
+          rezoningContext: undefined,
+          scandalContext: undefined,
+          removeInvestorsContext: undefined,
+        })
+        return
+      }
       if (negated) {
         toast.success('Rolled 6 — scandal negated. The anchor keeps its influence.')
       } else {
@@ -4683,6 +4939,13 @@ function AppInner() {
             toast.success(`Influence discontinued for ${anchorName} at ${ctx.col}${ctx.row}.`)
           }, 0)
           return { ...current, plots: newPlots }
+        })
+        broadcastBoardFx({
+          notice: {
+            title: 'Anchor influence discontinued',
+            detail: `${ctx.col}${ctx.row} — scandal succeeds.`,
+          },
+          sound: 'dwindle',
         })
       }
       finalizeScandalCardSpent(instanceId)
@@ -4919,6 +5182,56 @@ function AppInner() {
         return
       }
       /** Counter roll: Mafia owner rolls one. Needs 6 if attacker had no raid influence; 5–6 if attacker had +1 from Police/City Hall/Courthouse. */
+      const mafiaOwnerId = safeGameState.plots.find(
+        (p) => p.builtProperty === 'mafia' && p.claimedBy != null
+      )?.claimedBy
+
+      if (isOnlineActor && mafiaOwnerId != null) {
+        patchGameState((current) => {
+          const attacker = current.players[current.currentPlayerIndex]
+          const targetName =
+            current.players.find((p) => p.id === mafiaOwnerId)?.name ?? 'Mafia owner'
+          return {
+            ...current,
+            pendingRebuttalRoll: {
+              kind: 'police-raid',
+              targetPlayerId: mafiaOwnerId,
+              attackerPlayerId: attacker.id,
+              attackerName: attacker.name,
+              targetName,
+              actionInstanceId: instanceId!,
+              policeRaidInfluenceBonus: bonus,
+              policeRaidInfluenceLabels: dialog.influenceLabels ?? [],
+            },
+          }
+        })
+        setRollDieDialogState({
+          open: false,
+          mode: 'roll-die',
+          actionInstanceId: null,
+          targetPlayerId: undefined,
+          influenceBonus: undefined,
+          influenceLabels: undefined,
+          councilFreezeAttackerRollsCompleted: undefined,
+          councilFreezeAttackerLastNatural: undefined,
+          councilFreezeFailAuto: undefined,
+          diceRetryNonce: undefined,
+          takeoverContext: undefined,
+          rezoningContext: undefined,
+          scandalContext: undefined,
+          removeInvestorsContext: undefined,
+        })
+        broadcastBoardFx({
+          notice: {
+            title: 'Police Raid succeeds!',
+            detail: 'Mafia owner must roll to counter the raid.',
+          },
+          sound: 'boo',
+        })
+        toast.success(`Police Raid succeeds (${result}${bonus > 0 ? ` + ${bonus}` : ''}). Mafia rolls to counter.`)
+        return
+      }
+
       setRollDieDialogState({
         open: true,
         mode: 'police-raid-defender',
@@ -4944,6 +5257,51 @@ function AppInner() {
       /** Attacker had raid influence (+1 max) if bonus > 0 — defender then needs 5–6 to counter. Otherwise only a 6 counters. */
       const counterThreshold = bonus > 0 ? 5 : 6
       const counters = result >= counterThreshold
+
+      if (gameState.pendingRebuttalRoll?.kind === 'police-raid') {
+        sendAction({ type: 'rebuttal_roll', result })
+        setRollDieDialogState({
+          open: false,
+          mode: 'roll-die',
+          actionInstanceId: null,
+          targetPlayerId: undefined,
+          influenceBonus: undefined,
+          influenceLabels: undefined,
+          councilFreezeAttackerRollsCompleted: undefined,
+          councilFreezeAttackerLastNatural: undefined,
+          councilFreezeFailAuto: undefined,
+          diceRetryNonce: undefined,
+          takeoverContext: undefined,
+          rezoningContext: undefined,
+          scandalContext: undefined,
+          removeInvestorsContext: undefined,
+        })
+        return
+      }
+
+      if (!counters) {
+        const mafiaOwnerId = safeGameState.plots.find(
+          (p) => p.builtProperty === 'mafia' && p.claimedBy != null
+        )?.claimedBy
+        if (mafiaOwnerId != null) {
+          patchGameState((current) => ({
+            ...current,
+            plots: current.plots.map((p) =>
+              p.builtProperty === 'mafia' && p.claimedBy === mafiaOwnerId
+                ? { ...p, anchorInfluenceSuppressed: true }
+                : p
+            ),
+          }))
+          broadcastBoardFx({
+            notice: {
+              title: 'Mafia influence discontinued',
+              detail: 'Police Raid succeeds — Mafia anchor color fades from the board.',
+            },
+            sound: 'dwindle',
+          })
+        }
+      }
+
       finalizeSimpleActionResolution(dialog.actionInstanceId, {
         type: counters ? 'info' : 'success',
         text: counters
@@ -5523,6 +5881,22 @@ function AppInner() {
         ctaLabel: 'Waiting for their roll',
       }
     }
+    if (safeGameState.pendingRebuttalRoll) {
+      const pending = safeGameState.pendingRebuttalRoll
+      const kindTitle =
+        pending.kind === 'scandal'
+          ? 'Scandal'
+          : pending.kind === 'hostile-takeover'
+            ? 'Hostile Takeover'
+            : 'Police Raid on Mafia'
+      return {
+        id: 'rebuttal-wait',
+        title: `${kindTitle} — ${pending.targetName} is rolling`,
+        detail: `${pending.attackerName}'s play succeeded. ${pending.targetName} rolls on their own screen.`,
+        tone: 'danger',
+        ctaLabel: 'Waiting for their roll',
+      }
+    }
     if (incomeDialogState.open) {
       return {
         id: 'income',
@@ -5782,21 +6156,31 @@ function AppInner() {
               }
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden game-table">
-      <div style={{ flexShrink: 0 }}>
+    <div className="h-screen flex flex-col overflow-hidden game-table" style={{ backgroundColor: '#000000' }}>
+      <div style={{ flexShrink: 0, backgroundColor: '#000000' }}>
       {/* Header bar */}
       <header style={{
         flexShrink: 0,
         height: 56,
         padding: '0 32px',
-        backgroundColor: '#0a0a0f',
+        backgroundColor: '#000000',
         borderBottom: '1px solid rgba(255,255,255,0.08)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 300, letterSpacing: '0.03em', color: 'rgba(240,240,245,0.9)', margin: 0 }}>
+          <h1
+            style={{
+              fontFamily: "'Cinzel', 'Space Grotesk', serif",
+              fontSize: 'clamp(16px, 2.2vw, 22px)',
+              fontWeight: 800,
+              letterSpacing: '0.16em',
+              textTransform: 'uppercase',
+              color: '#f0f0f5',
+              margin: 0,
+            }}
+          >
             Founders Square
           </h1>
         </div>
@@ -5923,14 +6307,14 @@ function AppInner() {
         className="flex-1 flex overflow-hidden min-h-0"
         style={{ pointerEvents: isSpectator ? 'none' : 'auto' }}
       >
-        {/* Left player panel — river blue with contrasting stat insets */}
+        {/* Left player panel — black chrome with soft charcoal insets */}
         <aside style={{
           width: 264,
           flexShrink: 0,
           padding: 24,
           overflowY: 'auto',
-          borderRight: '1px solid rgba(74, 154, 208, 0.3)',
-          background: 'linear-gradient(180deg, #061a30 0%, #0f3a5e 52%, #071f39 100%)',
+          borderRight: '1px solid rgba(255, 255, 255, 0.08)',
+          background: 'linear-gradient(180deg, #0a0a0a 0%, #121212 52%, #080808 100%)',
           pointerEvents: showOpeningProTip ? 'none' : 'auto',
           opacity: showOpeningProTip ? 0.55 : 1,
           transition: 'opacity 200ms ease',
@@ -5942,7 +6326,7 @@ function AppInner() {
               fontWeight: 600,
               letterSpacing: '0.14em',
               textTransform: 'uppercase' as const,
-              color: 'rgba(186, 230, 253, 0.72)',
+              color: 'rgba(226, 232, 240, 0.55)',
             }}>
               Players
             </span>
@@ -6037,9 +6421,9 @@ function AppInner() {
                     marginTop: isActive ? 14 : 12,
                     padding: '10px 12px',
                     borderRadius: 8,
-                    backgroundColor: isActive ? 'rgba(0, 0, 0, 0.32)' : 'rgba(0, 0, 0, 0.2)',
-                    border: '1px solid rgba(74, 154, 208, 0.32)',
-                    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.07)',
+                    backgroundColor: isActive ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 8,
@@ -6048,15 +6432,15 @@ function AppInner() {
                   aria-hidden
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: 'rgba(186, 230, 253, 0.78)', fontWeight: 500 }}>Cash</span>
-                    <span style={{ fontWeight: 600, color: '#f0f9ff', fontVariantNumeric: 'tabular-nums' }}>${player.money}M</span>
+                    <span style={{ color: 'rgba(226, 232, 240, 0.62)', fontWeight: 500 }}>Cash</span>
+                    <span style={{ fontWeight: 600, color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>${player.money}M</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: 'rgba(186, 230, 253, 0.78)', fontWeight: 500 }}>Property</span>
-                    <span style={{ fontWeight: 600, color: '#f0f9ff', fontVariantNumeric: 'tabular-nums' }}>${stats.propertyValue}M</span>
+                    <span style={{ color: 'rgba(226, 232, 240, 0.62)', fontWeight: 500 }}>Property</span>
+                    <span style={{ fontWeight: 600, color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>${stats.propertyValue}M</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: 'rgba(186, 230, 253, 0.78)', fontWeight: 500 }}>Income</span>
+                    <span style={{ color: 'rgba(226, 232, 240, 0.62)', fontWeight: 500 }}>Income</span>
                     <span style={{ fontWeight: 600, color: '#fef9c3', fontVariantNumeric: 'tabular-nums' }}>${stats.income}M/turn</span>
                   </div>
                 </div>
@@ -6067,10 +6451,13 @@ function AppInner() {
           </div>
         </aside>
 
-        {/* Center board + bottom hand */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Center board + bottom hand — black surround; cards sit at bottom of screen */}
+        <div
+          className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0"
+          style={{ backgroundColor: '#000000' }}
+        >
           {/* Board area */}
-          <div className="relative flex-1 flex items-center justify-center overflow-auto p-6 min-h-0">
+          <div className="relative flex-1 flex items-center justify-center overflow-hidden px-3 pt-2 min-h-0">
             {showOpeningProTip ? (
               <div
                 aria-hidden
@@ -6079,7 +6466,7 @@ function AppInner() {
               />
             ) : null}
             <div
-              className="relative w-full flex justify-center"
+              className="relative w-full h-full min-h-0 flex items-center justify-center"
               style={{ zIndex: showOpeningProTip ? 45 : undefined }}
             >
             <GameBoard
@@ -6208,8 +6595,7 @@ function AppInner() {
             )}
           </div>
 
-          {/* Bottom player hand. Each deck pile is rendered inside PlayerHand, flanking its matching
-              section: [Property Deck] [Property Fan] [Action Fan] [Action Deck]. */}
+          {/* Bottom hand rail — matches the integrated board layout */}
           <div
             className="flex-shrink-0 border-t border-[#d8b75a40] px-8 py-5"
             style={{

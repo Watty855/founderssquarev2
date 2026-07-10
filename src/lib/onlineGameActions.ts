@@ -45,6 +45,8 @@ export type GameAction =
   | { type: 'discard_action_cards'; instanceIds: string[] }
   /** The council-freeze target's device reports their negate roll (6 negates the freeze). */
   | { type: 'council_freeze_defense'; result: number }
+  /** PvP rebuttal roll (scandal / hostile takeover / police raid) reported by the defender's device. */
+  | { type: 'rebuttal_roll'; result: number }
 
 export type GameEvent =
   | { type: 'discard_required'; numToDiscard: number }
@@ -54,10 +56,20 @@ export type GameEvent =
   | { type: 'toast'; level: 'info' | 'success' | 'error'; message: string }
   /** Council-freeze negate roll resolved — announced with sound on every device. */
   | { type: 'council_freeze_result'; targetName: string; result: number; negated: boolean }
+  /** Scandal / takeover / police-raid rebuttal resolved on every device. */
+  | {
+      type: 'rebuttal_result'
+      kind: 'scandal' | 'hostile-takeover' | 'police-raid'
+      targetName: string
+      attackerName: string
+      result: number
+      negated: boolean
+      plotLabel?: string
+    }
 
 /** Fire-and-forget effects (sounds / board notices) mirrored to every device on the board channel. */
 export type BoardFx = {
-  sound?: 'construction' | 'anchor' | 'income' | 'boo' | 'cheer'
+  sound?: 'construction' | 'anchor' | 'income' | 'boo' | 'cheer' | 'dwindle'
   notice?: { title: string; detail?: string }
 }
 

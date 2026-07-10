@@ -10,6 +10,49 @@ import { applyEndTurn, applyAnimationFlagsClear } from '@/lib/gameEngine/applyEn
 import { attachUndoSnapshotIfTurnAction } from '@/lib/undoLastAction'
 import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
+import { buildEndGameTriggerPatch } from '@/lib/gameEngine/statePatches'
+import { replenishCurrentPlayerActionHand, turnLimitReached } from '@/lib/turnActions'
+
+function verifyDefenderSeat(
+  state: GameState,
+  ctx: ApplyActionContext,
+  targetPlayerId: number
+): { ok: true; defenderIdx: number } | { ok: false; result: ApplyGameActionResult } {
+  const defenderIdx = state.players.findIndex((p) => p.id === targetPlayerId)
+  const defender = state.players[defenderIdx]
+  if (!defender) {
+    return { ok: false, result: { ok: false, error: 'Defender seat not found.', code: 'bad_defender' } }
+  }
+  if (defender.isAi) {
+    if (!ctx.senderIsHost) {
+      return { ok: false, result: { ok: false, error: 'AI seats are driven by the host.', code: 'ai_seat' } }
+    }
+  } else {
+    const senderIdx = findHostSeatIndexForConnection(state, ctx.senderConnectionId)
+    if (senderIdx !== defenderIdx) {
+      return { ok: false, result: { ok: false, error: 'Only the defending founder may roll.', code: 'wrong_defender' } }
+    }
+  }
+  return { ok: true, defenderIdx }
+}
+
+function spendActionCard(state: GameState, instanceId: string): GameState {
+  const cpIdx = state.currentPlayerIndex
+  const p = state.players[cpIdx]
+  const inst = p.actionCards.find((c) => c.instanceId === instanceId)
+  const updatedActionCards = p.actionCards.filter((c) => c.instanceId !== instanceId)
+  const actionDiscardPile = inst ? [...state.actionDiscard, inst] : [...state.actionDiscard]
+  return {
+    ...state,
+    players: state.players.map((pl, i) =>
+      i === cpIdx ? { ...pl, actionCards: updatedActionCards } : pl
+    ),
+    actionDiscard: actionDiscardPile,
+    actionsPlayedThisTurn: state.actionsPlayedThisTurn + 1,
+    turnActionsConsumed: (state.turnActionsConsumed ?? 0) + 1,
+    undoLastAction: undefined,
+  }
+}
 
 export type ApplyActionContext = {
   senderConnectionId: string
@@ -138,6 +181,112 @@ export function applyGameAction(
             targetName: pending.targetName,
             result,
             negated,
+          },
+        ],
+      }
+    }
+
+    case 'rebuttal_roll': {
+      const pending = state.pendingRebuttalRoll
+      if (!pending) {
+        return { ok: false, error: 'No rebuttal roll is pending.', code: 'no_pending_rebuttal' }
+      }
+      const seat = verifyDefenderSeat(state, ctx, pending.targetPlayerId)
+      if (!seat.ok) return seat.result
+      const result = Math.round(action.result)
+      if (!(result >= 1 && result <= 6)) {
+        return { ok: false, error: 'Invalid die result.', code: 'bad_roll' }
+      }
+
+      let negated = false
+      let next: GameState = { ...state, pendingRebuttalRoll: undefined }
+
+      if (pending.kind === 'scandal') {
+        negated = result === 6
+        const ctxScandal = pending.scandalContext
+        if (!negated && ctxScandal) {
+          const plotIndex = next.plots.findIndex((p) => p.row === ctxScandal.row && p.col === ctxScandal.col)
+          if (plotIndex >= 0) {
+            const plot = next.plots[plotIndex]
+            if (plot.builtProperty === ctxScandal.anchorCardId) {
+              const newPlots = [...next.plots]
+              newPlots[plotIndex] = { ...plot, anchorInfluenceSuppressed: true }
+              next = { ...next, plots: newPlots }
+            }
+          }
+        }
+      } else if (pending.kind === 'hostile-takeover') {
+        negated = result === 6
+        const ctxTakeover = pending.takeoverContext
+        if (!negated && ctxTakeover) {
+          const cpIdx = next.currentPlayerIndex
+          const attacker = next.players[cpIdx]
+          const ownerIdx = next.players.findIndex((p) => p.id === ctxTakeover.ownerPlayerId)
+          const plotIndex = next.plots.findIndex((p) => p.row === ctxTakeover.row && p.col === ctxTakeover.col)
+          if (plotIndex >= 0 && ownerIdx >= 0 && attacker.money >= ctxTakeover.payment120Million) {
+            const plot = next.plots[plotIndex]
+            if (plot.claimedBy === ctxTakeover.ownerPlayerId) {
+              const newPlots = [...next.plots]
+              newPlots[plotIndex] = {
+                ...plot,
+                claimedBy: attacker.id,
+                investmentStripes: undefined,
+              }
+              const players = next.players.map((p, i) => {
+                if (i === cpIdx) return { ...p, money: p.money - ctxTakeover.payment120Million }
+                if (i === ownerIdx) return { ...p, money: p.money + ctxTakeover.payment120Million }
+                return p
+              })
+              const baseUpdate: GameState = { ...next, players, plots: newPlots }
+              const triggerPatch = buildEndGameTriggerPatch(next, newPlots, {
+                row: ctxTakeover.row,
+                col: ctxTakeover.col,
+              })
+              next = { ...baseUpdate, ...triggerPatch }
+            }
+          }
+        }
+        next = spendActionCard(next, pending.actionInstanceId)
+        if (turnLimitReached(next.turnActionsConsumed ?? 0)) {
+          // End turn scheduling is client-side; authority only marks consumption.
+        }
+        next = replenishCurrentPlayerActionHand(next, next.currentPlayerIndex).state
+      } else if (pending.kind === 'police-raid') {
+        const bonus = pending.policeRaidInfluenceBonus ?? 0
+        const counterThreshold = bonus > 0 ? 5 : 6
+        negated = result >= counterThreshold
+        if (!negated) {
+          const mafiaOwnerId = pending.targetPlayerId
+          const newPlots = next.plots.map((p) =>
+            p.builtProperty === 'mafia' && p.claimedBy === mafiaOwnerId
+              ? { ...p, anchorInfluenceSuppressed: true }
+              : p
+          )
+          next = { ...next, plots: newPlots }
+        }
+        next = spendActionCard(next, pending.actionInstanceId)
+        next = replenishCurrentPlayerActionHand(next, next.currentPlayerIndex).state
+      }
+
+      const plotLabel =
+        pending.kind === 'scandal' && pending.scandalContext
+          ? `${pending.scandalContext.col}${pending.scandalContext.row}`
+          : pending.kind === 'hostile-takeover' && pending.takeoverContext
+            ? `${pending.takeoverContext.col}${pending.takeoverContext.row}`
+            : undefined
+
+      return {
+        ok: true,
+        state: next,
+        events: [
+          {
+            type: 'rebuttal_result',
+            kind: pending.kind,
+            targetName: pending.targetName,
+            attackerName: pending.attackerName,
+            result,
+            negated,
+            plotLabel,
           },
         ],
       }

@@ -266,6 +266,41 @@ export const playAnchorDropSound = () => {
   playTone(ctx, { start: landT + 0.08, duration: 0.7, gain: 0.07, type: 'triangle', from: 392, to: 380, curve: 'linear' })
 }
 
+/* ───────────────────────── Influence dwindling — anchor scandal / raid ───────────────────────── */
+
+/** Fading chain rattle + descending tone when anchor influence is discontinued. */
+export const playInfluenceDwindleSound = () => {
+  const ctx = getAudioContext()
+  if (!ctx) return
+  const now = ctx.currentTime
+
+  for (let i = 0; i < 6; i++) {
+    const t = now + i * 0.11
+    const f = 1400 - i * 120 + Math.random() * 80
+    playNoise(ctx, {
+      start: t,
+      duration: 0.04,
+      gain: 0.07 - i * 0.008,
+      filterType: 'bandpass',
+      frequency: f,
+      q: 5,
+      gainCurve: 'hit',
+    })
+    playTone(ctx, { start: t, duration: 0.05, gain: 0.035 - i * 0.004, type: 'triangle', from: f * 0.45, to: f * 0.3 })
+  }
+
+  playTone(ctx, { start: now + 0.35, duration: 0.9, gain: 0.12, type: 'sine', from: 220, to: 72 })
+  playNoise(ctx, {
+    start: now + 0.4,
+    duration: 0.7,
+    gain: 0.08,
+    filterType: 'lowpass',
+    frequency: 480,
+    gainCurve: 'fade',
+    playbackRate: 0.65,
+  })
+}
+
 /* ───────────────────────── Legacy aliases (existing call sites) ───────────────────────── */
 
 export const playIncomeSound = () => playCashRegisterSound()

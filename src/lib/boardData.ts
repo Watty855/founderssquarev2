@@ -1,11 +1,17 @@
 import { Plot } from './types'
 import { buildingData, civicVariantByCell, lotCategoryData } from './boardLotData'
 
+/** Empty city lots ringing the cathedral — styled as church grounds on the board. */
+export const CHURCH_SURROUND_CELLS = new Set([
+  'J10', 'K10', 'L10', 'J11', 'L11', 'J12', 'K12', 'L12',
+])
+export const CHURCH_BLOCK_CELLS = new Set([...CHURCH_SURROUND_CELLS, 'K11'])
+
 export const createInitialBoard = (): Plot[] => {
   const plots: Plot[] = []
 
   // Church area: empty city plots around the cathedral
-  const churchEmptyCells = new Set(['J10', 'K10', 'L10', 'J11', 'L11', 'J12', 'K12', 'L12'])
+  const churchEmptyCells = CHURCH_SURROUND_CELLS
 
   const COLUMNS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U']
   const STREET_ROWS = [5, 9, 13, 17]

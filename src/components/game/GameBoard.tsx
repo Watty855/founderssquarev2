@@ -3,15 +3,29 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Plot, Player, COLUMNS } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { getPlotDistricts, DISTRICTS } from '@/lib/districts'
+import { getPlotDistricts } from '@/lib/districts'
+import { CHURCH_SURROUND_CELLS, CHURCH_BLOCK_CELLS } from '@/lib/boardData'
 import { propertyCards } from '@/lib/cardData'
 import { getPlotBoardLetter } from '@/lib/lotCategory'
+import { BOARD_ART } from '@/lib/boardArt'
 
-/** Unified light blueprint tint for every named zoning district (lighter than border “River” cells ~#0e3560). */
+/** When true, the illustrated board image is the visual base; cells are interactive overlays.
+ *  Kept off so builds, claim colors, and lot labels render as the integrated CSS board. */
+const USE_BOARD_ART = false
+
+/** Blueprint lot palette — used only when board art is off. */
+const BLUEPRINT_LOT_BG = '#c5daf0'
+const BLUEPRINT_LOT_BORDER = '#7aa8c8'
+const BLUEPRINT_LOT_TEXT = '#0a0a0a'
+const LOT_LABEL_FONT = "'Cinzel', 'Space Grotesk', serif"
+/** Church 3×3 block (J10–L12) — shared green with the cathedral center cell. */
+const CHURCH_BLOCK_FILL = 'linear-gradient(135deg, #1f5c34 0%, #0d3018 100%)'
+
+/** Unified light blueprint tint for every named zoning district. */
 const DISTRICT_ZONE_STYLE = {
-  bg: '#d5e6f4',
-  border: '#8eb4cc',
-  text: '#3d5a73',
+  bg: '#bdd4eb',
+  border: '#6d9ec4',
+  text: BLUEPRINT_LOT_TEXT,
 } as const
 
 /** Named "[Player] Square" — entire 3×3 city block owned by one founder. */
@@ -72,6 +86,29 @@ interface GameBoardProps {
 const STREET_COLS = new Set(['E', 'I', 'M', 'Q'])
 const STREET_ROWS = new Set([5, 9, 13, 17])
 
+/** Lot title font — small Cinzel so letter + full name fit inside the cell. */
+function lotTitleFontSize(title: string, opts?: { anchor?: boolean; multiline?: boolean }) {
+  const len = title.length
+  const words = title.trim().split(/\s+/).length
+  if (opts?.anchor) return len > 16 ? 'clamp(4px, 0.52vw, 5.5px)' : 'clamp(4.5px, 0.56vw, 6px)'
+  if (opts?.multiline) return 'clamp(4px, 0.52vw, 5.5px)'
+  if (len > 20 || words >= 3) return 'clamp(3.5px, 0.48vw, 5px)'
+  if (len > 14 || words >= 2) return 'clamp(4px, 0.52vw, 5.5px)'
+  if (len > 10) return 'clamp(4.5px, 0.56vw, 6px)'
+  return 'clamp(5px, 0.62vw, 6.5px)'
+}
+
+function lotLetterFontSize(letter: string) {
+  return letter.length > 1 ? 'clamp(4px, 0.5vw, 5.5px)' : 'clamp(4.5px, 0.55vw, 6px)'
+}
+
+/** Border terrain label — fits narrow strips along the board edge. */
+function borderLabelFontSize(terrain: string, vertical: boolean) {
+  const len = terrain.length
+  if (vertical) return len > 7 ? 'clamp(5px, 0.55vw, 6.5px)' : 'clamp(5.5px, 0.6vw, 7px)'
+  return len > 8 ? 'clamp(5px, 0.6vw, 6.5px)' : 'clamp(5.5px, 0.65vw, 7.5px)'
+}
+
 // Border terrain colors — rich and distinct
 const BORDER_STYLES: Record<string, { bg: string; pattern?: string; accent: string }> = {
   'Mountain': { bg: '#3a2e1e', pattern: 'mountain', accent: '#8a7a5a' },
@@ -117,6 +154,8 @@ export function GameBoard({
    */
   const prevBuiltKeysRef = useRef<Set<string> | null>(null)
   const [elevatingCells, setElevatingCells] = useState<Set<string>>(() => new Set())
+  const prevSuppressedKeysRef = useRef<Set<string> | null>(null)
+  const [fadingAnchorCells, setFadingAnchorCells] = useState<Set<string>>(() => new Set())
   useEffect(() => {
     const builtNow = new Set<string>()
     for (const p of plots) {
@@ -141,7 +180,38 @@ export function GameBoard({
     return () => window.clearTimeout(t)
   }, [plots])
 
+  useEffect(() => {
+    const curKeys = new Set(
+      plots.filter((p) => p.anchorInfluenceSuppressed).map((p) => `${p.col}${p.row}`)
+    )
+    const prev = prevSuppressedKeysRef.current
+    prevSuppressedKeysRef.current = curKeys
+    if (!prev) return
+    const fresh: string[] = []
+    curKeys.forEach((k) => {
+      if (!prev.has(k)) fresh.push(k)
+    })
+    if (fresh.length === 0) return
+    setFadingAnchorCells((cur) => new Set([...cur, ...fresh]))
+    const t = window.setTimeout(() => {
+      setFadingAnchorCells((cur) => {
+        const next = new Set(cur)
+        for (const k of fresh) next.delete(k)
+        return next
+      })
+    }, 1600)
+    return () => window.clearTimeout(t)
+  }, [plots])
+
   const getPlotStyle = (plot: Plot): React.CSSProperties => {
+    if (plot.anchorInfluenceSuppressed) {
+      return {
+        backgroundColor: '#1e1e28',
+        boxShadow: 'inset 0 0 10px rgba(0,0,0,0.55)',
+        opacity: 0.82,
+        filter: 'saturate(0.35) brightness(0.88)',
+      }
+    }
     if (plot.claimedBy !== undefined) {
       const player = players.find(p => p.id === plot.claimedBy)
       if (player) {
@@ -211,22 +281,42 @@ export function GameBoard({
     }
   }
 
-  // Grid sizing
+  // Grid sizing — with board art, use equal fr tracks so the image maps evenly across the grid.
   const colTemplate = COLUMNS.map(col => {
-    if (col === 'A' || col === 'U') return '36px'
+    if (USE_BOARD_ART) {
+      if (STREET_COLS.has(col)) return '0.12fr'
+      if (col === 'A' || col === 'U') return '0.85fr'
+      return '1fr'
+    }
+    if (col === 'A' || col === 'U') return '44px'
     if (STREET_COLS.has(col)) return '4px'
     return '1fr'
   }).join(' ')
 
   const rows = Array.from({ length: 21 }, (_, i) => i + 1)
   const rowTemplate = rows.map(row => {
-    if (row === 1 || row === 21) return '24px'
+    if (USE_BOARD_ART) {
+      if (STREET_ROWS.has(row)) return '0.12fr'
+      if (row === 1 || row === 21) return '0.85fr'
+      return '1fr'
+    }
+    if (row === 1 || row === 21) return '32px'
     if (STREET_ROWS.has(row)) return '4px'
     return '1fr'
   }).join(' ')
 
   return (
-    <div>
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
       <style>{`
         @keyframes fsBuildElevate {
           0%   { transform: translate(0, 0) scale(1); filter: drop-shadow(0 0 0 rgba(0,0,0,0)); }
@@ -234,22 +324,31 @@ export function GameBoard({
           60%  { transform: translate(3px, -6px) scale(1.16); filter: drop-shadow(-9px 11px 10px rgba(0,0,0,0.55)) brightness(1.1); }
           100% { transform: translate(0, 0) scale(1); filter: drop-shadow(0 0 0 rgba(0,0,0,0)); }
         }
+        @keyframes fsAnchorInfluenceFade {
+          0%   { filter: saturate(1) brightness(1); opacity: 1; }
+          100% { filter: saturate(0.35) brightness(0.88); opacity: 0.82; }
+        }
         @keyframes fsMastheadShimmer {
           0%, 100% { background-position: 0% 50%; }
           50%      { background-position: 100% 50%; }
         }
+        @media (max-width: 767px) {
+          .fs-board-masthead { display: none !important; }
+        }
       `}</style>
 
-      {/* Masthead — Founders Square title */}
+      {/* Masthead — Founders Square title above the board */}
       <div
         aria-label="Founders Square"
+        className="fs-board-masthead"
         style={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           gap: 2,
-          margin: '0 auto 10px',
+          margin: '0 auto 8px',
           maxWidth: 1400,
+          flexShrink: 0,
           userSelect: 'none',
         }}
       >
@@ -304,24 +403,50 @@ export function GameBoard({
         style={{
           position: 'relative',
           width: '100%',
-          maxWidth: 1400,
-          ...(boardDockHud != null || boardActionStrip != null ? { paddingBottom: boardActionStrip != null ? 44 : 8 } : {}),
+          flex: USE_BOARD_ART ? '1 1 auto' : undefined,
+          height: USE_BOARD_ART ? undefined : undefined,
+          maxWidth: 1600,
+          maxHeight: USE_BOARD_ART ? '100%' : undefined,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: 0,
+          containerType: USE_BOARD_ART ? 'size' : undefined,
+          ...(boardDockHud != null || boardActionStrip != null
+            ? { paddingBottom: boardActionStrip != null ? 44 : 8 }
+            : {}),
         }}
       >
         <div
+          className={USE_BOARD_ART ? 'fs-board-art-surface' : undefined}
           style={{
             display: 'grid',
             gridTemplateColumns: colTemplate,
             gridTemplateRows: rowTemplate,
-            maxWidth: 1400,
-            maxHeight: 'calc(100vh - 280px)',
-            width: '100%',
-            aspectRatio: '21 / 9',
+            ...(USE_BOARD_ART
+              ? {
+                  // Largest size that fits the container while keeping art aspect ratio.
+                  width: 'min(100cqw, calc(100cqh * 1672 / 941))',
+                  height: 'auto',
+                  aspectRatio: `${BOARD_ART.width} / ${BOARD_ART.height}`,
+                  backgroundImage: `url(${BOARD_ART.src})`,
+                  backgroundSize: '100% 100%',
+                  backgroundPosition: 'center',
+                  backgroundRepeat: 'no-repeat',
+                }
+              : {
+                  width: '100%',
+                  maxWidth: 1400,
+                  maxHeight: 'min(calc(100vh - 180px), calc(100vw * 9 / 21))',
+                  aspectRatio: '21 / 9',
+                }),
             flexShrink: 0,
-            borderRadius: 16,
+            borderRadius: USE_BOARD_ART ? 8 : 16,
             overflow: 'hidden',
             border: 'none',
-            boxShadow: '0 0 60px rgba(0,0,0,0.5), 0 0 120px rgba(0,112,204,0.05), inset 0 0 80px rgba(0,0,0,0.3)',
+            boxShadow: USE_BOARD_ART
+              ? '0 0 40px rgba(0,0,0,0.65)'
+              : '0 0 60px rgba(0,0,0,0.5), 0 0 120px rgba(0,112,204,0.05), inset 0 0 80px rgba(0,0,0,0.3)',
           }}
         >
         {plots.map((plot, index) => {
@@ -368,6 +493,13 @@ export function GameBoard({
           const isStreet = plot.type === 'street'
           const isBorder = plot.type === 'border'
           const isCity = plot.type === 'city'
+          const plotCellKey = `${plot.col}${plot.row}`
+          const isChurchSurround =
+            isCity &&
+            CHURCH_SURROUND_CELLS.has(plotCellKey) &&
+            !plot.builtProperty
+          const isChurchBlockLot =
+            isCity && CHURCH_BLOCK_CELLS.has(plotCellKey) && !isCathedral
           const placementBuildLens =
             placementMode?.active === true &&
             placementMode.interaction === 'build' &&
@@ -450,12 +582,22 @@ export function GameBoard({
               <div
                 key={index}
                 style={{
-                  backgroundColor: tint ? `${tint}` : '#08080e',
+                  backgroundColor: tint
+                    ? tint
+                    : USE_BOARD_ART
+                      ? 'transparent'
+                      : '#08080e',
                   boxShadow: tint
                     ? `0 0 12px ${tint}, inset 0 0 8px ${tint}`
                     : undefined,
-                  borderTop: STREET_ROWS.has(plot.row) ? '1px solid rgba(255,255,255,0.03)' : 'none',
-                  borderLeft: STREET_COLS.has(plot.col) ? '1px solid rgba(255,255,255,0.03)' : 'none',
+                  borderTop:
+                    !USE_BOARD_ART && STREET_ROWS.has(plot.row)
+                      ? '1px solid rgba(255,255,255,0.03)'
+                      : 'none',
+                  borderLeft:
+                    !USE_BOARD_ART && STREET_COLS.has(plot.col)
+                      ? '1px solid rgba(255,255,255,0.03)'
+                      : 'none',
                   transition: 'background-color 600ms ease, box-shadow 600ms ease',
                 }}
               />
@@ -464,79 +606,96 @@ export function GameBoard({
 
           // Border cells (Mountain, River, Farmland, Railway)
           if (isBorder) {
-            const isHorizontalBorder = plot.row === 1 || plot.row === 21
+            if (USE_BOARD_ART) {
+              return <div key={index} title={plot.building} style={{ background: 'transparent' }} />
+            }
             const isVerticalBorder = plot.col === 'A' || plot.col === 'U'
-            const middleCol = plot.col === 'K'
-            const middleRow = plot.row === 11
-            const showLabel = (isHorizontalBorder && middleCol) || (isVerticalBorder && middleRow)
+            const terrain = plot.building ?? ''
             const accent = borderStyle?.accent || '#666'
 
             return (
               <div
                 key={index}
+                title={terrain}
                 style={{
                   backgroundColor: borderStyle?.bg || '#1a1a22',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   overflow: 'hidden',
-                  borderTop: plot.row === 1 ? `2px solid ${accent}40` : undefined,
-                  borderBottom: plot.row === 21 ? `2px solid ${accent}40` : undefined,
-                  borderLeft: plot.col === 'A' ? `2px solid ${accent}40` : undefined,
-                  borderRight: plot.col === 'U' ? `2px solid ${accent}40` : undefined,
+                  padding: isVerticalBorder ? '2px 1px' : '1px 2px',
+                  borderTop: plot.row === 1 ? `2px solid ${accent}55` : undefined,
+                  borderBottom: plot.row === 21 ? `2px solid ${accent}55` : undefined,
+                  borderLeft: plot.col === 'A' ? `2px solid ${accent}55` : undefined,
+                  borderRight: plot.col === 'U' ? `2px solid ${accent}55` : undefined,
+                  boxShadow: `inset 0 0 12px ${accent}18`,
                 }}
               >
-                {showLabel ? (
+                {terrain ? (
                   <span style={{
-                    fontSize: isVerticalBorder ? 7 : 8,
-                    fontWeight: 700,
+                    fontSize: borderLabelFontSize(terrain, isVerticalBorder),
+                    fontWeight: 800,
                     color: accent,
-                    letterSpacing: '0.15em',
+                    letterSpacing: isVerticalBorder ? '0.08em' : '0.1em',
                     textTransform: 'uppercase',
                     fontFamily: 'var(--font-jetbrains-mono), monospace',
-                    whiteSpace: 'nowrap',
+                    whiteSpace: 'normal',
+                    wordBreak: 'break-word',
+                    textAlign: 'center',
+                    lineHeight: 1.05,
+                    textShadow: `0 1px 3px rgba(0,0,0,0.65), 0 0 8px ${accent}44`,
                     writingMode: isVerticalBorder ? 'vertical-rl' : undefined,
                     textOrientation: isVerticalBorder ? 'mixed' : undefined,
+                    maxWidth: '100%',
+                    maxHeight: '100%',
                   }}>
-                    {plot.building}
+                    {terrain}
                   </span>
-                ) : (
-                  <div style={{
-                    width: '60%',
-                    height: 2,
-                    borderRadius: 1,
-                    backgroundColor: accent,
-                    opacity: 0.2,
-                  }} />
-                )}
+                ) : null}
               </div>
             )
           }
 
-          // Cathedral (Church)
+          // Cathedral (Church) — center of the 3×3 church block
           if (isCathedral) {
+            if (USE_BOARD_ART) {
+              return (
+                <div
+                  key={index}
+                  title="Church"
+                  style={{ background: 'transparent', cursor: 'not-allowed' }}
+                />
+              )
+            }
             return (
               <div
                 key={index}
                 style={{
-                  background: 'linear-gradient(135deg, #1a4a2a 0%, #0d3018 100%)',
+                  background: CHURCH_BLOCK_FILL,
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 2,
-                  border: '2px solid rgba(100,200,120,0.3)',
-                  boxShadow: '0 0 20px rgba(100,200,120,0.15), inset 0 0 15px rgba(0,0,0,0.3)',
+                  border: '2px solid rgba(120,220,150,0.45)',
+                  boxShadow: '0 0 24px rgba(100,200,120,0.25), inset 0 0 18px rgba(0,0,0,0.35)',
                   cursor: 'not-allowed',
+                  minHeight: 0,
+                  overflow: 'hidden',
+                  padding: '2px 4px',
                 }}
               >
-                <span style={{ fontSize: 16 }}>⛪</span>
+                <span style={{ fontSize: 'clamp(10px, 1.2vw, 16px)', lineHeight: 1 }}>⛪</span>
                 <span style={{
-                  fontSize: 8,
-                  fontWeight: 700,
-                  color: '#90d0a0',
+                  fontSize: 'clamp(5px, 0.62vw, 7px)',
+                  fontWeight: 800,
+                  fontFamily: LOT_LABEL_FONT,
+                  color: '#e8f8ec',
                   letterSpacing: '0.1em',
                   textTransform: 'uppercase',
+                  textAlign: 'center',
+                  lineHeight: 1.1,
+                  textShadow: '0 1px 2px rgba(0,0,0,0.55)',
                 }}>
                   Church
                 </span>
@@ -545,9 +704,33 @@ export function GameBoard({
           }
 
           // City cells
-          const cellBg = isClaimed
+          const cellBg = USE_BOARD_ART
             ? undefined
-            : districtStyle?.bg || '#141420'
+            : isClaimed
+              ? undefined
+              : isChurchBlockLot && !plot.builtProperty
+                ? undefined
+                : districtStyle?.bg || BLUEPRINT_LOT_BG
+          const cellBackground = USE_BOARD_ART
+            ? undefined
+            : isChurchBlockLot && !isClaimed && !plot.builtProperty
+              ? CHURCH_BLOCK_FILL
+              : undefined
+          const claimStyle = getPlotStyle(plot)
+          const artClaimOverlay =
+            USE_BOARD_ART && isClaimed && !plot.anchorInfluenceSuppressed
+              ? {
+                  backgroundColor: `${claimingPlayer?.color ?? '#888'}99`,
+                  boxShadow: highDensityHousingLot
+                    ? `inset 0 0 8px rgba(0,0,0,0.35), 0 0 10px ${claimingPlayer?.color ?? '#888'}`
+                    : `inset 0 0 6px rgba(0,0,0,0.25)`,
+                }
+              : USE_BOARD_ART && plot.anchorInfluenceSuppressed
+                ? {
+                    backgroundColor: 'rgba(30,30,40,0.55)',
+                    filter: 'saturate(0.4) brightness(0.9)',
+                  }
+                : {}
 
           return (
             <div
@@ -571,19 +754,31 @@ export function GameBoard({
               onDragOver={(e) => handleDragOver(e, plot)}
               onDrop={(e) => handleDrop(e, plot)}
               style={{
+                background: cellBackground,
                 backgroundColor: cellBg,
-                ...getPlotStyle(plot),
+                ...(USE_BOARD_ART ? artClaimOverlay : claimStyle),
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: 1,
+                gap: 0,
                 overflow: 'hidden',
                 position: 'relative',
                 cursor: claimable ? 'pointer' : 'default',
+                minHeight: 0,
+                padding: '2px',
                 transition: 'opacity 180ms ease, filter 180ms ease, transform 180ms ease, box-shadow 150ms ease, border-color 150ms ease',
                 ...(elevatingCells.has(`${plot.col}${plot.row}`)
                   ? { animation: 'fsBuildElevate 1.6s cubic-bezier(0.22, 1, 0.36, 1) both', zIndex: 30 }
+                  : {}),
+                ...(fadingAnchorCells.has(`${plot.col}${plot.row}`)
+                  ? { animation: 'fsAnchorInfluenceFade 1.4s ease-out both', zIndex: 28 }
+                  : {}),
+                ...(!USE_BOARD_ART && isChurchBlockLot && !isClaimed
+                  ? {
+                      border: '1px solid rgba(120,220,150,0.38)',
+                      boxShadow: 'inset 0 0 10px rgba(0,0,0,0.22)',
+                    }
                   : {}),
                 ...(dimVacantCityForBuild
                   ? { opacity: 0.38, filter: 'brightness(0.72) saturate(0.88)' }
@@ -592,20 +787,26 @@ export function GameBoard({
                   ? placementBuildLens
                     ? `2px solid rgba(255,255,255,0.92)`
                     : `2px solid ${placementHi.solid}`
+                  : USE_BOARD_ART
+                    ? isClaimed
+                      ? `1px solid rgba(255,255,255,0.2)`
+                      : '1px solid transparent'
                   : isAnchor
-                    ? `1px solid ${districtStyle?.border || 'rgba(255,255,255,0.1)'}88`
-                    : `1px solid ${isClaimed ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)'}`,
+                    ? `1px solid ${districtStyle?.border || BLUEPRINT_LOT_BORDER}88`
+                    : `1px solid ${isClaimed ? 'rgba(255,255,255,0.12)' : `${BLUEPRINT_LOT_BORDER}66`}`,
                 boxShadow: validPlacement
                   ? placementBuildLens
                     ? `0 0 0 1px rgba(0,212,255,0.5), 0 0 22px ${placementHi.outer}, 0 0 48px rgba(0, 140, 220, 0.35), inset 0 0 10px ${placementHi.inner}`
                     : `0 0 12px ${placementHi.outer}, inset 0 0 8px ${placementHi.inner}`
                   : isWinning
                     ? '0 0 20px rgba(30,174,219,0.6), inset 0 0 10px rgba(255,255,255,0.1)'
-                    : isAnchor && !isClaimed
-                      ? `inset 0 0 12px ${districtStyle?.border || '#333'}30`
-                      : isClaimed
-                        ? 'inset 0 0 6px rgba(0,0,0,0.3)'
-                        : 'inset 0 1px 3px rgba(0,0,0,0.2)',
+                    : USE_BOARD_ART
+                      ? artClaimOverlay.boxShadow
+                      : isAnchor && !isClaimed
+                        ? `inset 0 0 12px ${districtStyle?.border || '#333'}30`
+                        : isClaimed
+                          ? 'inset 0 0 6px rgba(0,0,0,0.3)'
+                          : 'inset 0 1px 3px rgba(0,0,0,0.2)',
                 ...(validPlacement
                   ? {
                       animation:
@@ -634,74 +835,86 @@ export function GameBoard({
                 }
               }}
             >
-              {/* Lot category letter (matches property card corner letters from the board CSV) */}
-              {lotLetter && (
-                <span
+              {(lotLetter || plotDisplayTitle) && !isChurchSurround && !USE_BOARD_ART ? (
+                <div
                   style={{
-                    fontSize: lotLetter.length > 1 ? 6 : 8,
-                    fontWeight: 400,
-                    letterSpacing: '0.04em',
-                    lineHeight: 1,
-                    opacity: isClaimed ? 0.85 : 0.65,
-                    color: isClaimed
-                      ? 'rgba(255,255,255,0.75)'
-                      : districtStyle?.text || 'rgba(255,255,255,0.45)',
-                    fontFamily: 'var(--font-jetbrains-mono), monospace',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flex: 1,
+                    width: '100%',
+                    minHeight: 0,
+                    gap: 1,
+                    textAlign: 'center',
                   }}
                 >
-                  {lotLetter}
-                </span>
-              )}
-
-              {/* Building / anchor tenet name */}
-              {plotDisplayTitle && (
-                <span style={{
-                  fontSize:
-                    anchorTenetTitle && anchorTenetTitle.length > 14
-                      ? 5.5
-                      : anchorTenetTitle
-                        ? 6.5
-                        : buildingMultiline
-                          ? 6.5
-                          : 7,
-                  fontWeight: 700,
-                  lineHeight: 1.15,
-                  color: isClaimed ? 'rgba(255,255,255,0.85)' : (districtStyle?.text || 'rgba(255,255,255,0.5)'),
-                  textAlign: 'center',
-                  overflow: 'hidden',
-                  textOverflow: buildingMultiline ? undefined : 'ellipsis',
-                  whiteSpace: anchorTenetTitle || buildingMultiline ? 'pre-line' : 'nowrap',
-                  display: buildingMultiline || anchorTenetTitle ? 'block' : '-webkit-box',
-                  WebkitLineClamp: buildingMultiline ? undefined : anchorTenetTitle ? 2 : 1,
-                  WebkitBoxOrient: buildingMultiline ? undefined : ('vertical' as const),
-                  maxWidth: '100%',
-                  padding: '0 2px',
-                  fontFamily: 'var(--font-jetbrains-mono), monospace',
-                  textShadow: isClaimed ? '0 1px 2px rgba(0,0,0,0.5)' : 'none',
-                }}>
-                  {plotDisplayTitle}
-                  {highDensityHousingLot && (
+                  {lotLetter ? (
                     <span
                       style={{
-                        display: 'block',
-                        fontSize: 5,
+                        fontSize: lotLetterFontSize(lotLetter),
                         fontWeight: 800,
                         letterSpacing: '0.06em',
-                        color: '#fef9c3',
-                        textShadow: claimingPlayer
-                          ? `0 0 8px ${claimingPlayer.color}, 0 0 12px rgba(255,255,255,0.9)`
-                          : '0 0 8px #fff',
-                        marginTop: 2,
+                        lineHeight: 1,
+                        flexShrink: 0,
+                        width: '100%',
+                        textAlign: 'center',
+                        color: isClaimed ? 'rgba(255,255,255,0.95)' : BLUEPRINT_LOT_TEXT,
+                        fontFamily: LOT_LABEL_FONT,
+                        textShadow: isClaimed ? '0 1px 2px rgba(0,0,0,0.5)' : 'none',
                       }}
                     >
-                      HIGH-DENSITY
+                      {lotLetter}
                     </span>
-                  )}
-                </span>
-              )}
+                  ) : null}
+
+                  {plotDisplayTitle ? (
+                    <span
+                      style={{
+                        fontSize: lotTitleFontSize(plotDisplayTitle, {
+                          anchor: !!anchorTenetTitle,
+                          multiline: buildingMultiline,
+                        }),
+                        fontWeight: 700,
+                        lineHeight: 1.06,
+                        color: isClaimed ? 'rgba(255,255,255,0.95)' : BLUEPRINT_LOT_TEXT,
+                        textAlign: 'center',
+                        whiteSpace: anchorTenetTitle || buildingMultiline ? 'pre-line' : 'normal',
+                        wordBreak: 'break-word',
+                        overflowWrap: 'anywhere',
+                        hyphens: 'auto',
+                        display: 'block',
+                        width: '100%',
+                        padding: '0 1px',
+                        fontFamily: LOT_LABEL_FONT,
+                        textShadow: isClaimed ? '0 1px 2px rgba(0,0,0,0.5)' : 'none',
+                      }}
+                    >
+                      {plotDisplayTitle}
+                      {highDensityHousingLot && (
+                        <span
+                          style={{
+                            display: 'block',
+                            fontSize: 5,
+                            fontWeight: 800,
+                            letterSpacing: '0.06em',
+                            color: '#fef9c3',
+                            textShadow: claimingPlayer
+                              ? `0 0 8px ${claimingPlayer.color}, 0 0 12px rgba(255,255,255,0.9)`
+                              : '0 0 8px #fff',
+                            marginTop: 2,
+                          }}
+                        >
+                          HIGH-DENSITY
+                        </span>
+                      )}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
 
               {/* Anchor/Union special marker */}
-              {isAnchor && !isClaimed && (
+              {isAnchor && !isClaimed && !USE_BOARD_ART && (
                 <div style={{
                   position: 'absolute',
                   top: 2,
@@ -965,31 +1178,6 @@ export function GameBoard({
           ) : null}
         </div>
       ) : null}
-      </div>
-
-      {/* District legend */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        gap: 24,
-        marginTop: 12,
-        fontSize: 9,
-        fontWeight: 500,
-        letterSpacing: '0.08em',
-        textTransform: 'uppercase',
-      }}>
-        {DISTRICTS.map(({ name }) => (
-          <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{
-              width: 8,
-              height: 8,
-              borderRadius: 2,
-              backgroundColor: DISTRICT_ZONE_STYLE.border,
-              border: `1px solid ${DISTRICT_ZONE_STYLE.text}35`,
-            }} />
-            <span style={{ color: DISTRICT_ZONE_STYLE.text, opacity: 0.85 }}>{name}</span>
-          </div>
-        ))}
       </div>
     </div>
   )
