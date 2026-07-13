@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Plot, Player, COLUMNS } from '@/lib/types'
-import { cn } from '@/lib/utils'
 import { getPlotDistricts } from '@/lib/districts'
 import { CHURCH_SURROUND_CELLS, CHURCH_BLOCK_CELLS } from '@/lib/boardData'
 import { propertyCards } from '@/lib/cardData'
@@ -81,33 +80,105 @@ interface GameBoardProps {
   openingProTip?: ReactNode
   /** When the player taps a vacant lot without property placement active (claiming is only via card build). */
   onVacantLotHint?: () => void
+  /** Phone / compact chrome — smaller terrain strips, hide masthead, pixel-scaled lot labels. */
+  compact?: boolean
 }
 
 const STREET_COLS = new Set(['E', 'I', 'M', 'Q'])
 const STREET_ROWS = new Set([5, 9, 13, 17])
 
-/** Lot title font — scales with cell size; longer names step down so the full title still fits. */
-function lotTitleFontSize(title: string, opts?: { anchor?: boolean; multiline?: boolean }) {
+const BOARD_ASPECT = 21 / 9
+const STREET_TRACK_PX = 4
+const STREET_COL_COUNT = 4
+const STREET_ROW_COUNT = 4
+
+/** Category titles that duplicate the corner letter — show letter only on phones. */
+const GENERIC_LOT_TITLES = new Set([
+  'Housing',
+  'Grocery',
+  'Hotel',
+  'Dining',
+  'Park',
+  'Commercial',
+  'Industry',
+  'Storage',
+  'Food',
+  'Power',
+  'Anchor Tenet',
+  'Anchor',
+  'Union',
+  'Distribution',
+  'Tourism',
+  'Entertainment',
+  'Freight',
+  'Civic',
+  'Civic Center',
+])
+
+/** City lot size from grid fr tracks (terrain strips + hairline streets are thinner than city blocks). */
+function computeCityCellPx(gridW: number, gridH: number, compact: boolean): number {
+  const terrainFr = compact ? 0.35 : 0.4
+  const streetPx = STREET_TRACK_PX * STREET_COL_COUNT
+  const colFr = 17 + terrainFr * 2
+  const cityColW = Math.max(0, (gridW - streetPx) / colFr)
+
+  const streetRowPx = STREET_TRACK_PX * STREET_ROW_COUNT
+  const rowFr = 15 + terrainFr * 2
+  const cityRowH = Math.max(0, (gridH - streetRowPx) / rowFr)
+
+  return Math.min(cityColW, cityRowH)
+}
+
+function fitBoardDimensions(containerW: number, containerH: number): { w: number; h: number } {
+  if (containerW <= 0 || containerH <= 0) return { w: 0, h: 0 }
+  const widthLed = containerW
+  const heightFromWidth = widthLed / BOARD_ASPECT
+  if (heightFromWidth <= containerH) return { w: widthLed, h: heightFromWidth }
+  const heightLed = containerH
+  return { w: heightLed * BOARD_ASPECT, h: heightLed }
+}
+
+/** Derive lot label px from measured city cells — scales with board size; pinch-zoom scales labels uniformly. */
+function computeLotLabelSizes(
+  cityCell: number,
+  title: string,
+  compact: boolean
+): { letterPx: number; titlePx: number; maxTitleLines: number } {
   const len = title.length
-  const words = title.trim().split(/\s+/).length
-  // cqmin = % of the smaller cell dimension (works once the lot has container-type: size).
-  if (opts?.anchor) return len > 16 ? 'clamp(6px, 11cqmin, 9px)' : 'clamp(7px, 13cqmin, 10px)'
-  if (opts?.multiline) return 'clamp(6px, 11cqmin, 9px)'
-  if (len > 20 || words >= 3) return 'clamp(5.5px, 10cqmin, 8.5px)'
-  if (len > 14 || words >= 2) return 'clamp(6.5px, 12cqmin, 9.5px)'
-  if (len > 10) return 'clamp(7px, 13cqmin, 10.5px)'
-  return 'clamp(7.5px, 15cqmin, 12px)'
+  const words = title.trim().split(/\s+/).filter(Boolean).length
+  let titleRatio = compact ? 0.34 : 0.38
+  if (len > 10 || words >= 2) titleRatio = compact ? 0.3 : 0.34
+  if (len > 16 || words >= 3) titleRatio = compact ? 0.26 : 0.3
+  if (len > 22) titleRatio = compact ? 0.22 : 0.26
+  const letterPx = Math.max(compact ? 5 : 6, Math.min(compact ? 11 : 13, cityCell * (compact ? 0.42 : 0.46)))
+  const titlePx = Math.max(compact ? 4.5 : 5, Math.min(compact ? 9 : 11, cityCell * titleRatio))
+  const maxTitleLines = compact ? 2 : len > 18 ? 3 : 2
+  return { letterPx, titlePx, maxTitleLines }
 }
 
-function lotLetterFontSize(letter: string) {
-  return letter.length > 1 ? 'clamp(7px, 14cqmin, 12px)' : 'clamp(8px, 16cqmin, 13px)'
+function borderLabelPx(cityCell: number, compact: boolean): number {
+  return Math.max(4, Math.min(compact ? 7 : 8, cityCell * 0.28))
 }
 
-/** Border terrain label — fits narrow strips along the board edge. */
-function borderLabelFontSize(terrain: string, vertical: boolean) {
-  const len = terrain.length
-  if (vertical) return len > 7 ? 'clamp(5px, 9cqmin, 8px)' : 'clamp(5.5px, 10cqmin, 9px)'
-  return len > 8 ? 'clamp(5px, 10cqmin, 8px)' : 'clamp(5.5px, 11cqmin, 9px)'
+function compactLotLabelVisibility(
+  compact: boolean,
+  lotLetter: string | null,
+  lotTitleText: string,
+  anchorTenetTitle: string | null
+): { showLetter: boolean; showTitle: boolean } {
+  if (!compact) return { showLetter: !!lotLetter, showTitle: !!lotTitleText }
+  if (anchorTenetTitle) return { showLetter: false, showTitle: true }
+  if (lotTitleText && GENERIC_LOT_TITLES.has(lotTitleText) && lotLetter) {
+    return { showLetter: true, showTitle: false }
+  }
+  if (lotTitleText) return { showLetter: false, showTitle: true }
+  return { showLetter: !!lotLetter, showTitle: false }
+}
+
+/** Flatten multiline building labels so line-clamp can fit them without overlap. */
+function lotTitleForDisplay(title: string, multiline: boolean): string {
+  if (!multiline) return title
+  return title.replace(/\s*\n+\s*/g, ' ').trim()
 }
 
 // Border terrain colors — rich and distinct
@@ -135,7 +206,41 @@ export function GameBoard({
   boardActionStrip,
   openingProTip,
   onVacantLotHint,
+  compact = false,
 }: GameBoardProps) {
+  const fitRef = useRef<HTMLDivElement>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const [fitSize, setFitSize] = useState({ w: 800, h: 360 })
+  const [gridSize, setGridSize] = useState({ w: 800, h: 340 })
+
+  useEffect(() => {
+    const fitEl = fitRef.current
+    const gridEl = gridRef.current
+    if (!fitEl || !gridEl) return
+
+    const update = () => {
+      const fitRect = fitEl.getBoundingClientRect()
+      if (fitRect.width > 0 && fitRect.height > 0) {
+        setFitSize({ w: fitRect.width, h: fitRect.height })
+      }
+      const gridRect = gridEl.getBoundingClientRect()
+      if (gridRect.width > 0 && gridRect.height > 0) {
+        setGridSize({ w: gridRect.width, h: gridRect.height })
+      }
+    }
+
+    const ro = new ResizeObserver(update)
+    ro.observe(fitEl)
+    ro.observe(gridEl)
+    update()
+    return () => ro.disconnect()
+  }, [])
+
+  const boardDimensions = fitBoardDimensions(fitSize.w, fitSize.h)
+  const cityCellPx = computeCityCellPx(gridSize.w, gridSize.h, compact)
+
+  const labelFont = compact ? "'Space Grotesk', system-ui, sans-serif" : LOT_LABEL_FONT
+  const terrainFr = compact ? '0.35fr' : '0.4fr'
   /** Quick lookup for street-segment cells to tint them with the owner color when game-over. */
   const streetSegmentTint = (() => {
     if (!showNamedRegions || !namedStreets || namedStreets.length === 0) return new Map<string, string>()
@@ -287,14 +392,14 @@ export function GameBoard({
   // strip is ~40% of a city lot; streets remain hairline separators.
   const colTemplate = COLUMNS.map(col => {
     if (STREET_COLS.has(col)) return '4px'
-    if (col === 'A' || col === 'U') return '0.4fr'
+    if (col === 'A' || col === 'U') return terrainFr
     return '1fr'
   }).join(' ')
 
   const rows = Array.from({ length: 21 }, (_, i) => i + 1)
   const rowTemplate = rows.map(row => {
     if (STREET_ROWS.has(row)) return '4px'
-    if (row === 1 || row === 21) return '0.4fr'
+    if (row === 1 || row === 21) return terrainFr
     return '1fr'
   }).join(' ')
 
@@ -328,9 +433,19 @@ export function GameBoard({
         @media (max-width: 767px) {
           .fs-board-masthead { display: none !important; }
         }
+        .fs-board-masthead.fs-board-masthead--compact { display: none !important; }
+        .fs-lot-title {
+          overflow: hidden;
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          word-break: break-word;
+          overflow-wrap: anywhere;
+          hyphens: auto;
+        }
       `}</style>
 
-      {/* Masthead — Founders Square title above the board */}
+      {/* Masthead — desktop/tablet only; phones use the app header */}
+      {!compact ? (
       <div
         aria-label="Founders Square"
         className="fs-board-masthead"
@@ -391,26 +506,29 @@ export function GameBoard({
           <div style={{ flex: 1, height: 1, background: 'linear-gradient(270deg, transparent, #d8b75a88)' }} />
         </div>
       </div>
+      ) : null}
 
       <div
+        ref={fitRef}
+        className="fs-board-fit"
         style={{
           position: 'relative',
           width: '100%',
-          flex: USE_BOARD_ART ? '1 1 auto' : undefined,
-          height: USE_BOARD_ART ? undefined : undefined,
+          height: '100%',
+          flex: USE_BOARD_ART ? '1 1 auto' : 1,
           maxWidth: 1600,
-          maxHeight: USE_BOARD_ART ? '100%' : undefined,
+          maxHeight: '100%',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           minHeight: 0,
-          containerType: USE_BOARD_ART ? 'size' : undefined,
           ...(boardDockHud != null || boardActionStrip != null
             ? { paddingBottom: boardActionStrip != null ? 44 : 8 }
             : {}),
         }}
       >
         <div
+          ref={gridRef}
           className={USE_BOARD_ART ? 'fs-board-art-surface' : 'fs-board-grid'}
           style={{
             display: 'grid',
@@ -418,9 +536,8 @@ export function GameBoard({
             gridTemplateRows: rowTemplate,
             ...(USE_BOARD_ART
               ? {
-                  // Largest size that fits the container while keeping art aspect ratio.
-                  width: 'min(100cqw, calc(100cqh * 1672 / 941))',
-                  height: 'auto',
+                  width: boardDimensions.w > 0 ? boardDimensions.w : '100%',
+                  height: boardDimensions.h > 0 ? boardDimensions.h : 'auto',
                   aspectRatio: `${BOARD_ART.width} / ${BOARD_ART.height}`,
                   backgroundImage: `url(${BOARD_ART.src})`,
                   backgroundSize: '100% 100%',
@@ -428,11 +545,9 @@ export function GameBoard({
                   backgroundRepeat: 'no-repeat',
                 }
               : {
-                  // Fit the board area while keeping table proportions readable.
-                  width: '100%',
+                  width: boardDimensions.w > 0 ? boardDimensions.w : '100%',
+                  height: boardDimensions.h > 0 ? boardDimensions.h : 'auto',
                   maxWidth: 1400,
-                  maxHeight: '100%',
-                  height: 'auto',
                   aspectRatio: '21 / 9',
                 }),
             flexShrink: 0,
@@ -527,6 +642,22 @@ export function GameBoard({
             isClaimed &&
             plot.housingHighDensity === true &&
             (plot.builtProperty?.startsWith('housing') ?? false)
+
+          const lotTitleText = plotDisplayTitle
+            ? lotTitleForDisplay(plotDisplayTitle, buildingMultiline)
+            : ''
+          const lotSizes = computeLotLabelSizes(
+            cityCellPx,
+            lotTitleText || lotLetter || 'Lot',
+            compact
+          )
+          const lotLabelVisibility = compactLotLabelVisibility(
+            compact,
+            lotLetter,
+            lotTitleText,
+            anchorTenetTitle
+          )
+          const borderFs = borderLabelPx(cityCellPx, compact)
 
           const churchAnchorTooltip =
             isClaimed && builtPropertyCard?.type === 'anchor' && builtPropertyCard?.id === 'church'
@@ -628,7 +759,7 @@ export function GameBoard({
               >
                 {terrain ? (
                   <span style={{
-                    fontSize: borderLabelFontSize(terrain, isVerticalBorder),
+                    fontSize: borderFs,
                     fontWeight: 800,
                     color: accent,
                     letterSpacing: isVerticalBorder ? '0.08em' : '0.1em',
@@ -761,8 +892,7 @@ export function GameBoard({
                 position: 'relative',
                 cursor: claimable ? 'pointer' : 'default',
                 minHeight: 0,
-                padding: '2px',
-                containerType: 'size',
+                padding: '1px',
                 transition: 'opacity 180ms ease, filter 180ms ease, transform 180ms ease, box-shadow 150ms ease, border-color 150ms ease',
                 ...(elevatingCells.has(`${plot.col}${plot.row}`)
                   ? { animation: 'fsBuildElevate 1.6s cubic-bezier(0.22, 1, 0.36, 1) both', zIndex: 30 }
@@ -831,7 +961,7 @@ export function GameBoard({
                 }
               }}
             >
-              {(lotLetter || plotDisplayTitle) && !isChurchSurround && !USE_BOARD_ART ? (
+              {(lotLabelVisibility.showLetter || lotLabelVisibility.showTitle) && !isChurchSurround && !USE_BOARD_ART ? (
                 <div
                   style={{
                     display: 'flex',
@@ -841,22 +971,25 @@ export function GameBoard({
                     flex: 1,
                     width: '100%',
                     minHeight: 0,
-                    gap: 1,
+                    maxHeight: '100%',
+                    gap: 0,
                     textAlign: 'center',
+                    overflow: 'hidden',
+                    padding: '0 1px',
                   }}
                 >
-                  {lotLetter ? (
+                  {lotLabelVisibility.showLetter && lotLetter ? (
                     <span
                       style={{
-                        fontSize: lotLetterFontSize(lotLetter),
+                        fontSize: lotSizes.letterPx,
                         fontWeight: 800,
-                        letterSpacing: '0.06em',
+                        letterSpacing: '0.04em',
                         lineHeight: 1,
                         flexShrink: 0,
                         width: '100%',
                         textAlign: 'center',
                         color: isClaimed ? 'rgba(255,255,255,0.95)' : BLUEPRINT_LOT_TEXT,
-                        fontFamily: LOT_LABEL_FONT,
+                        fontFamily: labelFont,
                         textShadow: isClaimed ? '0 1px 2px rgba(0,0,0,0.5)' : 'none',
                       }}
                     >
@@ -864,41 +997,40 @@ export function GameBoard({
                     </span>
                   ) : null}
 
-                  {plotDisplayTitle ? (
+                  {lotLabelVisibility.showTitle && lotTitleText ? (
                     <span
+                      className="fs-lot-title"
                       style={{
-                        fontSize: lotTitleFontSize(plotDisplayTitle, {
-                          anchor: !!anchorTenetTitle,
-                          multiline: buildingMultiline,
-                        }),
-                        fontWeight: 700,
-                        lineHeight: 1.06,
+                        fontSize: lotSizes.titlePx,
+                        fontWeight: 600,
+                        lineHeight: 1.1,
                         color: isClaimed ? 'rgba(255,255,255,0.95)' : BLUEPRINT_LOT_TEXT,
                         textAlign: 'center',
-                        whiteSpace: anchorTenetTitle || buildingMultiline ? 'pre-line' : 'normal',
-                        wordBreak: 'break-word',
-                        overflowWrap: 'anywhere',
-                        hyphens: 'auto',
-                        display: 'block',
+                        display: '-webkit-box',
+                        WebkitBoxOrient: 'vertical',
+                        WebkitLineClamp: lotSizes.maxTitleLines,
                         width: '100%',
-                        padding: '0 1px',
-                        fontFamily: LOT_LABEL_FONT,
+                        maxWidth: '100%',
+                        maxHeight: lotSizes.titlePx * lotSizes.maxTitleLines * 1.12,
+                        padding: 0,
+                        marginTop: lotLabelVisibility.showLetter && lotLetter ? 1 : 0,
+                        fontFamily: labelFont,
                         textShadow: isClaimed ? '0 1px 2px rgba(0,0,0,0.5)' : 'none',
                       }}
                     >
-                      {plotDisplayTitle}
+                      {lotTitleText}
                       {highDensityHousingLot && (
                         <span
                           style={{
                             display: 'block',
-                            fontSize: 'clamp(5px, 9cqmin, 8px)',
+                            fontSize: Math.max(3, lotSizes.titlePx * 0.85),
                             fontWeight: 800,
-                            letterSpacing: '0.06em',
+                            letterSpacing: '0.04em',
                             color: '#fef9c3',
                             textShadow: claimingPlayer
                               ? `0 0 8px ${claimingPlayer.color}, 0 0 12px rgba(255,255,255,0.9)`
                               : '0 0 8px #fff',
-                            marginTop: 2,
+                            marginTop: 1,
                           }}
                         >
                           HIGH-DENSITY

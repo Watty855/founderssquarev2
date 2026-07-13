@@ -892,7 +892,7 @@ function AppInner() {
   const FINAL_TURN_BANNER_VISIBLE_MS = 5000
   const [showFinalTurnBanner, setShowFinalTurnBanner] = useState(false)
   const [rulesQuickOpen, setRulesQuickOpen] = useState(false)
-  const isCompactLayout = useCompactGameLayout()
+  const { compact: isCompactLayout, landscape: isLandscapeLayout } = useCompactGameLayout()
 
   useEffect(() => {
     if (motivationalFlashTimerRef.current !== null) {
@@ -6580,13 +6580,15 @@ function AppInner() {
               }}
             >
             {/* Board area */}
-            <div
-              className={
-                isCompactLayout
-                  ? 'relative flex-1 min-h-0 flex items-center justify-center overflow-hidden px-1 pt-1'
-                  : 'relative flex-1 flex items-center justify-center overflow-hidden px-3 pt-2 min-h-0'
-              }
-            >
+          <div
+            className={
+              isCompactLayout
+                ? isLandscapeLayout
+                  ? 'relative flex-[1.4] min-h-0 flex items-center justify-center overflow-hidden px-1 pt-0.5'
+                  : 'relative flex-1 min-h-0 flex items-center justify-center overflow-hidden px-1 pt-1'
+                : 'relative flex-1 flex items-center justify-center overflow-hidden px-3 pt-2 min-h-0'
+            }
+          >
             {showOpeningProTip ? (
               <div
                 aria-hidden
@@ -6599,6 +6601,7 @@ function AppInner() {
               style={{ zIndex: showOpeningProTip ? 45 : undefined }}
             >
             <GameBoard
+              compact={isCompactLayout}
               plots={safeGameState.plots}
               players={safeGameState.players}
               onPlotClaim={handlePlotClaim}
@@ -6726,7 +6729,13 @@ function AppInner() {
 
           {/* Bottom hand rail — zooms/pans with the board on phones */}
           <div
-            className={isCompactLayout ? 'flex-shrink-0 border-t border-[#d8b75a40] px-2 py-2' : 'flex-shrink-0 border-t border-[#d8b75a40] px-8 py-5'}
+            className={
+              isCompactLayout
+                ? isLandscapeLayout
+                  ? 'flex-shrink-0 border-t border-[#d8b75a40] px-2 py-1'
+                  : 'flex-shrink-0 border-t border-[#d8b75a40] px-2 py-2'
+                : 'flex-shrink-0 border-t border-[#d8b75a40] px-8 py-5'
+            }
             style={{
               background: 'linear-gradient(180deg, #4a4028 0%, #362e1a 55%, #2a2414 100%)',
               pointerEvents: showOpeningProTip ? 'none' : 'auto',
@@ -6741,6 +6750,7 @@ function AppInner() {
               opponents={safeGameState.players.filter((_, i) => i !== safeGameState.currentPlayerIndex)}
               handInteractionsActive={handInteractionsActive}
               compact={isCompactLayout}
+              landscape={isLandscapeLayout}
               onPlayCards={handlePlayCards}
               onEndTurn={handleEndTurn}
               placementMode={placementMode}

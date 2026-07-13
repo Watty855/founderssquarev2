@@ -49,6 +49,8 @@ interface PlayerHandProps {
   handInteractionsActive: boolean
   /** When true (phone layout), shrink fans and allow horizontal scroll. */
   compact?: boolean
+  /** Phone held sideways — tighter hand strip to leave room for the board. */
+  landscape?: boolean
   onPlayCards: (
     propertyInstanceId: string | null,
     actionInstanceIds: string[],
@@ -171,6 +173,7 @@ export function PlayerHand({
   opponents = [],
   handInteractionsActive,
   compact = false,
+  landscape = false,
   onPlayCards,
   onEndTurn,
   placementMode,
@@ -366,8 +369,8 @@ export function PlayerHand({
       : actionCardsList.find(c => c.instance.instanceId === cardDialog.instanceId)
   ) : null
 
-  const cardWidth = compact ? 72 : 110
-  const fanHeight = compact ? 112 : 165
+  const cardWidth = compact ? (landscape ? 64 : 72) : 110
+  const fanHeight = compact ? (landscape ? 92 : 112) : 165
   /** Fan offset shrinks gently (3px per card past 5) instead of jumping between tiers,
    *  so playing / drawing a card doesn't re-space the whole hand. Floor keeps crowded
    *  hands readable on tablet widths (was 32px overlap for 7+ cards). */
