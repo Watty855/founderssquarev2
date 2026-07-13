@@ -92,29 +92,6 @@ const STREET_TRACK_PX = 4
 const STREET_COL_COUNT = 4
 const STREET_ROW_COUNT = 4
 
-/** Category titles that duplicate the corner letter — show letter only on phones. */
-const GENERIC_LOT_TITLES = new Set([
-  'Housing',
-  'Grocery',
-  'Hotel',
-  'Dining',
-  'Park',
-  'Commercial',
-  'Industry',
-  'Storage',
-  'Food',
-  'Power',
-  'Anchor Tenet',
-  'Anchor',
-  'Union',
-  'Distribution',
-  'Tourism',
-  'Entertainment',
-  'Freight',
-  'Civic',
-  'Civic Center',
-])
-
 /** City lot size from grid fr tracks (terrain strips + hairline streets are thinner than city blocks). */
 function computeCityCellPx(gridW: number, gridH: number, compact: boolean): number {
   const terrainFr = compact ? 0.35 : 0.4
@@ -138,41 +115,82 @@ function fitBoardDimensions(containerW: number, containerH: number): { w: number
   return { w: heightLed * BOARD_ASPECT, h: heightLed }
 }
 
-/** Derive lot label px from measured city cells — scales with board size; pinch-zoom scales labels uniformly. */
+/** Soft wrap estimate so title font can shrink until the full name fits the cell. */
+function estimateWrappedLines(text: string, charsPerLine: number): number {
+  if (!text || charsPerLine < 1) return 1
+  const words = text.trim().split(/\s+/).filter(Boolean)
+  if (words.length === 0) return 1
+  let lines = 1
+  let used = 0
+  for (const word of words) {
+    const need = word.length
+    if (used === 0) {
+      used = need
+      if (need > charsPerLine) {
+        // Force-break long tokens across lines
+        lines += Math.ceil(need / charsPerLine) - 1
+        used = need % charsPerLine
+      }
+      continue
+    }
+    if (used + 1 + need <= charsPerLine) {
+      used += 1 + need
+    } else {
+      lines += 1
+      used = need
+      if (need > charsPerLine) {
+        lines += Math.ceil(need / charsPerLine) - 1
+        used = need % charsPerLine
+      }
+    }
+  }
+  return Math.max(1, lines)
+}
+
+/**
+ * Fit letter + full lot name into the city cell.
+ * Shrinks fonts until the complete title is visible (no truncation).
+ */
 function computeLotLabelSizes(
   cityCell: number,
   title: string,
+  hasLetter: boolean,
   compact: boolean
-): { letterPx: number; titlePx: number; maxTitleLines: number } {
-  const len = title.length
-  const words = title.trim().split(/\s+/).filter(Boolean).length
-  let titleRatio = compact ? 0.34 : 0.38
-  if (len > 10 || words >= 2) titleRatio = compact ? 0.3 : 0.34
-  if (len > 16 || words >= 3) titleRatio = compact ? 0.26 : 0.3
-  if (len > 22) titleRatio = compact ? 0.22 : 0.26
-  const letterPx = Math.max(compact ? 5 : 6, Math.min(compact ? 11 : 13, cityCell * (compact ? 0.42 : 0.46)))
-  const titlePx = Math.max(compact ? 4.5 : 5, Math.min(compact ? 9 : 11, cityCell * titleRatio))
-  const maxTitleLines = compact ? 2 : len > 18 ? 3 : 2
-  return { letterPx, titlePx, maxTitleLines }
+): { letterPx: number; titlePx: number } {
+  const pad = 2
+  const usableW = Math.max(8, cityCell - pad)
+  const usableH = Math.max(8, cityCell - pad)
+  const letterMax = compact ? 8 : 10
+  const titleMax = compact ? 8 : 9
+  const titleMin = 3.25
+  const lineHeight = 1.05
+  // Space Grotesk / Cinzel approx average glyph width
+  const charWidthFactor = 0.58
+
+  let bestLetter = hasLetter ? Math.min(letterMax, usableH * 0.28) : 0
+  let bestTitle = titleMin
+
+  for (let titlePx = titleMax; titlePx >= titleMin; titlePx -= 0.25) {
+    const letterPx = hasLetter
+      ? Math.min(letterMax, Math.max(3.5, Math.min(titlePx * 1.15, usableH * 0.26)))
+      : 0
+    const gap = hasLetter ? 1 : 0
+    const titleBudgetH = usableH - letterPx - gap
+    const charsPerLine = Math.max(1, Math.floor(usableW / (titlePx * charWidthFactor)))
+    const lines = estimateWrappedLines(title, charsPerLine)
+    const titleH = lines * titlePx * lineHeight
+    if (titleH <= titleBudgetH + 0.5) {
+      bestLetter = letterPx
+      bestTitle = titlePx
+      break
+    }
+  }
+
+  return { letterPx: bestLetter, titlePx: bestTitle }
 }
 
 function borderLabelPx(cityCell: number, compact: boolean): number {
   return Math.max(4, Math.min(compact ? 7 : 8, cityCell * 0.28))
-}
-
-function compactLotLabelVisibility(
-  compact: boolean,
-  lotLetter: string | null,
-  lotTitleText: string,
-  anchorTenetTitle: string | null
-): { showLetter: boolean; showTitle: boolean } {
-  if (!compact) return { showLetter: !!lotLetter, showTitle: !!lotTitleText }
-  if (anchorTenetTitle) return { showLetter: false, showTitle: true }
-  if (lotTitleText && GENERIC_LOT_TITLES.has(lotTitleText) && lotLetter) {
-    return { showLetter: true, showTitle: false }
-  }
-  if (lotTitleText) return { showLetter: false, showTitle: true }
-  return { showLetter: !!lotLetter, showTitle: false }
 }
 
 /** Flatten multiline building labels so line-clamp can fit them without overlap. */
@@ -239,7 +257,7 @@ export function GameBoard({
   const boardDimensions = fitBoardDimensions(fitSize.w, fitSize.h)
   const cityCellPx = computeCityCellPx(gridSize.w, gridSize.h, compact)
 
-  const labelFont = compact ? "'Space Grotesk', system-ui, sans-serif" : LOT_LABEL_FONT
+  const labelFont = "'Space Grotesk', system-ui, sans-serif"
   const terrainFr = compact ? '0.35fr' : '0.4fr'
   /** Quick lookup for street-segment cells to tint them with the owner color when game-over. */
   const streetSegmentTint = (() => {
@@ -435,12 +453,11 @@ export function GameBoard({
         }
         .fs-board-masthead.fs-board-masthead--compact { display: none !important; }
         .fs-lot-title {
-          overflow: hidden;
-          display: -webkit-box;
-          -webkit-box-orient: vertical;
+          overflow: visible;
+          white-space: normal;
           word-break: break-word;
-          overflow-wrap: anywhere;
-          hyphens: auto;
+          overflow-wrap: break-word;
+          hyphens: none;
         }
       `}</style>
 
@@ -646,16 +663,13 @@ export function GameBoard({
           const lotTitleText = plotDisplayTitle
             ? lotTitleForDisplay(plotDisplayTitle, buildingMultiline)
             : ''
+          const showLotLetter = Boolean(lotLetter)
+          const showLotTitle = Boolean(lotTitleText)
           const lotSizes = computeLotLabelSizes(
             cityCellPx,
             lotTitleText || lotLetter || 'Lot',
+            showLotLetter && showLotTitle,
             compact
-          )
-          const lotLabelVisibility = compactLotLabelVisibility(
-            compact,
-            lotLetter,
-            lotTitleText,
-            anchorTenetTitle
           )
           const borderFs = borderLabelPx(cityCellPx, compact)
 
@@ -961,7 +975,7 @@ export function GameBoard({
                 }
               }}
             >
-              {(lotLabelVisibility.showLetter || lotLabelVisibility.showTitle) && !isChurchSurround && !USE_BOARD_ART ? (
+              {(showLotLetter || showLotTitle) && !isChurchSurround && !USE_BOARD_ART ? (
                 <div
                   style={{
                     display: 'flex',
@@ -978,12 +992,12 @@ export function GameBoard({
                     padding: '0 1px',
                   }}
                 >
-                  {lotLabelVisibility.showLetter && lotLetter ? (
+                  {showLotLetter && lotLetter ? (
                     <span
                       style={{
                         fontSize: lotSizes.letterPx,
                         fontWeight: 800,
-                        letterSpacing: '0.04em',
+                        letterSpacing: '0.02em',
                         lineHeight: 1,
                         flexShrink: 0,
                         width: '100%',
@@ -997,23 +1011,19 @@ export function GameBoard({
                     </span>
                   ) : null}
 
-                  {lotLabelVisibility.showTitle && lotTitleText ? (
+                  {showLotTitle && lotTitleText ? (
                     <span
                       className="fs-lot-title"
                       style={{
                         fontSize: lotSizes.titlePx,
                         fontWeight: 600,
-                        lineHeight: 1.1,
+                        lineHeight: 1.05,
                         color: isClaimed ? 'rgba(255,255,255,0.95)' : BLUEPRINT_LOT_TEXT,
                         textAlign: 'center',
-                        display: '-webkit-box',
-                        WebkitBoxOrient: 'vertical',
-                        WebkitLineClamp: lotSizes.maxTitleLines,
                         width: '100%',
                         maxWidth: '100%',
-                        maxHeight: lotSizes.titlePx * lotSizes.maxTitleLines * 1.12,
                         padding: 0,
-                        marginTop: lotLabelVisibility.showLetter && lotLetter ? 1 : 0,
+                        marginTop: showLotLetter ? 0.5 : 0,
                         fontFamily: labelFont,
                         textShadow: isClaimed ? '0 1px 2px rgba(0,0,0,0.5)' : 'none',
                       }}

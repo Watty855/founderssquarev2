@@ -50,7 +50,8 @@ interface IncomeDialogProps {
   onComplete: (
     earnedIncome: number,
     doubleIncomeInstanceId?: string,
-    incomeResolution?: 'property-roll' | 'bank-income-card'
+    incomeResolution?: 'property-roll' | 'bank-income-card',
+    dieFace?: number
   ) => void
   onCancel: () => void
   aiAutoplay?: boolean
@@ -250,10 +251,10 @@ export function IncomeDialog({
     const t = window.setTimeout(() => {
       incomeAiCollectSentRef.current = stamp
       playIncomeSound()
-      onComplete(amt, doubleIncomeAllowed ? sid : undefined, 'property-roll')
+      onComplete(amt, doubleIncomeAllowed ? sid : undefined, 'property-roll', diceValue ?? undefined)
     }, aiPlaybackDelay(520, aiFastPlayback))
     return () => window.clearTimeout(t)
-  }, [open, aiAutoplay, aiFastPlayback, incomeResult, selectedDoubleIncomeId, doubleIncomeAllowed, onComplete])
+  }, [open, aiAutoplay, aiFastPlayback, incomeResult, selectedDoubleIncomeId, doubleIncomeAllowed, onComplete, diceValue])
 
   const handleCollect = () => {
     if (incomeResult) {
@@ -261,7 +262,8 @@ export function IncomeDialog({
       onComplete(
         incomeResult.amount,
         doubleIncomeAllowed ? selectedDoubleIncomeId || undefined : undefined,
-        'property-roll'
+        'property-roll',
+        diceValue ?? undefined
       )
     }
   }

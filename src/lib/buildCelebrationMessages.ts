@@ -1,73 +1,66 @@
+import { buildingData } from './boardLotData'
 import type { PropertyCard } from './cardTypes'
-
-const CIVIC_LAW_NAMES = new Set(['City Hall', 'Civic Center', 'Courthouse', 'Police'])
-
-/** Cultural line: museum-lot Arts & Entertainment cards keep the museum celebration. */
-const MUSEUM_STYLE_IDS = ['museum-']
+import { getCardLotLetter, type LotCategoryLetter } from './lotCategory'
+import type { Plot } from './types'
 
 export type BuildCelebrationOpts = {
   housingHighDensity?: boolean
 }
 
+export type BuildCelebrationNotice = {
+  lotName: string
+  suffix: string
+}
+
+const CATEGORY_SUFFIX: Partial<Record<LotCategoryLetter, string>> = {
+  C: ' assembled!',
+  E: ' crafted to add to the surrounding area!',
+  T: ' constructed!',
+  P: ' established to add to property value!',
+  M: ' fashioned!',
+  H: ' developed!',
+  I: ' manufactured to strengthen infrastructure!',
+  D: ' organized!',
+  S: ' assembled!',
+  O: ' engineered!',
+  F: ' cultivated!',
+}
+
+/** Named lot label from the physical board (e.g. Firehouse 01, D & D Diner). */
+export function getPlotLotDisplayName(col: string, row: number, plotBuilding?: string | null): string {
+  const key = `${col}${row}`
+  return buildingData[key] ?? plotBuilding?.replace(/\s*\n+\s*/g, ' ').trim() ?? 'Lot'
+}
+
+function resolveLotCategoryLetter(
+  plot: Pick<Plot, 'lotCategory'>,
+  card: PropertyCard
+): LotCategoryLetter | null {
+  if (plot.lotCategory && plot.lotCategory !== 'AT') return plot.lotCategory
+  return getCardLotLetter(card)
+}
+
 /**
- * Returns the centered board banner line for a standard property or anchor build, or null to use a generic fallback.
+ * Lot-specific build banner — bold lot name + category phrase (anchors use separate titles).
  */
-export function getBuildCelebrationMessage(
+export function getBuildCelebrationNotice(
+  plot: Pick<Plot, 'col' | 'row' | 'building' | 'lotCategory'>,
   card: PropertyCard,
   opts: BuildCelebrationOpts = {}
-): string | null {
-  const high = opts.housingHighDensity === true
+): BuildCelebrationNotice | null {
+  if (card.type === 'anchor') return null
 
-  if (card.name === 'Housing') {
-    return high ? 'High density housing developed!' : 'Housing developed!'
+  const lotName = getPlotLotDisplayName(plot.col, plot.row, plot.building)
+
+  if (opts.housingHighDensity) {
+    return { lotName, suffix: ' High density housing erected!' }
   }
 
-  if (CIVIC_LAW_NAMES.has(card.name)) {
-    return 'City laws established to be enforced!'
-  }
+  const letter = resolveLotCategoryLetter(plot, card)
+  if (!letter) return null
 
-  if (MUSEUM_STYLE_IDS.some((prefix) => card.id.startsWith(prefix))) {
-    return 'Museum built to add to surrounding area!'
-  }
+  const suffix = CATEGORY_SUFFIX[letter]
+  if (!suffix) return null
 
-  switch (card.name) {
-    case 'Church Affiliation':
-      return 'Church affiliation created!'
-    case 'Farm Bureau':
-      return 'Farm Bureau formed!'
-    case 'Port Authority':
-      return 'Port Authority engineered!'
-    case 'Arts Council':
-      return 'Arts Council crafted!'
-    case 'Tourism Office':
-      return 'Tourism office conceived!'
-    case 'Influencer':
-      return 'Social media influencer launched!'
-    case 'Mafia':
-      return 'Mafia infiltrated!'
-    case 'News Outlet':
-      return 'News Outlet originated!'
-    case 'Regulation Bureau':
-      return 'Regulation Bureau established!'
-    case 'Hotel':
-      return 'Hotel constructed!'
-    case 'Park':
-      return 'City block beautified!'
-    case 'Commercial':
-      return 'Shops and offices fashioned!'
-    case 'Industry':
-      return 'Industry founded to strengthen infrastructure!'
-    case 'Freight':
-      return 'Freight and distribution organized!'
-    case 'Storage':
-      return 'Extra space established!'
-    case 'Power':
-      return 'Power grid engineered!'
-    case 'Food':
-      return 'Food access coordinated!'
-    case 'Arts':
-      return 'Entertainment established!'
-    default:
-      return null
-  }
+  return { lotName, suffix }
 }

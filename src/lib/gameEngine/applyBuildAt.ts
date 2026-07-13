@@ -5,7 +5,7 @@ import { isCivicFlexHandCard } from '@/lib/civicFlexProperty'
 import { resolvePropertyPlacementTemplate } from '@/lib/placementTemplate'
 import { getValidPlotsForProperty } from '@/lib/placementRules'
 import { getHousingBuildCost, isHousingPropertyCard } from '@/lib/housingEconomics'
-import { getBuildCelebrationMessage } from '@/lib/buildCelebrationMessages'
+import { getBuildCelebrationNotice } from '@/lib/buildCelebrationMessages'
 import { MAX_TURN_ACTIONS, replenishCurrentPlayerActionHand, turnLimitReached } from '@/lib/turnActions'
 import type { ApplyGameActionResult, GameEvent } from '@/lib/onlineGameActions'
 import { buildEndGameTriggerPatch } from '@/lib/gameEngine/statePatches'
@@ -135,18 +135,31 @@ export function applyBuildAt(state: GameState, params: BuildAtParams): ApplyGame
   let merged: GameState = { ...newState, ...triggerPatch }
 
   const events: GameEvent[] = []
-  const celebration = getBuildCelebrationMessage(placementTemplate, {
+  const celebration = getBuildCelebrationNotice(plot, placementTemplate, {
     housingHighDensity: highDensityPlacement,
   })
-  const title =
-    placementTemplate.type === 'anchor'
-      ? `⚓ ${placementTemplate.name} anchored!`
-      : celebration ?? `Built ${placementTemplate.name}!`
-  events.push({
-    type: 'build_celebration',
-    title,
-    detail: `${params.col}${params.row} · $${buildCost}M`,
-  })
+  if (placementTemplate.type === 'anchor') {
+    events.push({
+      type: 'build_celebration',
+      lotName: placementTemplate.name,
+      suffix: ' anchored!',
+      detail: `${params.col}${params.row} · $${buildCost}M`,
+    })
+  } else if (celebration) {
+    events.push({
+      type: 'build_celebration',
+      lotName: celebration.lotName,
+      suffix: celebration.suffix,
+      detail: `${params.col}${params.row} · $${buildCost}M`,
+    })
+  } else {
+    events.push({
+      type: 'build_celebration',
+      lotName: placementTemplate.name,
+      suffix: ' built!',
+      detail: `${params.col}${params.row} · $${buildCost}M`,
+    })
+  }
   if (usingTaxBuild) {
     events.push({
       type: 'toast',

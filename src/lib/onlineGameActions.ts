@@ -52,7 +52,7 @@ export type GameEvent =
   | { type: 'discard_required'; numToDiscard: number }
   | { type: 'turn_changed'; playerName: string; finalRound: boolean }
   | { type: 'game_over' }
-  | { type: 'build_celebration'; title: string; detail: string }
+  | { type: 'build_celebration'; lotName: string; suffix: string; detail: string }
   | { type: 'toast'; level: 'info' | 'success' | 'error'; message: string }
   /** Council-freeze negate roll resolved — announced with sound on every device. */
   | { type: 'council_freeze_result'; targetName: string; result: number; negated: boolean }

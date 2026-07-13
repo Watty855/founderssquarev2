@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, type CSSProperties } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, type CSSProperties, type ReactNode } from 'react'
 import { useGameState } from '@/hooks/use-game-state'
 import { Player, Plot, GameState, PlayerScore } from '@/lib/types'
 import { attachUndoSnapshotIfTurnAction, canUndoLastAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
@@ -101,7 +101,7 @@ import {
   getPlotPropertyIncome,
   isHousingPropertyCard,
 } from '@/lib/housingEconomics'
-import { getBuildCelebrationMessage } from '@/lib/buildCelebrationMessages'
+import { getBuildCelebrationNotice, getPlotLotDisplayName } from '@/lib/buildCelebrationMessages'
 import {
   MAX_TURN_ACTIONS,
   replenishCurrentPlayerActionHand,
@@ -749,9 +749,9 @@ function AppInner() {
     taxActionInstanceId: string
   } | null>(null)
 
-  const [boardNotice, setBoardNotice] = useState<{ title: string; detail?: string } | null>(null)
+  const [boardNotice, setBoardNotice] = useState<{ title: ReactNode; detail?: string } | null>(null)
   const boardNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const showBoardNotice = useCallback((title: string, detail?: string) => {
+  const showBoardNotice = useCallback((title: ReactNode, detail?: string) => {
     if (boardNoticeTimerRef.current) {
       clearTimeout(boardNoticeTimerRef.current)
       boardNoticeTimerRef.current = null
@@ -779,6 +779,15 @@ function AppInner() {
     if (isOnlineActor) sendFxRef.current(fx)
   }
 
+  const broadcastDiceRollNotice = useCallback(
+    (title: string, detail?: string, sound?: BoardFx['sound']) => {
+      const diceTitle = title.startsWith('🎲') ? title : `🎲 ${title}`
+      broadcastBoardFx({ notice: { title: diceTitle, detail }, sound })
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isOnlineActor]
+  )
+
   onGameEventsRef.current = (events: GameEvent[]) => {
     for (const e of events) {
       if (e.type === 'toast') {
@@ -805,19 +814,35 @@ function AppInner() {
       } else if (e.type === 'game_over') {
         toast.success('Final Round complete — game over!')
       } else if (e.type === 'build_celebration') {
-        showBoardNotice(e.title, e.detail)
-        if (e.title.includes('anchored')) playAnchorDropSound()
+        const title =
+          e.suffix === ' anchored!' ? (
+            <>
+              ⚓ <strong>{e.lotName}</strong>
+              {e.suffix}
+            </>
+          ) : (
+            <>
+              <strong>{e.lotName}</strong>
+              {e.suffix}
+            </>
+          )
+        showBoardNotice(title, e.detail)
+        if (e.suffix === ' anchored!') playAnchorDropSound()
         else playConstructionSound()
       } else if (e.type === 'council_freeze_result') {
         if (e.negated) {
           showBoardNotice(
-            `${e.targetName} rolled a 6!`,
+            <>
+              🎲 <strong>{e.targetName}</strong> rolled a 6!
+            </>,
             'City Council Freeze negated — they can build as usual.'
           )
           playCrowdCheerSound()
         } else {
           showBoardNotice(
-            `${e.targetName} rolled ${e.result} — the freeze holds.`,
+            <>
+              🎲 <strong>{e.targetName}</strong> rolled {e.result} — the freeze holds.
+            </>,
             'They cannot build properties until they finish their next turn.'
           )
           playCrowdBooSound()
@@ -831,14 +856,21 @@ function AppInner() {
               : 'Police Raid on Mafia'
         if (e.negated) {
           showBoardNotice(
-            `${kindLabel}: ${e.targetName} rolled ${e.result} — blocked!`,
+            <>
+              🎲 {kindLabel}: <strong>{e.targetName}</strong> rolled {e.result} — blocked!
+            </>,
             `${e.attackerName}'s play is repelled.`
           )
           playCrowdCheerSound()
         } else {
           showBoardNotice(
-            `${kindLabel}: ${e.targetName} rolled ${e.result} — ${e.attackerName} succeeds${e.plotLabel ? ` at ${e.plotLabel}` : ''}.`,
-            'Anchor influence is discontinued.'
+            <>
+              🎲 {kindLabel}: <strong>{e.targetName}</strong> rolled {e.result} — {e.attackerName} succeeds
+              {e.plotLabel ? ` at ${e.plotLabel}` : ''}.
+            </>,
+            e.kind === 'hostile-takeover'
+              ? 'The lot changes hands.'
+              : 'Anchor influence is discontinued.'
           )
           playInfluenceDwindleSound()
         }
@@ -852,7 +884,7 @@ function AppInner() {
     if (d11Plot && d11Plot.building === 'Housing') {
       setGameState((current) => {
         const updatedPlots = current.plots.map(p =>
-          p.row === 11 && p.col === 'D' ? { ...p, building: 'Park' } : p
+          p.row === 11 && p.col === 'D' ? { ...p, building: 'Reese Park' } : p
         )
         return { ...current, plots: updatedPlots }
       })
@@ -1226,7 +1258,7 @@ function AppInner() {
     if (announcedFreezeKeyRef.current !== pendingFreezeKey) {
       announcedFreezeKeyRef.current = pendingFreezeKey
       showBoardNotice(
-        `City Council Freeze on ${pending.targetName}!`,
+        `🎲 City Council Freeze on ${pending.targetName}!`,
         `${pending.attackerName} succeeded — ${pending.targetName} must roll a 6 to negate the freeze.`
       )
     }
@@ -1295,10 +1327,19 @@ function AppInner() {
             ? 'Hostile Takeover'
             : 'Police Raid on Mafia'
       showBoardNotice(
-        `${kindTitle} — ${pending.targetName} must roll!`,
+        `🎲 ${kindTitle} — ${pending.targetName} must roll!`,
         `${pending.attackerName} succeeded. ${pending.targetName} rolls on their own screen.`
       )
-      broadcastBoardFx({ sound: 'cheer', notice: { title: `${kindTitle} defense roll`, detail: `${pending.targetName} is rolling.` } }, { localEcho: false })
+      broadcastBoardFx(
+        {
+          sound: 'cheer',
+          notice: {
+            title: `🎲 ${kindTitle} defense roll`,
+            detail: `${pending.targetName} is rolling.`,
+          },
+        },
+        { localEcho: false }
+      )
     }
 
     const defender = gameState.players.find((p) => p.id === pending.targetPlayerId)
@@ -1368,16 +1409,16 @@ function AppInner() {
     if (announcedLocalDramaKeyRef.current === key) return
     announcedLocalDramaKeyRef.current = key
     const titles: Record<string, { title: string; detail: string }> = {
-      'hostile-takeover-attacker': { title: 'Hostile Takeover roll', detail: 'Attacker is rolling to seize a rival lot.' },
-      'hostile-takeover-defender': { title: 'Hostile Takeover defense', detail: 'Owner rolls — only a 6 blocks the takeover.' },
-      'scandal-attacker': { title: 'Scandal roll', detail: 'Attacker is rolling to discontinue anchor influence.' },
-      'scandal-defender': { title: 'Scandal defense', detail: 'Anchor owner rolls — only a 6 negates the scandal.' },
-      'council-freeze-attacker': { title: 'City Council Freeze', detail: 'Attacker is rolling to freeze a rival founder.' },
-      'council-freeze-defender': { title: 'Freeze defense roll', detail: 'Frozen founder rolls — only a 6 negates.' },
-      'police-raid-attacker': { title: 'Police Raid on Mafia', detail: 'Attacker is rolling against the Mafia.' },
-      'police-raid-defender': { title: 'Mafia counter roll', detail: 'Mafia owner rolls to repel the raid.' },
-      'remove-investors': { title: 'Remove Investors roll', detail: 'Attacker is rolling to clear investors from a lot.' },
-      'rezoning': { title: 'Rezoning roll', detail: 'Founder is rolling to rezone a vacant lot.' },
+      'hostile-takeover-attacker': { title: '🎲 Hostile Takeover roll', detail: 'Attacker is rolling to seize a rival lot.' },
+      'hostile-takeover-defender': { title: '🎲 Hostile Takeover defense', detail: 'Owner rolls — only a 6 blocks the takeover.' },
+      'scandal-attacker': { title: '🎲 Scandal roll', detail: 'Attacker is rolling to discontinue anchor influence.' },
+      'scandal-defender': { title: '🎲 Scandal defense', detail: 'Anchor owner rolls — only a 6 negates the scandal.' },
+      'council-freeze-attacker': { title: '🎲 City Council Freeze', detail: 'Attacker is rolling to freeze a rival founder.' },
+      'council-freeze-defender': { title: '🎲 Freeze defense roll', detail: 'Frozen founder rolls — only a 6 negates.' },
+      'police-raid-attacker': { title: '🎲 Police Raid on Mafia', detail: 'Attacker is rolling against the Mafia.' },
+      'police-raid-defender': { title: '🎲 Mafia counter roll', detail: 'Mafia owner rolls to repel the raid.' },
+      'remove-investors': { title: '🎲 Remove Investors roll', detail: 'Attacker is rolling to clear investors from a lot.' },
+      'rezoning': { title: '🎲 Rezoning roll', detail: 'Founder is rolling to rezone a vacant lot.' },
     }
     const copy = titles[mode]
     if (copy) {
@@ -1397,7 +1438,7 @@ function AppInner() {
     broadcastBoardFx(
       {
         notice: {
-          title: 'Income resolution',
+          title: '🎲 Income resolution',
           detail: `${incomeDialogState.player?.name ?? 'A founder'} is rolling for income.`,
         },
         sound: 'income',
@@ -2674,15 +2715,36 @@ function AppInner() {
       )
 
       {
-        const celebration = getBuildCelebrationMessage(resolvedTemplate, { housingHighDensity: highDensityPlacement })
+        const celebration = getBuildCelebrationNotice(plot, resolvedTemplate, {
+          housingHighDensity: highDensityPlacement,
+        })
         const isAnchorBuild = resolvedTemplate.type === 'anchor'
-        const title = celebration ?? `Built ${resolvedTemplate.name}!`
-        showBoardNotice(
-          isAnchorBuild ? `⚓ ${resolvedTemplate.name} anchored!` : title,
-          `${col}${row} · $${buildCost}M`
-        )
-        if (isAnchorBuild) playAnchorDropSound()
-        else playConstructionSound()
+        if (isAnchorBuild) {
+          showBoardNotice(
+            <>
+              ⚓ <strong>{resolvedTemplate.name}</strong> anchored!
+            </>,
+            `${col}${row} · $${buildCost}M`
+          )
+          playAnchorDropSound()
+        } else if (celebration) {
+          showBoardNotice(
+            <>
+              <strong>{celebration.lotName}</strong>
+              {celebration.suffix}
+            </>,
+            `${col}${row} · $${buildCost}M`
+          )
+          playConstructionSound()
+        } else {
+          showBoardNotice(
+            <>
+              Built <strong>{getPlotLotDisplayName(col, row, plot.building)}</strong>!
+            </>,
+            `${col}${row} · $${buildCost}M`
+          )
+          playConstructionSound()
+        }
       }
       setPlacementMode({
         active: false,
@@ -3892,7 +3954,8 @@ function AppInner() {
   const handleIncomeComplete = (
     earnedIncome: number,
     doubleIncomeInstanceId?: string,
-    incomeResolution: 'property-roll' | 'bank-income-card' = 'property-roll'
+    incomeResolution: 'property-roll' | 'bank-income-card' = 'property-roll',
+    dieFace?: number
   ) => {
     if (!incomeDialogState.actionInstanceId) return
 
@@ -4080,6 +4143,20 @@ function AppInner() {
       resetIncomeDialog()
     }
 
+    if (isPropertyRoll && dieFace != null) {
+      broadcastDiceRollNotice(
+        `${incomeOwnerPreview.name} rolled ${dieFace}`,
+        `$${earnedIncome}M collected${cashToAdd !== earnedIncome ? ` · keeps $${cashToAdd}M after shares and levies` : ''}.`,
+        'income'
+      )
+    } else if (incomeResolution === 'bank-income-card') {
+      broadcastDiceRollNotice(
+        `${incomeOwnerPreview.name} banked Income`,
+        `$${earnedIncome}M added to their treasury.`,
+        'income'
+      )
+    }
+
     toast.success(
       pendingTax
         ? `Income collected: $${cashToAdd}M after city tax assessment${levy > 0 ? ` (−$${levy}M)` : ''}.`
@@ -4237,6 +4314,7 @@ function AppInner() {
     })
     if (source === 'accept') {
       toast.info('City Council Freeze ends — you did not reach 5–6 after influence.')
+      broadcastDiceRollNotice('City Council Freeze failed', 'The freeze card is spent with no effect.', 'boo')
     }
   }, [])
 
@@ -4402,6 +4480,11 @@ function AppInner() {
       if (success) {
         const detail = bonus > 0 ? ` ${natural} + ${bonus} (${labels.join(' & ')}) = ${total}` : ` ${natural}`
         toast.success(`Rolled${detail}. Success — target may roll a 6 to negate the freeze.`)
+        broadcastDiceRollNotice(
+          `City Council Freeze succeeds (rolled ${total})`,
+          'Target founder must roll a 6 to negate.',
+          'boo'
+        )
 
         if (isOnlineActor) {
           // Online: hand the negate roll to the target's own device. Spend the card
@@ -4599,6 +4682,11 @@ function AppInner() {
       }
       if (takeoverTotal < 5) {
         toast.info('Unsuccessful Take Over. The card is spent and the $1M fee is lost.')
+        broadcastDiceRollNotice(
+          `Hostile Takeover failed (rolled ${takeoverTotal})`,
+          'Need 5+ after influence to seize a rival lot.',
+          'cheer'
+        )
         setRollDieDialogState({
           open: false,
           mode: 'roll-die',
@@ -4661,7 +4749,7 @@ function AppInner() {
         })
         broadcastBoardFx({
           notice: {
-            title: 'Hostile Takeover succeeds!',
+            title: `🎲 Hostile Takeover succeeds (rolled ${takeoverTotal})!`,
             detail: `${ctx.col}${ctx.row} owner must roll a 6 to block.`,
           },
           sound: 'boo',
@@ -4733,7 +4821,14 @@ function AppInner() {
       }
 
       if (blocked) {
+        const ownerName =
+          safeGameState.players.find((p) => p.id === ownerPlayerId)?.name ?? 'Property owner'
         toast.success('Rolled 6 — takeover blocked. The property stays with its owner.')
+        broadcastDiceRollNotice(
+          `Hostile Takeover blocked — ${ownerName} rolled 6`,
+          `${col}${row} stays with its owner.`,
+          'cheer'
+        )
       } else {
         patchGameState((current) => {
           const cpIdx = current.currentPlayerIndex
@@ -4780,6 +4875,11 @@ function AppInner() {
           }
           return stateAfterTakeover
         })
+        broadcastDiceRollNotice(
+          `Hostile Takeover complete at ${col}${row}`,
+          `Paid $${payment120Million}M to the former owner.`,
+          'dwindle'
+        )
       }
 
       setRollDieDialogState({
@@ -4813,6 +4913,11 @@ function AppInner() {
       }
       if (total < 6) {
         toast.info('Scandal fails — need 6+ after Influencer bonus. Scandal card is discarded.')
+        broadcastDiceRollNotice(
+          `Scandal failed (rolled ${total})`,
+          'Need 6+ after influence to target an anchor tenant.',
+          'cheer'
+        )
         finalizeScandalCardSpent(instanceId)
         return
       }
@@ -4872,7 +4977,7 @@ function AppInner() {
         })
         broadcastBoardFx({
           notice: {
-            title: 'Scandal succeeds!',
+            title: `🎲 Scandal succeeds (rolled ${total})!`,
             detail: `${ctx.col}${ctx.row} anchor owner must roll a 6 to negate.`,
           },
           sound: 'boo',
@@ -5110,12 +5215,18 @@ function AppInner() {
             : pl
         )
         {
-          const celebration = getBuildCelebrationMessage(card, { housingHighDensity: highDensity })
-          const title =
-            card.type === 'anchor' ? `⚓ ${card.name} anchored!` : (celebration ?? `Built ${card.name}!`)
+          const rezPlot = current.plots[plotIndex]
+          const celebration = getBuildCelebrationNotice(rezPlot, card, { housingHighDensity: highDensity })
+          const notice =
+            card.type === 'anchor'
+              ? { lotName: card.name, suffix: ' anchored!' }
+              : celebration ?? { lotName: getPlotLotDisplayName(ctx.col, ctx.row, rezPlot.building), suffix: ' built!' }
           broadcastBoardFx({
             sound: card.type === 'anchor' ? 'anchor' : 'construction',
-            notice: { title, detail: `Rezoning — ${ctx.col}${ctx.row} · $${buildCost}M` },
+            notice: {
+              title: `🎲 Rezoning — ${notice.lotName}${notice.suffix}`,
+              detail: `${ctx.col}${ctx.row} · $${buildCost}M`,
+            },
           })
         }
         const newState: GameState = {
