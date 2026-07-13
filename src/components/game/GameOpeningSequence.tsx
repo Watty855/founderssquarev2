@@ -14,7 +14,7 @@ const FADE_MS = 500
 
 /** Matches build-completion `boardNotice` title in GameApp exactly. */
 const bannerTextStyle: CSSProperties = {
-  fontSize: 'clamp(1.35rem, 2.8vw, 2rem)',
+  fontSize: 'clamp(0.95rem, 2.2vw, 1.35rem)',
   fontWeight: 600,
   lineHeight: 1.35,
   letterSpacing: '0.01em',

@@ -86,27 +86,28 @@ interface GameBoardProps {
 const STREET_COLS = new Set(['E', 'I', 'M', 'Q'])
 const STREET_ROWS = new Set([5, 9, 13, 17])
 
-/** Lot title font — small Cinzel so letter + full name fit inside the cell. */
+/** Lot title font — scales with cell size; longer names step down so the full title still fits. */
 function lotTitleFontSize(title: string, opts?: { anchor?: boolean; multiline?: boolean }) {
   const len = title.length
   const words = title.trim().split(/\s+/).length
-  if (opts?.anchor) return len > 16 ? 'clamp(4px, 0.52vw, 5.5px)' : 'clamp(4.5px, 0.56vw, 6px)'
-  if (opts?.multiline) return 'clamp(4px, 0.52vw, 5.5px)'
-  if (len > 20 || words >= 3) return 'clamp(3.5px, 0.48vw, 5px)'
-  if (len > 14 || words >= 2) return 'clamp(4px, 0.52vw, 5.5px)'
-  if (len > 10) return 'clamp(4.5px, 0.56vw, 6px)'
-  return 'clamp(5px, 0.62vw, 6.5px)'
+  // cqmin = % of the smaller cell dimension (works once the lot has container-type: size).
+  if (opts?.anchor) return len > 16 ? 'clamp(6px, 11cqmin, 9px)' : 'clamp(7px, 13cqmin, 10px)'
+  if (opts?.multiline) return 'clamp(6px, 11cqmin, 9px)'
+  if (len > 20 || words >= 3) return 'clamp(5.5px, 10cqmin, 8.5px)'
+  if (len > 14 || words >= 2) return 'clamp(6.5px, 12cqmin, 9.5px)'
+  if (len > 10) return 'clamp(7px, 13cqmin, 10.5px)'
+  return 'clamp(7.5px, 15cqmin, 12px)'
 }
 
 function lotLetterFontSize(letter: string) {
-  return letter.length > 1 ? 'clamp(4px, 0.5vw, 5.5px)' : 'clamp(4.5px, 0.55vw, 6px)'
+  return letter.length > 1 ? 'clamp(7px, 14cqmin, 12px)' : 'clamp(8px, 16cqmin, 13px)'
 }
 
 /** Border terrain label — fits narrow strips along the board edge. */
 function borderLabelFontSize(terrain: string, vertical: boolean) {
   const len = terrain.length
-  if (vertical) return len > 7 ? 'clamp(5px, 0.55vw, 6.5px)' : 'clamp(5.5px, 0.6vw, 7px)'
-  return len > 8 ? 'clamp(5px, 0.6vw, 6.5px)' : 'clamp(5.5px, 0.65vw, 7.5px)'
+  if (vertical) return len > 7 ? 'clamp(5px, 9cqmin, 8px)' : 'clamp(5.5px, 10cqmin, 9px)'
+  return len > 8 ? 'clamp(5px, 10cqmin, 8px)' : 'clamp(5.5px, 11cqmin, 9px)'
 }
 
 // Border terrain colors — rich and distinct
@@ -281,27 +282,19 @@ export function GameBoard({
     }
   }
 
-  // Grid sizing — with board art, use equal fr tracks so the image maps evenly across the grid.
+  // Proportional fr tracks so Mountain/River/Farmland/Railway scale with the board
+  // (fixed px strips dominated small screens) but stay a minor share: each terrain
+  // strip is ~40% of a city lot; streets remain hairline separators.
   const colTemplate = COLUMNS.map(col => {
-    if (USE_BOARD_ART) {
-      if (STREET_COLS.has(col)) return '0.12fr'
-      if (col === 'A' || col === 'U') return '0.85fr'
-      return '1fr'
-    }
-    if (col === 'A' || col === 'U') return '44px'
     if (STREET_COLS.has(col)) return '4px'
+    if (col === 'A' || col === 'U') return '0.4fr'
     return '1fr'
   }).join(' ')
 
   const rows = Array.from({ length: 21 }, (_, i) => i + 1)
   const rowTemplate = rows.map(row => {
-    if (USE_BOARD_ART) {
-      if (STREET_ROWS.has(row)) return '0.12fr'
-      if (row === 1 || row === 21) return '0.85fr'
-      return '1fr'
-    }
-    if (row === 1 || row === 21) return '32px'
     if (STREET_ROWS.has(row)) return '4px'
+    if (row === 1 || row === 21) return '0.4fr'
     return '1fr'
   }).join(' ')
 
@@ -418,7 +411,7 @@ export function GameBoard({
         }}
       >
         <div
-          className={USE_BOARD_ART ? 'fs-board-art-surface' : undefined}
+          className={USE_BOARD_ART ? 'fs-board-art-surface' : 'fs-board-grid'}
           style={{
             display: 'grid',
             gridTemplateColumns: colTemplate,
@@ -435,8 +428,7 @@ export function GameBoard({
                   backgroundRepeat: 'no-repeat',
                 }
               : {
-                  // Fit the board area (not full viewport width) so phone layouts
-                  // with a players strip still show a readable board.
+                  // Fit the board area while keeping table proportions readable.
                   width: '100%',
                   maxWidth: 1400,
                   maxHeight: '100%',
@@ -770,6 +762,7 @@ export function GameBoard({
                 cursor: claimable ? 'pointer' : 'default',
                 minHeight: 0,
                 padding: '2px',
+                containerType: 'size',
                 transition: 'opacity 180ms ease, filter 180ms ease, transform 180ms ease, box-shadow 150ms ease, border-color 150ms ease',
                 ...(elevatingCells.has(`${plot.col}${plot.row}`)
                   ? { animation: 'fsBuildElevate 1.6s cubic-bezier(0.22, 1, 0.36, 1) both', zIndex: 30 }
@@ -898,7 +891,7 @@ export function GameBoard({
                         <span
                           style={{
                             display: 'block',
-                            fontSize: 5,
+                            fontSize: 'clamp(5px, 9cqmin, 8px)',
                             fontWeight: 800,
                             letterSpacing: '0.06em',
                             color: '#fef9c3',

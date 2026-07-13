@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import { MOTIVATIONAL_BANNER_PHRASES } from '@/lib/motivationalBannerPhrases'
 
 /** Matches build-completion center notice title in GameApp (`boardNotice`). */
-const BANNER_TITLE_FS = 'clamp(1.35rem, 2.8vw, 2rem)' as const
+const BANNER_TITLE_FS = 'clamp(0.85rem, 2vw, 1.25rem)' as const
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t
@@ -69,7 +69,7 @@ export function MotivationalRoundBanner({ playRoundNumber }: MotivationalRoundBa
       className="pointer-events-none flex w-full min-w-0 max-w-[min(92%,1100px)] flex-col items-center justify-center px-1 sm:px-2"
     >
       <div
-        className="max-w-[min(96vw,1100px)] rounded-xl border border-white/20 px-5 py-3 text-center shadow-lg sm:px-8 sm:py-4"
+        className="max-w-[min(92vw,36rem)] rounded-lg border border-white/20 px-3 py-2 text-center shadow-lg sm:rounded-xl sm:px-5 sm:py-3"
         style={{
           backgroundColor: 'rgba(8, 10, 16, 0.88)',
           backdropFilter: 'blur(8px)',

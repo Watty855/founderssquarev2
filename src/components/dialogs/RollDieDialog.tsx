@@ -329,12 +329,12 @@ function RollDieDialogInner({
        * which is enough — no `position: relative` needed on the dialog itself.
        */}
       <DialogContent
-        className="max-w-[400px] [&>button:first-child]:hidden"
+        className="max-w-[min(360px,92vw)] max-h-[min(85dvh,640px)] overflow-y-auto overscroll-contain [&>button:first-child]:hidden"
         style={{
           backgroundColor: '#141418',
           border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: 16,
-          padding: 24,
+          borderRadius: 14,
+          padding: 16,
         }}
       >
         {councilFreezeFailAuto && (
@@ -560,8 +560,8 @@ function RollDieDialogInner({
               <div
                 id={containerId}
                 style={{
-                  width: 300,
-                  height: 200,
+                  width: 'min(220px, 70vw)',
+                  height: 'min(140px, 22vh)',
                   borderRadius: 10,
                   background: '#1a1a24',
                   position: 'relative',
@@ -572,7 +572,7 @@ function RollDieDialogInner({
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {diceValue !== null && (
-                <div style={{ textAlign: 'center', fontSize: 32, fontWeight: 300, color: '#1eaedb', padding: '8px 0' }}>
+                <div style={{ textAlign: 'center', fontSize: 'clamp(22px, 5vw, 28px)', fontWeight: 300, color: '#1eaedb', padding: '6px 0' }}>
                   You rolled: {diceValue}
                   {(mode === 'council-freeze-attacker' || mode === 'rezoning') && influenceBonus > 0 && (
                     <div style={{ fontSize: 16, fontWeight: 500, color: 'rgba(240,240,245,0.75)', marginTop: 8 }}>

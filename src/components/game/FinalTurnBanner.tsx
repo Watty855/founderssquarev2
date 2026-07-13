@@ -28,22 +28,22 @@ export function FinalTurnBanner({
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none z-40 flex w-full min-w-0 max-w-full justify-center px-4 py-2 sm:px-6"
+      className="pointer-events-none z-40 flex w-full min-w-0 max-w-full justify-center px-2 py-1 sm:px-4 sm:py-2"
     >
       <style>{`
         @keyframes fsFinalTurnPulse {
           0%, 100% {
             box-shadow:
               0 0 0 1px rgba(255, 255, 255, 0.18),
-              0 0 32px -4px rgba(248, 113, 113, 0.55),
-              0 0 80px -10px rgba(248, 113, 113, 0.35),
+              0 0 20px -4px rgba(248, 113, 113, 0.45),
+              0 0 40px -10px rgba(248, 113, 113, 0.28),
               inset 0 0 0 1px rgba(255, 255, 255, 0.05);
           }
           50% {
             box-shadow:
               0 0 0 1px rgba(255, 255, 255, 0.25),
-              0 0 60px -2px rgba(248, 113, 113, 0.85),
-              0 0 120px -8px rgba(248, 113, 113, 0.55),
+              0 0 36px -2px rgba(248, 113, 113, 0.7),
+              0 0 64px -8px rgba(248, 113, 113, 0.4),
               inset 0 0 0 1px rgba(255, 255, 255, 0.08);
           }
         }
@@ -58,24 +58,24 @@ export function FinalTurnBanner({
       `}</style>
       <div
         style={{
-          minWidth: 420,
-          maxWidth: 720,
-          padding: '14px 26px',
-          borderRadius: 18,
+          width: 'min(92vw, 28rem)',
+          maxWidth: 520,
+          padding: '10px 14px',
+          borderRadius: 14,
           backgroundColor: 'rgba(15, 7, 7, 0.92)',
           backdropFilter: 'blur(8px)',
           WebkitBackdropFilter: 'blur(8px)',
           animation: 'fsFinalTurnPulse 2.4s ease-in-out infinite, fsFinalTurnSlideIn 320ms ease-out',
           display: 'flex',
           alignItems: 'center',
-          gap: 16,
+          gap: 10,
         }}
       >
         <span
           aria-hidden
           style={{
-            width: 12,
-            height: 12,
+            width: 9,
+            height: 9,
             borderRadius: 999,
             backgroundColor: '#f87171',
             boxShadow: '0 0 12px #f87171, 0 0 4px #fff',
@@ -83,13 +83,13 @@ export function FinalTurnBanner({
             flexShrink: 0,
           }}
         />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
           <p
             style={{
               margin: 0,
-              fontSize: 11,
+              fontSize: 'clamp(9px, 1.4vw, 11px)',
               fontWeight: 800,
-              letterSpacing: '0.22em',
+              letterSpacing: '0.16em',
               textTransform: 'uppercase',
               color: '#fca5a5',
             }}
@@ -99,7 +99,7 @@ export function FinalTurnBanner({
           <p
             style={{
               margin: 0,
-              fontSize: 22,
+              fontSize: 'clamp(14px, 2.4vw, 18px)',
               fontWeight: 700,
               letterSpacing: '0.02em',
               color: '#fff5f5',
@@ -129,13 +129,13 @@ export function FinalTurnBanner({
             flexDirection: 'column',
             alignItems: 'flex-end',
             gap: 2,
-            paddingLeft: 12,
+            paddingLeft: 10,
             borderLeft: '1px solid rgba(255,255,255,0.12)',
           }}
         >
           <span
             style={{
-              fontSize: 26,
+              fontSize: 'clamp(18px, 3vw, 22px)',
               fontWeight: 800,
               fontVariantNumeric: 'tabular-nums',
               color: '#fff5f5',
@@ -147,9 +147,9 @@ export function FinalTurnBanner({
           </span>
           <span
             style={{
-              fontSize: 9.5,
+              fontSize: 9,
               fontWeight: 700,
-              letterSpacing: '0.16em',
+              letterSpacing: '0.14em',
               textTransform: 'uppercase',
               color: 'rgba(252, 165, 165, 0.85)',
             }}

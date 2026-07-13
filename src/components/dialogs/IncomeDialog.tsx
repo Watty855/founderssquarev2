@@ -287,12 +287,12 @@ export function IncomeDialog({
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && handleClose()}>
       <DialogContent
-        className="max-w-[400px] max-h-[min(90dvh,720px)] overflow-y-auto overscroll-contain [&>button:first-child]:hidden"
+        className="max-w-[min(360px,92vw)] max-h-[min(85dvh,640px)] overflow-y-auto overscroll-contain [&>button:first-child]:hidden"
         style={{
           backgroundColor: '#141418',
           border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: 16,
-          padding: 24,
+          borderRadius: 14,
+          padding: 16,
         }}
       >
         <DialogHeader style={{ marginBottom: 4 }}>
@@ -371,9 +371,9 @@ export function IncomeDialog({
                     <div
                       id={containerId}
                       style={{
-                        width: 'min(300px, 100%)',
-                        height: 'min(200px, 28vh)',
-                        maxHeight: 200,
+                        width: 'min(220px, 70vw)',
+                        height: 'min(140px, 22vh)',
+                        maxHeight: 160,
                         borderRadius: 10,
                         background: '#1a1a24',
                         position: 'relative',
@@ -804,7 +804,7 @@ export function IncomeDialog({
                     )}
                     <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 10, marginTop: 6 }}>
                       <div style={{ fontSize: 11, color: '#8888a0', marginBottom: 2 }}>You receive</div>
-                      <div style={{ fontSize: 32, fontWeight: 300, color: '#1eaedb' }}>
+                      <div style={{ fontSize: 'clamp(22px, 5vw, 28px)', fontWeight: 300, color: '#1eaedb' }}>
                         ${incomeResult.amount}M
                       </div>
                     </div>

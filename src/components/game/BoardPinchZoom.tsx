@@ -18,7 +18,7 @@ type BoardPinchZoomProps = {
 }
 
 const MIN_SCALE = 1
-const MAX_SCALE = 3.5
+const MAX_SCALE = 4.5
 
 function distance(a: { x: number; y: number }, b: { x: number; y: number }) {
   return Math.hypot(b.x - a.x, b.y - a.y)
@@ -29,8 +29,8 @@ function midpoint(a: { x: number; y: number }, b: { x: number; y: number }) {
 }
 
 /**
- * Pinch-to-zoom + pan for the game board on phones.
- * Whole-page WKWebView zoom is unreliable inside Capacitor's clipped shell.
+ * Pinch-to-zoom + pan for the board and hand together on phones.
+ * At 1× scale, one-finger gestures pass through so the hand can scroll horizontally.
  */
 export function BoardPinchZoom({ enabled, children, className, style }: BoardPinchZoomProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -44,13 +44,15 @@ export function BoardPinchZoom({ enabled, children, className, style }: BoardPin
   )
   const panStart = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
   const lastTap = useRef(0)
+  const capturing = useRef(false)
 
   const clampPan = useCallback((nextScale: number, nextTx: number, nextTy: number) => {
     const el = viewportRef.current
     if (!el) return { tx: nextTx, ty: nextTy }
     const { clientWidth: w, clientHeight: h } = el
-    const maxX = ((nextScale - 1) * w) / 2 + 24
-    const maxY = ((nextScale - 1) * h) / 2 + 24
+    // Extra slack so zoomed hands/cards past the edge can be panned into view.
+    const maxX = ((nextScale - 1) * w) / 2 + w * 0.45
+    const maxY = ((nextScale - 1) * h) / 2 + h * 0.35
     return {
       tx: Math.max(-maxX, Math.min(maxX, nextTx)),
       ty: Math.max(-maxY, Math.min(maxY, nextTy)),
@@ -69,8 +71,6 @@ export function BoardPinchZoom({ enabled, children, className, style }: BoardPin
 
   const onPointerDown = (e: ReactPointerEvent) => {
     if (!enabled) return
-    const target = e.currentTarget
-    target.setPointerCapture(e.pointerId)
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
     if (pointers.current.size === 1) {
@@ -81,12 +81,23 @@ export function BoardPinchZoom({ enabled, children, className, style }: BoardPin
       } else {
         lastTap.current = now
       }
+      // At 1×, leave one-finger gestures alone (hand scroll / card taps).
       if (scale > 1.01) {
+        capturing.current = true
+        e.currentTarget.setPointerCapture(e.pointerId)
         panStart.current = { x: e.clientX, y: e.clientY, tx, ty }
       }
     }
 
     if (pointers.current.size === 2) {
+      capturing.current = true
+      for (const id of pointers.current.keys()) {
+        try {
+          e.currentTarget.setPointerCapture(id)
+        } catch {
+          /* already captured or released */
+        }
+      }
       const pts = [...pointers.current.values()]
       pinchStart.current = {
         dist: distance(pts[0], pts[1]),
@@ -104,6 +115,7 @@ export function BoardPinchZoom({ enabled, children, className, style }: BoardPin
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
     if (pointers.current.size === 2 && pinchStart.current) {
+      e.preventDefault()
       const pts = [...pointers.current.values()]
       const dist = distance(pts[0], pts[1])
       const mid = midpoint(pts[0], pts[1])
@@ -121,6 +133,7 @@ export function BoardPinchZoom({ enabled, children, className, style }: BoardPin
     }
 
     if (pointers.current.size === 1 && panStart.current && scale > 1.01) {
+      e.preventDefault()
       const dx = e.clientX - panStart.current.x
       const dy = e.clientY - panStart.current.y
       const pan = clampPan(scale, panStart.current.tx + dx, panStart.current.ty + dy)
@@ -133,20 +146,25 @@ export function BoardPinchZoom({ enabled, children, className, style }: BoardPin
     if (!enabled) return
     pointers.current.delete(e.pointerId)
     if (pointers.current.size < 2) pinchStart.current = null
-    if (pointers.current.size === 0) panStart.current = null
+    if (pointers.current.size === 0) {
+      panStart.current = null
+      capturing.current = false
+    }
     if (pointers.current.size === 1 && scale > 1.01) {
-      const remaining = [...pointers.current.values()][0]
-      panStart.current = { x: remaining.x, y: remaining.y, tx, ty }
+      const remaining = [...pointers.current.entries()][0]
+      panStart.current = { x: remaining[1].x, y: remaining[1].y, tx, ty }
     }
   }
 
   if (!enabled) {
     return (
-      <div className={className} style={style}>
+      <div className={className} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, ...style }}>
         {children}
       </div>
     )
   }
+
+  const zoomed = scale > 1.01
 
   return (
     <div
@@ -159,7 +177,8 @@ export function BoardPinchZoom({ enabled, children, className, style }: BoardPin
         minHeight: 0,
         minWidth: 0,
         ...style,
-        touchAction: 'none',
+        // At 1× allow native hand scrolling; when zoomed, we own gestures.
+        touchAction: zoomed ? 'none' : 'pan-x pan-y',
         overflow: 'hidden',
         position: 'relative',
         overscrollBehavior: 'contain',
@@ -175,8 +194,9 @@ export function BoardPinchZoom({ enabled, children, className, style }: BoardPin
           height: '100%',
           minHeight: 0,
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          flexDirection: 'column',
+          alignItems: 'stretch',
+          justifyContent: 'stretch',
           transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
           transformOrigin: 'center center',
           transition: pointers.current.size > 0 ? 'none' : 'transform 120ms ease-out',

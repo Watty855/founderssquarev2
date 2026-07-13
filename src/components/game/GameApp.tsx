@@ -6560,18 +6560,33 @@ function AppInner() {
         </aside>
         )}
 
-        {/* Center board + bottom hand — black surround; cards sit at bottom of screen */}
+        {/* Center board + bottom hand — pinch-zoom together on phones */}
         <div
           className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0"
           style={{ backgroundColor: '#000000' }}
         >
-          {/* Board area */}
           <BoardPinchZoom
             enabled={isCompactLayout}
-            className="relative flex-1 flex items-center justify-center overflow-hidden min-h-0"
-            style={{ padding: isCompactLayout ? '4px 4px 0' : undefined }}
+            className="relative flex-1 flex flex-col overflow-hidden min-h-0 min-w-0"
           >
-            <div className={isCompactLayout ? 'relative w-full h-full min-h-0 flex items-center justify-center px-1 pt-1' : 'relative flex-1 flex items-center justify-center overflow-hidden px-3 pt-2 min-h-0 w-full h-full'}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                width: '100%',
+                height: '100%',
+                minHeight: 0,
+                minWidth: 0,
+              }}
+            >
+            {/* Board area */}
+            <div
+              className={
+                isCompactLayout
+                  ? 'relative flex-1 min-h-0 flex items-center justify-center overflow-hidden px-1 pt-1'
+                  : 'relative flex-1 flex items-center justify-center overflow-hidden px-3 pt-2 min-h-0'
+              }
+            >
             {showOpeningProTip ? (
               <div
                 aria-hidden
@@ -6674,14 +6689,14 @@ function AppInner() {
             ) : null}
             {boardNotice && (
               <div
-                className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-6"
+                className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-3 sm:p-6"
                 aria-live="polite"
                 role="status"
               >
-                <div className="fs-board-notice-panel max-w-xl rounded-2xl border border-white/25 bg-black/80 px-10 py-9 text-center shadow-[0_0_60px_rgba(0,0,0,0.65)] backdrop-blur-md">
+                <div className="fs-board-notice-panel max-w-[min(92vw,28rem)] rounded-xl border border-white/25 bg-black/80 px-4 py-3 text-center shadow-[0_0_40px_rgba(0,0,0,0.55)] backdrop-blur-md sm:rounded-2xl sm:px-6 sm:py-5">
                   <p
                     style={{
-                      fontSize: 'clamp(1.35rem, 2.8vw, 2rem)',
+                      fontSize: 'clamp(0.95rem, 2.2vw, 1.35rem)',
                       fontWeight: 600,
                       lineHeight: 1.35,
                       letterSpacing: '0.01em',
@@ -6694,8 +6709,8 @@ function AppInner() {
                   {boardNotice.detail ? (
                     <p
                       style={{
-                        marginTop: 14,
-                        fontSize: 15,
+                        marginTop: 8,
+                        fontSize: 'clamp(12px, 1.6vw, 14px)',
                         fontWeight: 500,
                         color: 'rgba(226,232,240,0.72)',
                         letterSpacing: '0.04em',
@@ -6708,9 +6723,8 @@ function AppInner() {
               </div>
             )}
             </div>
-          </BoardPinchZoom>
 
-          {/* Bottom hand rail — matches the integrated board layout */}
+          {/* Bottom hand rail — zooms/pans with the board on phones */}
           <div
             className={isCompactLayout ? 'flex-shrink-0 border-t border-[#d8b75a40] px-2 py-2' : 'flex-shrink-0 border-t border-[#d8b75a40] px-8 py-5'}
             style={{
@@ -6718,8 +6732,8 @@ function AppInner() {
               pointerEvents: showOpeningProTip ? 'none' : 'auto',
               opacity: showOpeningProTip ? 0.55 : 1,
               transition: 'opacity 200ms ease',
-              overflowX: isCompactLayout ? 'auto' : undefined,
-              WebkitOverflowScrolling: isCompactLayout ? 'touch' : undefined,
+              overflowX: 'auto',
+              WebkitOverflowScrolling: 'touch',
             }}
           >
             <PlayerHand
@@ -6776,6 +6790,8 @@ function AppInner() {
               crossingTheLineActive={safeGameState.crossingTheLineActive}
             />
           </div>
+            </div>
+          </BoardPinchZoom>
         </div>
       </div>
 

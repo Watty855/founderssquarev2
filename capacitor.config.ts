@@ -7,6 +7,9 @@ const config: CapacitorConfig = {
   backgroundColor: '#0a0a0f',
   ios: {
     contentInset: 'always',
+    // Beta diagnostics: allows attaching Safari Web Inspector to TestFlight builds
+    // to debug in-game freezes. Disable before public App Store release.
+    webContentsDebuggingEnabled: true,
   },
   android: {
     allowMixedContent: false,
