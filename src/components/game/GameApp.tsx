@@ -431,39 +431,21 @@ function AppInner() {
 
   const isOnlineActor = Boolean(partyBoardConfig && boardPartyConnectionId)
 
-  const commitOnlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pendingCommitStateRef = useRef<GameState | null>(null)
-
   const commitOnlineAfterState = useCallback(
     (state: GameState) => {
-      if (!partyBoardConfig || !boardPartyConnectionId) return
-      // Coalesce rapid patchGameState bursts into one commit_actor_state (latest wins).
-      pendingCommitStateRef.current = state
-      if (commitOnlineTimerRef.current != null) clearTimeout(commitOnlineTimerRef.current)
-      commitOnlineTimerRef.current = setTimeout(() => {
-        commitOnlineTimerRef.current = null
-        const latest = pendingCommitStateRef.current
-        pendingCommitStateRef.current = null
-        if (latest) {
-          sendActionRef.current({ type: 'commit_actor_state', state: latest }, { skipOptimistic: true })
-        }
-      }, 80)
+      if (partyBoardConfig && boardPartyConnectionId) {
+        sendActionRef.current({ type: 'commit_actor_state', state }, { skipOptimistic: true })
+      }
     },
     [partyBoardConfig, boardPartyConnectionId]
   )
-
-  useEffect(() => {
-    return () => {
-      if (commitOnlineTimerRef.current != null) clearTimeout(commitOnlineTimerRef.current)
-    }
-  }, [])
 
   const setGameStateWithOnlineCommit = useCallback(
     (updater: React.SetStateAction<GameState>) => {
       setGameState((prev) => {
         const next = typeof updater === 'function' ? updater(prev) : updater
         if (partyBoardConfig && boardPartyConnectionId && next !== prev) {
-          commitOnlineAfterState(next)
+          queueMicrotask(() => commitOnlineAfterState(next))
         }
         return next
       })
@@ -2478,6 +2460,13 @@ function AppInner() {
               if (card.id === 'crossing-the-line') {
                 crossingActivated = true
                 toast.success('Crossing the Line activated! Build anywhere in the city!')
+                broadcastBoardFx({
+                  notice: {
+                    title: 'Crossing the Line!',
+                    detail: `${currentPlayer.name} can build anywhere in the city this play.`,
+                  },
+                  sound: 'cheer',
+                })
               }
               updatedActionCards = updatedActionCards.filter(c => c.instanceId !== instanceId)
               updatedActionDiscard.push(instance)
@@ -4183,12 +4172,12 @@ function AppInner() {
           : `Income collected: $${cashToAdd}M!`
     )
     if (pendingTax) {
-      showBoardNotice(
-        'Tax Time Boys & Girls!',
+      const taxTitle = 'Tax Time Boys & Girls!'
+      const taxDetail =
         levy > 0
           ? `City assessment: −$${levy}M (50% of your $${totalInc}M property income base). You keep $${cashToAdd}M. Cannot be overturned.`
           : `Assessment cleared on this Income. You keep $${cashToAdd}M. Cannot be overturned.`
-      )
+      broadcastBoardFx({ notice: { title: taxTitle, detail: taxDetail }, sound: 'boo' })
     }
     if (isPropertyRoll && totalInvestorPayout > 0) {
       const resolutionLabel =

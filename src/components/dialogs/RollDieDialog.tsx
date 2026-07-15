@@ -3,8 +3,6 @@
 import { useId, useEffect, useState, useCallback } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useDiceBox } from '@/hooks/use-dice-box'
-import { FlatDie } from '@/components/game/FlatDie'
-import { useCompactGameLayout } from '@/hooks/use-compact-game-layout'
 import { XCircle } from '@phosphor-icons/react'
 import { actionCards } from '@/lib/cardData'
 import { playCrowdCheerSound } from '@/lib/soundEffects'
@@ -97,8 +95,6 @@ function RollDieDialogInner({
 }: RollDieDialogProps) {
   const instanceId = useId()
   const containerId = `dice-roll-${instanceId.replace(/:/g, '')}-${mode}`
-  const { compact } = useCompactGameLayout()
-  const preferFlatDie = compact
   const councilFreezeFlow = mode === 'council-freeze-attacker' || mode === 'council-freeze-defender'
   const councilFreezeBankValue = actionCards.find((c) => c.id === 'city-council-freeze')?.bankValue ?? 2
 
@@ -106,11 +102,7 @@ function RollDieDialogInner({
   const diceBoxOpen = open && (!councilFreezeFlow || !showCouncilFreezeIntro)
   const showNonIntroDiceUi = !councilFreezeFlow || !showCouncilFreezeIntro
 
-  const { roll, isRolling, diceValue, reset, isReady, previewFace, usingFlatDie } = useDiceBox({
-    containerId,
-    open: diceBoxOpen,
-    preferFlatDie,
-  })
+  const { roll, isRolling, diceValue, reset, isReady } = useDiceBox({ containerId, open: diceBoxOpen })
 
   const takeoverFlow = mode === 'hostile-takeover-attacker' || mode === 'hostile-takeover-defender'
   const scandalFlow = mode === 'scandal-attacker' || mode === 'scandal-defender'
@@ -565,34 +557,17 @@ function RollDieDialogInner({
             )}
 
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}>
-              {usingFlatDie || preferFlatDie ? (
-                <div
-                  style={{
-                    width: 'min(220px, 70vw)',
-                    minHeight: 120,
-                    borderRadius: 10,
-                    background: '#1a1a24',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: 16,
-                  }}
-                >
-                  <FlatDie face={diceValue ?? previewFace} rolling={isRolling} size={96} />
-                </div>
-              ) : (
-                <div
-                  id={containerId}
-                  style={{
-                    width: 'min(220px, 70vw)',
-                    height: 'min(140px, 22vh)',
-                    borderRadius: 10,
-                    background: '#1a1a24',
-                    position: 'relative',
-                    overflow: 'hidden',
-                  }}
-                />
-              )}
+              <div
+                id={containerId}
+                style={{
+                  width: 'min(220px, 70vw)',
+                  height: 'min(140px, 22vh)',
+                  borderRadius: 10,
+                  background: '#1a1a24',
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+              />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

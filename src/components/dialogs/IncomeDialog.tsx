@@ -12,8 +12,6 @@ import {
 import { aiPlaybackDelay } from '@/lib/bot/aiTiming'
 import { playIncomeSound } from '@/lib/soundEffects'
 import { useDiceBox } from '@/hooks/use-dice-box'
-import { FlatDie } from '@/components/game/FlatDie'
-import { useCompactGameLayout } from '@/hooks/use-compact-game-layout'
 
 interface IncomeDialogProps {
   open: boolean
@@ -124,8 +122,6 @@ export function IncomeDialog({
 }: IncomeDialogProps) {
   const instanceId = useId()
   const containerId = `dice-income-${instanceId.replace(/:/g, '')}`
-  const { compact } = useCompactGameLayout()
-  const preferFlatDie = compact
 
   const [incomeResult, setIncomeResult] = useState<{
     percentage: number
@@ -139,11 +135,7 @@ export function IncomeDialog({
   const [showInitialChoice, setShowInitialChoice] = useState(true)
 
   const diceOpen = open && !showInitialChoice
-  const { roll, isRolling, diceValue, isReady, previewFace, usingFlatDie } = useDiceBox({
-    containerId,
-    open: diceOpen,
-    preferFlatDie,
-  })
+  const { roll, isRolling, diceValue, isReady } = useDiceBox({ containerId, open: diceOpen })
 
   const doubleIncomeCards = (player?.actionCards || []).filter(instance => {
     const card = actionCards.find(c => c.id === instance.cardId)
@@ -378,36 +370,18 @@ export function IncomeDialog({
               {!showInitialChoice && (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}>
-                    {usingFlatDie || preferFlatDie ? (
-                      <div
-                        style={{
-                          width: 'min(220px, 70vw)',
-                          minHeight: 120,
-                          maxHeight: 160,
-                          borderRadius: 10,
-                          background: '#1a1a24',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: 16,
-                        }}
-                      >
-                        <FlatDie face={diceValue ?? previewFace} rolling={isRolling} size={96} />
-                      </div>
-                    ) : (
-                      <div
-                        id={containerId}
-                        style={{
-                          width: 'min(220px, 70vw)',
-                          height: 'min(140px, 22vh)',
-                          maxHeight: 160,
-                          borderRadius: 10,
-                          background: '#1a1a24',
-                          position: 'relative',
-                          overflow: 'hidden',
-                        }}
-                      />
-                    )}
+                    <div
+                      id={containerId}
+                      style={{
+                        width: 'min(220px, 70vw)',
+                        height: 'min(140px, 22vh)',
+                        maxHeight: 160,
+                        borderRadius: 10,
+                        background: '#1a1a24',
+                        position: 'relative',
+                        overflow: 'hidden',
+                      }}
+                    />
                   </div>
 
                   <div style={{

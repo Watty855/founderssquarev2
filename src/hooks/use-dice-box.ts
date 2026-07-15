@@ -6,32 +6,23 @@ import type DiceBox from '@3d-dice/dice-box-threejs'
 interface UseDiceBoxOptions {
   containerId: string
   open: boolean
-  /**
-   * Prefer CSS flat die (phones / WKWebView). Skips Three.js load entirely.
-   * Desktop/tablet leave false for the 3D dice-box.
-   */
-  preferFlatDie?: boolean
 }
 
 /** 3D roll animations normally settle in ~2-3s; past this we assume the canvas hung. */
 const ROLL_TIMEOUT_MS = 8000
-const FLAT_ROLL_MS = 720
 
 function randomDie(): number {
   return Math.floor(Math.random() * 6) + 1
 }
 
-export function useDiceBox({ containerId, open, preferFlatDie = false }: UseDiceBoxOptions) {
+export function useDiceBox({ containerId, open }: UseDiceBoxOptions) {
   const diceBoxRef = useRef<DiceBox | null>(null)
   const [isRolling, setIsRolling] = useState(false)
   const [diceValue, setDiceValue] = useState<number | null>(null)
   const [isReady, setIsReady] = useState(false)
-  const [previewFace, setPreviewFace] = useState(1)
   const initializingRef = useRef(false)
   /** WebGL/asset init failed (e.g. WKWebView refused a context) — roll without the 3D animation so the game never stalls. */
   const fallbackModeRef = useRef(false)
-  const flatModeRef = useRef(preferFlatDie)
-  flatModeRef.current = preferFlatDie
 
   useEffect(() => {
     if (!open) {
@@ -42,17 +33,8 @@ export function useDiceBox({ containerId, open, preferFlatDie = false }: UseDice
       setDiceValue(null)
       setIsRolling(false)
       setIsReady(false)
-      setPreviewFace(1)
       initializingRef.current = false
       fallbackModeRef.current = false
-      return
-    }
-
-    // Phone / compact path: ready immediately, no WebGL.
-    if (preferFlatDie) {
-      fallbackModeRef.current = true
-      setIsReady(true)
-      initializingRef.current = false
       return
     }
 
@@ -130,23 +112,18 @@ export function useDiceBox({ containerId, open, preferFlatDie = false }: UseDice
       initializingRef.current = false
       fallbackModeRef.current = false
     }
-  }, [open, containerId, preferFlatDie])
+  }, [open, containerId])
 
   const roll = useCallback(async (): Promise<number> => {
     if (isRolling) return 0
 
-    // Flat / fallback path — no 3D renderer.
-    if (flatModeRef.current || !diceBoxRef.current || fallbackModeRef.current) {
-      if (!flatModeRef.current && !fallbackModeRef.current && !diceBoxRef.current) return 0
+    // No 3D renderer — resolve with a short pause so the result still reads as a roll.
+    if (!diceBoxRef.current || fallbackModeRef.current) {
+      if (!fallbackModeRef.current && !diceBoxRef.current) return 0
       setIsRolling(true)
       setDiceValue(null)
-      const tick = window.setInterval(() => {
-        setPreviewFace(randomDie())
-      }, 70)
-      await new Promise((r) => setTimeout(r, flatModeRef.current ? FLAT_ROLL_MS : 650))
-      window.clearInterval(tick)
+      await new Promise((r) => setTimeout(r, 650))
       const value = randomDie()
-      setPreviewFace(value)
       setDiceValue(value)
       setIsRolling(false)
       return value
@@ -171,20 +148,17 @@ export function useDiceBox({ containerId, open, preferFlatDie = false }: UseDice
         }
         const value = randomDie()
         setDiceValue(value)
-        setPreviewFace(value)
         setIsRolling(false)
         return value
       }
       const value = result.sets[0]?.rolls[0]?.value ?? 0
       setDiceValue(value)
-      setPreviewFace(value)
       setIsRolling(false)
       return value
     } catch (err) {
       console.error('Dice roll failed — resolving with fallback value:', err)
       const value = randomDie()
       setDiceValue(value)
-      setPreviewFace(value)
       setIsRolling(false)
       return value
     }
@@ -196,17 +170,7 @@ export function useDiceBox({ containerId, open, preferFlatDie = false }: UseDice
     }
     setDiceValue(null)
     setIsRolling(false)
-    setPreviewFace(1)
   }, [])
 
-  return {
-    roll,
-    isRolling,
-    diceValue,
-    reset,
-    isReady,
-    /** Face to show on the flat die while rolling / after settle. */
-    previewFace,
-    usingFlatDie: preferFlatDie || fallbackModeRef.current,
-  }
+  return { roll, isRolling, diceValue, reset, isReady }
 }
