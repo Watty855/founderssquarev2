@@ -251,7 +251,6 @@ export const propertyCards: PropertyCard[] = [
     buildLocations: ['Civic', 'Civic Center'],
     specialAbility: 'Influence only on the city block that is built',
     category: 'civic',
-    district: 'City Center',
   },
   ...Array(1).fill(null).map((_, i) => ({
     id: `civic-riverfront-${i + 1}`,
@@ -263,10 +262,10 @@ export const propertyCards: PropertyCard[] = [
     bankValue: 4,
     endGameValue: 8,
     copies: 1,
-    buildLocations: ['Civic', 'Civic Center'],
-    specialAbility: 'When built, choose City Hall, Courthouse, Police, or Civic Center',
+    buildLocations: ['Civic', 'Civic Center', 'City Hall', 'Courthouse', 'Police'],
+    specialAbility:
+      'Build on any vacant civic (C) lot — Hope Hospital, Firehouse, City Hall, Courthouse, Police, Public Works, Water Works, Children’s Hosp, etc. Choose the lot when you play. No district restriction.',
     category: 'civic' as const,
-    district: 'Riverfront' as const
   })),
   ...Array(1).fill(null).map((_, i) => ({
     id: `civic-railway-${i + 1}`,
@@ -278,10 +277,10 @@ export const propertyCards: PropertyCard[] = [
     bankValue: 4,
     endGameValue: 8,
     copies: 1,
-    buildLocations: ['Civic', 'Civic Center'],
-    specialAbility: 'When built, choose City Hall, Courthouse, Police, or Civic Center',
+    buildLocations: ['Civic', 'Civic Center', 'City Hall', 'Courthouse', 'Police'],
+    specialAbility:
+      'Build on any vacant civic (C) lot — Hope Hospital, Firehouse, City Hall, Courthouse, Police, Public Works, Water Works, Children’s Hosp, etc. Choose the lot when you play. No district restriction.',
     category: 'civic' as const,
-    district: 'Railway District' as const
   })),
   ...Array(6).fill(null).map((_, i) => ({
     id: `civic-city-${i + 1}`,
@@ -293,10 +292,10 @@ export const propertyCards: PropertyCard[] = [
     bankValue: 4,
     endGameValue: 8,
     copies: 1,
-    buildLocations: ['Civic', 'Civic Center'],
-    specialAbility: 'When built, choose City Hall, Courthouse, Police, or Civic Center',
+    buildLocations: ['Civic', 'Civic Center', 'City Hall', 'Courthouse', 'Police'],
+    specialAbility:
+      'Build on any vacant civic (C) lot — Hope Hospital, Firehouse, City Hall, Courthouse, Police, Public Works, Water Works, Children’s Hosp, etc. Choose the lot when you play. No district restriction.',
     category: 'civic' as const,
-    district: 'City Center' as const
   })),
   {
     id: 'city-hall',
@@ -309,9 +308,8 @@ export const propertyCards: PropertyCard[] = [
     endGameValue: 8,
     copies: 1,
     buildLocations: ['City Hall'],
-    specialAbility: 'When built, choose City Hall, Courthouse, Police, or Civic Center',
+    specialAbility: 'Board-wide civic influence when built (City Council Freeze, Police Raid, etc.)',
     category: 'civic',
-    district: 'City Center'
   },
   {
     id: 'courthouse',
@@ -324,9 +322,8 @@ export const propertyCards: PropertyCard[] = [
     endGameValue: 8,
     copies: 1,
     buildLocations: ['Courthouse'],
-    specialAbility: 'When built, choose City Hall, Courthouse, Police, or Civic Center',
+    specialAbility: 'Board-wide civic influence when built (City Council Freeze, Police Raid, etc.)',
     category: 'civic',
-    district: 'City Center'
   },
   {
     id: 'police',
@@ -339,9 +336,8 @@ export const propertyCards: PropertyCard[] = [
     endGameValue: 8,
     copies: 1,
     buildLocations: ['Police'],
-    specialAbility: 'When built, choose City Hall, Courthouse, Police, or Civic Center',
+    specialAbility: 'Board-wide civic influence when built (Police Raid, City Council Freeze, etc.)',
     category: 'civic',
-    district: 'City Center'
   },
   
   ...Array(1).fill(null).map((_, i) => ({

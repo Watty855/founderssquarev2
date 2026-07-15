@@ -30,7 +30,7 @@ export type SendActionOptions = { skipOptimistic?: boolean }
 type BoardWire =
   | { kind: 'public_state'; rev: number; state: unknown }
   | { kind: 'private_hand'; rev: number; to: string; hand: PrivateHandPayload }
-  | { kind: 'action_applied'; rev: number; actionId: string; state: unknown; events?: GameEvent[] }
+  | { kind: 'action_applied'; rev: number; actionId: string; events?: GameEvent[]; state?: unknown }
   | { kind: 'action_rejected'; to: string; actionId: string; rev: number; error: string; code?: string }
   | { kind: 'game_action'; from: string; actionId: string; action: GameAction }
   | { kind: 'game_request'; from: string }
@@ -108,16 +108,18 @@ export function useOnlineBoardSync(params: {
   const applyMergedView = useCallback(() => {
     const pub = latestPublicRef.current
     if (!pub) return
+    const prev = gameStateRef.current
     const merged = mergePublicAndPrivateHands(
       pub,
       resolveViewerId(),
-      [...latestHandsRef.current.values()]
+      [...latestHandsRef.current.values()],
+      { actionDeck: prev.actionDeck, propertyDeck: prev.propertyDeck }
     )
     // The opening narration is a per-device intro; once this device dismissed
     // it, don't let an authoritative snapshot (seeded before dismissal) bring
     // it back — it would also re-block the host's AI turn driver.
-    setGameState((prev) =>
-      prev.openingNarrationComplete === true && merged.openingNarrationComplete !== true
+    setGameState((prevState) =>
+      prevState.openingNarrationComplete === true && merged.openingNarrationComplete !== true
         ? { ...merged, openingNarrationComplete: true }
         : merged
     )
@@ -181,10 +183,9 @@ export function useOnlineBoardSync(params: {
               kind: 'action_applied',
               rev: m.rev,
               actionId: m.actionId,
-              state: m.state,
               events: m.events,
             })
-            ingestPublicState(m.rev, m.state)
+            // State already applied via preceding public_state (same rev).
             pendingRollbackRef.current.clear()
             const alreadyFired = optimisticEventsFiredRef.current.delete(m.actionId)
             if (m.events.length > 0 && !alreadyFired) onGameEventsRef.current?.(m.events)
@@ -232,7 +233,8 @@ export function useOnlineBoardSync(params: {
           if (msg.to === myId) ingestPrivateHand(msg.hand)
           return
         case 'action_applied': {
-          ingestPublicState(msg.rev, msg.state)
+          // Prefer public_state for board JSON; accept legacy payloads that still embed state.
+          if (msg.state) ingestPublicState(msg.rev, msg.state)
           pendingRollbackRef.current.clear()
           const alreadyFired = optimisticEventsFiredRef.current.delete(msg.actionId)
           const events = msg.events ?? []
@@ -391,7 +393,7 @@ export function useOnlineBoardSync(params: {
               payload: {
                 kind: 'public_state',
                 rev: authorityRef.current.gameRev,
-                state: toPublicGameState(gs),
+                state: toPublicGameState(gs, { includeDecks: true }),
               } satisfies BoardWire,
             })
           }

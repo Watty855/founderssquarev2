@@ -84,7 +84,8 @@ export type ServerMessage =
       type: 'action_applied'
       rev: number
       actionId: string
-      state: unknown
+      /** Optional — prefer public_state for board JSON (avoids duplicate payloads). */
+      state?: unknown
       events?: unknown
     }
   | { type: 'action_rejected'; actionId: string; rev: number; error: string; code?: string }

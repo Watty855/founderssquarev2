@@ -96,6 +96,8 @@ npx cap open android   # Android Studio → AAB → Play Console
   delivery glue changes.
 - **Host disconnects** pause action processing until the host returns (their
   authority store is rebuilt from their local state). A future iteration can
-  persist snapshots to Supabase Postgres for host migration.
+  persist snapshots to Supabase Postgres for host migration — see
+  [docs/REMOTE_AUTHORITY.md](./docs/REMOTE_AUTHORITY.md) for the Edge Function
+  migration path (scaffold under `supabase/functions/fs-board-authority/`).
 - Lobby chat / voice from v1 was intentionally left out of this pass and can be
   layered onto the same lobby channel.

@@ -112,7 +112,7 @@ export function canPlaceProperty(
     return coords !== null && coords.has(key)
   }
 
-  if (card.type === 'property' && card.district && !crossingTheLineActive) {
+  if (card.type === 'property' && card.district && !crossingTheLineActive && card.category !== 'civic') {
     const onPlot = getPlotDistricts(plot.row, plot.col)
     if (!onPlot.includes(card.district)) {
       return false

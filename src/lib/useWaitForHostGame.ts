@@ -78,7 +78,10 @@ export function useWaitForHostGame(opts: {
     ch.on('broadcast', { event: 'board' }, ({ payload }) => {
       const msg = payload as { kind?: string; to?: string; state?: PublicGameState; hand?: PrivateHandPayload }
       if (!msg || typeof msg !== 'object') return
-      if (msg.kind === 'public_state' || msg.kind === 'action_applied') {
+      if (msg.kind === 'public_state' && msg.state) {
+        publicSnap = msg.state ?? null
+        window.setTimeout(finish, 350)
+      } else if (msg.kind === 'action_applied' && msg.state) {
         publicSnap = msg.state ?? null
         window.setTimeout(finish, 350)
       } else if (msg.kind === 'private_hand' && msg.to === myId) {

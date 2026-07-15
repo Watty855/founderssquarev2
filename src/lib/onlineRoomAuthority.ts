@@ -4,7 +4,7 @@ import { applyGameAction } from '@/lib/gameEngine/applyGameAction'
 import { parsePartyGameState } from '@/lib/partyBoardSync'
 import { findHostSeatIndexForConnection } from '@/lib/partyBoardView'
 import { buildPrivateHandForPlayer } from '@/lib/partyGameBroadcast'
-import { toPublicGameState, type PublicGameState } from '@/lib/onlinePublicState'
+import { toPublicGameState, type PublicGameState, deckFingerprint } from '@/lib/onlinePublicState'
 import type { PrivateHandPayload } from '@/lib/onlinePublicState'
 
 /**
@@ -46,7 +46,7 @@ export type AuthorityOutbound =
       type: 'action_applied'
       rev: number
       actionId: string
-      state: PublicGameState
+      /** State ships once via `public_state` — keep empty to avoid duplicate payloads. */
       events: GameEvent[]
     }
   | { target: 'all'; type: 'game_cleared' }
@@ -75,7 +75,7 @@ export function authorityHydrateForClient(
       sessionId,
       type: 'public_state',
       rev: store.gameRev,
-      state: toPublicGameState(gs),
+      state: toPublicGameState(gs, { includeDecks: true }),
     },
   ]
   const idx = findHostSeatIndexForConnection(gs, sessionId)
@@ -97,20 +97,20 @@ export function authorityHydrateForClient(
 export function authorityBroadcastAfterState(
   store: OnlineAuthorityStore,
   gs: GameState,
-  meta?: { actionId: string; events: GameEvent[] }
+  meta?: { actionId?: string; events?: GameEvent[]; includeDecks?: boolean }
 ): AuthorityOutbound[] {
-  const pub = toPublicGameState(gs)
+  const includeDecks = meta?.includeDecks === true
+  const pub = toPublicGameState(gs, { includeDecks })
   const out: AuthorityOutbound[] = [
     { target: 'all', type: 'public_state', rev: store.gameRev, state: pub },
   ]
-  if (meta) {
+  if (meta?.actionId != null) {
     out.push({
       target: 'all',
       type: 'action_applied',
       rev: store.gameRev,
       actionId: meta.actionId,
-      state: pub,
-      events: meta.events,
+      events: meta.events ?? [],
     })
   }
   for (const sessionId of authorityListHumanSessionIds(gs)) {
@@ -175,11 +175,14 @@ export function authorityApplyGameAction(
   if (!result.ok) {
     return { ok: false, error: result.error, code: result.code }
   }
+  const prevFp = deckFingerprint(gs)
+  const nextFp = deckFingerprint(result.state)
   store.gameRev += 1
   authoritySaveState(store, result.state)
   const messages = authorityBroadcastAfterState(store, result.state, {
     actionId,
     events: result.events,
+    includeDecks: prevFp !== nextFp,
   })
   return { ok: true, state: result.state, messages }
 }
@@ -208,7 +211,7 @@ export function authorityInitGame(
   } catch {
     return { ok: false, error: 'Invalid board snapshot.' }
   }
-  const messages = authorityBroadcastAfterState(store, parsed)
+  const messages = authorityBroadcastAfterState(store, parsed, { includeDecks: true })
   return { ok: true, state: parsed, messages }
 }
 

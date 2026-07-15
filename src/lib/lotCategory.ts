@@ -1,8 +1,6 @@
 import type { PropertyCard } from './cardTypes'
 import type { Plot } from './types'
 import { CIVIC_VARIANT_PROPERTY_IDS } from './cardData'
-import { getCivicVariantPropertyCard } from './civicFlexProperty'
-import { getPlotDistricts } from './districts'
 import { getAnchorCornerNotation, getPropertyCornerLetter } from './cardCornerLetter'
 
 /** Board parenthetical letters from the physical game board CSV. */
@@ -77,24 +75,34 @@ export function plotsMatchingCivicVariant(plots: Plot[], variantId: string): Plo
 function civicVariantPlaceable(
   plots: Plot[],
   variantId: string,
-  crossingTheLineActive: boolean
+  _crossingTheLineActive: boolean
 ): boolean {
-  const template = getCivicVariantPropertyCard(variantId)
-  if (!template) return false
+  // Civic flex has no district lock — any vacant C lot with this identity is legal.
   return plots.some((plot) => {
     if (plot.type !== 'city' || plot.builtProperty || plot.lotCategory !== 'C') return false
     if (plot.civicVariantId !== variantId) return false
-    if (template.district && !crossingTheLineActive) {
-      const onPlot = getPlotDistricts(plot.row, plot.col)
-      if (!onPlot.includes(template.district)) return false
-    }
     return true
   })
 }
 
 /**
- * Civic flex picker: only variants with at least one legal vacant C lot on the board
- * (respects district unless Crossing the Line is active).
+ * Vacant civic (C) lots — Civic hand cards may build on any of these
+ * (Hope Hospital, Firehouse 01, City Hall, Courthouse, Police, Public Works, etc.).
+ */
+export function getVacantCivicLots(plots: Plot[]): Plot[] {
+  return plots.filter(
+    (p) =>
+      p.type === 'city' &&
+      p.lotCategory === 'C' &&
+      !p.builtProperty &&
+      !!p.civicVariantId &&
+      !!p.building
+  )
+}
+
+/**
+ * Civic flex picker: only variants with at least one vacant C lot on the board.
+ * District filters do not apply — the Civic card has no City Center / Farmland / etc. subtitle.
  */
 export function getAvailableCivicVariantIds(
   plots: Plot[],

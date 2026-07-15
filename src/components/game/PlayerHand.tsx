@@ -8,7 +8,7 @@ import {
   getPropertyHandDisplayName,
   isCivicFlexHandCard,
 } from '@/lib/civicFlexProperty'
-import { getAvailableCivicVariantIds } from '@/lib/lotCategory'
+import { getVacantCivicLots } from '@/lib/lotCategory'
 import { needsEmulateChoiceBeforePlacement } from '@/lib/placementTemplate'
 import { CompactCardView } from '@/components/game/CompactCardView'
 import {
@@ -222,6 +222,7 @@ export function PlayerHand({
   const [wildCardTab, setWildCardTab] = useState<'build' | 'bank'>('build')
   const [wildCardEmulateId, setWildCardEmulateId] = useState<string | null>(null)
   const [civicVariantId, setCivicVariantId] = useState<string | null>(null)
+  const [civicTargetLotKey, setCivicTargetLotKey] = useState<string | null>(null)
 
   const propertyCardsList = (player?.propertyCards || [])
     .map(instance => {
@@ -240,10 +241,7 @@ export function PlayerHand({
   const propertyHandCards = propertyCardsList.map((c) => ({ ...c, cardType: 'property' as const }))
   const actionHandCards = actionCardsList.map((c) => ({ ...c, cardType: 'action' as const }))
 
-  const availableCivicVariantIds = useMemo(
-    () => getAvailableCivicVariantIds(plots, crossingTheLineActive),
-    [plots, crossingTheLineActive]
-  )
+  const vacantCivicLots = useMemo(() => getVacantCivicLots(plots), [plots])
 
   useEffect(() => {
     if (!cardDialog?.open || cardDialog.type !== 'property') return
@@ -254,8 +252,15 @@ export function PlayerHand({
       setWildCardEmulateId(null)
     }
     if (def && isCivicFlexHandCard(def)) {
-      const available = getAvailableCivicVariantIds(plots, crossingTheLineActive)
-      setCivicVariantId(available.length === 1 ? available[0] : null)
+      const lots = getVacantCivicLots(plots)
+      if (lots.length === 1) {
+        const only = lots[0]
+        setCivicVariantId(only.civicVariantId ?? null)
+        setCivicTargetLotKey(`${only.col}${only.row}`)
+      } else {
+        setCivicVariantId(null)
+        setCivicTargetLotKey(null)
+      }
     }
   }, [cardDialog?.open, cardDialog?.instanceId, cardDialog?.type, player?.propertyCards, plots, crossingTheLineActive])
 
@@ -1141,23 +1146,30 @@ export function PlayerHand({
                 ) : isCivicFlexHandCard(currentCard as PropertyCard) ? (
                   <>
                     <p style={{ fontSize: 12, color: '#8888a0', marginBottom: 8, lineHeight: 1.45 }}>
-                      Choose which civic building this card becomes. Only options with vacant C lots on the board are shown.
+                      Civic builds on any vacant C lot (Hope Hospital, Firehouse 01, City Hall, Courthouse, Police,
+                      Public Works, Water Works, Children&apos;s Hosp, and other C lots). Choose a vacant lot below —
+                      this card has no district subtitle.
                     </p>
-                    {availableCivicVariantIds.length === 0 ? (
+                    {vacantCivicLots.length === 0 ? (
                       <p style={{ fontSize: 12, color: '#f87171', marginBottom: 8 }}>
-                        No vacant civic (C) lots on the board match any civic building right now.
+                        No vacant civic (C) lots remain on the board.
                       </p>
                     ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-                        {availableCivicVariantIds.map((variantId) => {
-                          const variant = propertyCards.find((c) => c.id === variantId)
-                          if (!variant) return null
-                          const sel = civicVariantId === variantId
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8, maxHeight: 220, overflowY: 'auto' }}>
+                        {vacantCivicLots.map((lot) => {
+                          const key = `${lot.col}${lot.row}`
+                          const variantId = lot.civicVariantId!
+                          const variantName =
+                            propertyCards.find((c) => c.id === variantId)?.name ?? variantId
+                          const sel = civicTargetLotKey === key
                           return (
                             <button
-                              key={variantId}
+                              key={key}
                               type="button"
-                              onClick={() => setCivicVariantId(variantId)}
+                              onClick={() => {
+                                setCivicTargetLotKey(key)
+                                setCivicVariantId(variantId)
+                              }}
                               style={{
                                 padding: '10px 12px',
                                 borderRadius: 8,
@@ -1170,9 +1182,15 @@ export function PlayerHand({
                                 lineHeight: 1.35,
                               }}
                             >
-                              <div style={{ fontWeight: 600, marginBottom: 4 }}>{variant.name}</div>
+                              <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                                {lot.building}{' '}
+                                <span style={{ color: '#88aacc', fontWeight: 500 }}>
+                                  ({lot.col}
+                                  {lot.row})
+                                </span>
+                              </div>
                               <div style={{ color: '#8888a0', fontSize: 10 }}>
-                                {getCivicVariantShortRule(variantId, plots)}
+                                Builds as {variantName} · {getCivicVariantShortRule(variantId)}
                               </div>
                             </button>
                           )
@@ -1182,26 +1200,27 @@ export function PlayerHand({
                     <button
                       type="button"
                       onClick={handleBuildCivicFlex}
-                      disabled={!civicVariantId}
+                      disabled={!civicVariantId || !civicTargetLotKey}
                       className="btn-ps"
                       style={{
                         height: 42,
                         borderRadius: 10,
-                        backgroundColor: civicVariantId ? '#0070cc' : '#333348',
+                        backgroundColor: civicVariantId && civicTargetLotKey ? '#0070cc' : '#333348',
                         color: '#fff',
                         fontSize: 14,
                         fontWeight: 600,
                         border: '2px solid transparent',
-                        cursor: civicVariantId ? 'pointer' : 'not-allowed',
-                        opacity: civicVariantId ? 1 : 0.6,
+                        cursor: civicVariantId && civicTargetLotKey ? 'pointer' : 'not-allowed',
+                        opacity: civicVariantId && civicTargetLotKey ? 1 : 0.6,
                         marginBottom: 8,
                       }}
                     >
-                      {civicVariantId
-                        ? `Build as ${
-                            propertyCards.find((c) => c.id === civicVariantId)?.name ?? 'civic'
+                      {civicTargetLotKey && civicVariantId
+                        ? `Build ${
+                            vacantCivicLots.find((l) => `${l.col}${l.row}` === civicTargetLotKey)?.building ??
+                            'civic lot'
                           } — $${(currentCard as PropertyCard).buildCost}M`
-                        : 'Choose a civic building to build'}
+                        : 'Choose a civic lot to build'}
                     </button>
                     <button
                       type="button"

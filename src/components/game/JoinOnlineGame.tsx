@@ -115,9 +115,12 @@ export function JoinOnlineGame({
     ch.on('broadcast', { event: 'board' }, ({ payload }) => {
       const msg = payload as { kind?: string; to?: string } & Record<string, unknown>
       if (!msg || typeof msg !== 'object') return
-      if (msg.kind === 'public_state' || msg.kind === 'action_applied') {
+      if (msg.kind === 'public_state' && msg.state) {
         publicRef.current = msg.state as PublicGameState
         // Give a targeted private_hand a beat to arrive before hydrating.
+        window.setTimeout(() => finishJoin(roomId, name), 350)
+      } else if (msg.kind === 'action_applied' && msg.state) {
+        publicRef.current = msg.state as PublicGameState
         window.setTimeout(() => finishJoin(roomId, name), 350)
       } else if (msg.kind === 'private_hand' && msg.to === myId) {
         handRef.current = msg.hand as PrivateHandPayload

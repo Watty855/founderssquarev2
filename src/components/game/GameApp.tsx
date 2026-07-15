@@ -431,21 +431,39 @@ function AppInner() {
 
   const isOnlineActor = Boolean(partyBoardConfig && boardPartyConnectionId)
 
+  const commitOnlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingCommitStateRef = useRef<GameState | null>(null)
+
   const commitOnlineAfterState = useCallback(
     (state: GameState) => {
-      if (partyBoardConfig && boardPartyConnectionId) {
-        sendActionRef.current({ type: 'commit_actor_state', state }, { skipOptimistic: true })
-      }
+      if (!partyBoardConfig || !boardPartyConnectionId) return
+      // Coalesce rapid patchGameState bursts into one commit_actor_state (latest wins).
+      pendingCommitStateRef.current = state
+      if (commitOnlineTimerRef.current != null) clearTimeout(commitOnlineTimerRef.current)
+      commitOnlineTimerRef.current = setTimeout(() => {
+        commitOnlineTimerRef.current = null
+        const latest = pendingCommitStateRef.current
+        pendingCommitStateRef.current = null
+        if (latest) {
+          sendActionRef.current({ type: 'commit_actor_state', state: latest }, { skipOptimistic: true })
+        }
+      }, 80)
     },
     [partyBoardConfig, boardPartyConnectionId]
   )
+
+  useEffect(() => {
+    return () => {
+      if (commitOnlineTimerRef.current != null) clearTimeout(commitOnlineTimerRef.current)
+    }
+  }, [])
 
   const setGameStateWithOnlineCommit = useCallback(
     (updater: React.SetStateAction<GameState>) => {
       setGameState((prev) => {
         const next = typeof updater === 'function' ? updater(prev) : updater
         if (partyBoardConfig && boardPartyConnectionId && next !== prev) {
-          queueMicrotask(() => commitOnlineAfterState(next))
+          commitOnlineAfterState(next)
         }
         return next
       })
@@ -1612,7 +1630,7 @@ function AppInner() {
             toast.error(
               isWild
                 ? 'Choose which anchor your Anchor Wild Card will become.'
-                : 'Choose City Hall, Courthouse, Police, or Civic Center for this Civic card.'
+                : 'Choose a vacant civic (C) lot for this Civic card.'
             )
             return
           }
@@ -1670,7 +1688,7 @@ function AppInner() {
           toast.error(
             isWild
               ? 'Choose which anchor your Anchor Wild Card will become.'
-              : 'Choose City Hall, Courthouse, Police, or Civic Center for this Civic card.'
+              : 'Choose a vacant civic (C) lot for this Civic card.'
           )
           return
         }
@@ -6528,9 +6546,9 @@ function AppInner() {
           </div>
         ) : (
         <aside style={{
-          width: 264,
+          width: 188,
           flexShrink: 0,
-          padding: 24,
+          padding: '14px 12px',
           overflowY: 'auto',
           borderRight: '1px solid rgba(255, 255, 255, 0.08)',
           background: 'linear-gradient(180deg, #0a0a0a 0%, #121212 52%, #080808 100%)',
@@ -6538,7 +6556,7 @@ function AppInner() {
           opacity: showOpeningProTip ? 0.55 : 1,
           transition: 'opacity 200ms ease',
         }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
             <span style={{
               fontSize: 10,
@@ -6600,9 +6618,9 @@ function AppInner() {
                 style={{
                   position: 'relative',
                   overflow: 'visible',
-                  padding: isActive ? 20 : 16,
-                  borderRadius: 12,
-                  borderLeft: `4px solid ${isActive ? player.color : 'transparent'}`,
+                  padding: isActive ? 12 : 10,
+                  borderRadius: 10,
+                  borderLeft: `3px solid ${isActive ? player.color : 'transparent'}`,
                   backgroundColor: isActive ? 'rgba(0, 0, 0, 0.14)' : 'transparent',
                   opacity: isActive ? 1 : 0.72,
                   transition: 'all 300ms ease',
@@ -6637,16 +6655,16 @@ function AppInner() {
                 </div>
                 <div
                   style={{
-                    marginTop: isActive ? 14 : 12,
-                    padding: '10px 12px',
+                    marginTop: isActive ? 10 : 8,
+                    padding: '8px 10px',
                     borderRadius: 8,
                     backgroundColor: isActive ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.03)',
                     border: '1px solid rgba(255, 255, 255, 0.1)',
                     boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 8,
-                    fontSize: isActive ? 12 : 11,
+                    gap: 6,
+                    fontSize: isActive ? 11 : 10,
                   }}
                   aria-hidden
                 >
