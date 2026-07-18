@@ -17,9 +17,9 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
     lines: [
       'Every property card names its district; each lot shows its district under the building name.',
       'The central lot on each block is called the "anchor tenet." Each anchor philosophy allows different influence modifiers that affect income and strategic actions.',
-      'Passive anchor influence toward dice rolls is usually capped at ±1 per step unless a card counts distinct sources (for example Regulation Bureau owners in a block).',
-      'Union anchors: Church-style +$M on your other lots on that Union block; −$M per rival lot on that block on their Income only (lost cash, not transferred).',
-      'Action-card scopes: Hostile Takeover anchor modifiers use only the target lot’s city block. Rezoning civic influence is board-wide (any civic you own; max +1). City Council Freeze uses City Hall/Courthouse anywhere (max +1). Remove Investors uses anchors/civics only on the selected lot’s block. Police Raid: +1 raid influence from Police/City Hall/Courthouse anywhere (max +1). Scandal: +1 max from Influencer and/or News Outlet together.',
+      'Anchor influence follows its printed reach: G is citywide, B is one city block, and named districts apply only when the selected lot lies there. Applicable Anchor identities stack; duplicate copies of one identity do not.',
+      'Every active Anchor adds +$1M to each of your other properties in its block during Income. Regulation Bureau and Union also subtract $1M from each rival property in that block; Mafia additionally collects $1M from each rival business there.',
+      'Action scopes: Anchor Tenets modify Hostile Takeover, Rezoning, and Remove Investors as printed. City Hall, Courthouse, or Police gives +1 max on City Council Freeze and Police Raid. Influencer and/or News Outlet gives +1 max on Scandal.',
       'Valid build targets highlight when you start placement. Crossing the Line (action) can bypass district lock for one build.',
     ],
   },

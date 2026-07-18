@@ -2,6 +2,7 @@ import type { GameState } from '@/lib/types'
 import { MAX_TURN_ACTIONS, replenishCurrentPlayerActionHand, turnLimitReached } from '@/lib/turnActions'
 import {
   allocateInvestorPayoutsFromOwner,
+  allocateMafiaTributeFromOwner,
   computeInvestorIncomeAwardsForOwner,
   getMafiaLevyForIncomePlayer,
 } from '@/lib/utils'
@@ -43,15 +44,18 @@ export function applyIncomeComplete(state: GameState, params: IncomeCompletePara
     ? computeInvestorIncomeAwardsForOwner(state.plots, ownerId)
     : { payoutByPlayerId: {} as Record<number, number> }
 
-  const { scaled: scaledInner, ownerKeeps: ownerKeepsInner } = allocateInvestorPayoutsFromOwner(
+  const { scaled: scaledInner, ownerKeeps: afterInvestors } = allocateInvestorPayoutsFromOwner(
     params.earnedIncome,
     isPropertyRoll ? payoutByPlayerId : {}
   )
-  const cashFromIncome = pendingTax ? Math.max(0, ownerKeepsInner - levy) : ownerKeepsInner
-
-  const { recipientAmounts: mafiaRecipientAmounts } = isPropertyRoll
+  const { recipientAmounts: mafiaOwed } = isPropertyRoll
     ? getMafiaLevyForIncomePlayer(ownerId, state.plots)
     : { recipientAmounts: {} as Record<number, number> }
+  const { scaled: mafiaRecipientAmounts, ownerKeeps: afterMafia } = allocateMafiaTributeFromOwner(
+    afterInvestors,
+    mafiaOwed
+  )
+  const cashFromIncome = pendingTax ? Math.max(0, afterMafia - levy) : afterMafia
 
   let updatedActionCards = currentPlayer.actionCards.filter(
     (c) => c.instanceId !== params.incomeInstanceId

@@ -22,6 +22,7 @@ import { SidebarHandFlightAnchors } from '@/components/game/SidebarHandFlightAnc
 import { RequiredActionBanner, type RequiredAction } from '@/components/game/RequiredActionBanner'
 import { FinalTurnBanner } from '@/components/game/FinalTurnBanner'
 import { RulesQuickSheet } from '@/components/game/RulesQuickSheet'
+import { AnchorTenetsQuickSheet } from '@/components/game/AnchorTenetsQuickSheet'
 import { PROPERTY_DECK_ANCHOR_KEY, ACTION_DECK_ANCHOR_KEY } from '@/components/game/DeckPile'
 import { CardFlightLayer, type CardFlight } from '@/components/game/CardFlightLayer'
 import { FlightAnchorProvider, useFlightRectGetter, type FlightRect } from '@/hooks/use-flight-anchors'
@@ -40,7 +41,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { ArrowCounterClockwise, BookOpen, CurrencyDollar } from '@phosphor-icons/react'
+import { Anchor, ArrowCounterClockwise, BookOpen, CurrencyDollar } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import { Toaster as BoardDockToaster } from 'sonner'
 import { FS_BOARD_TOASTER_ID, gameDockToast as toast } from '@/lib/fsGameToast'
@@ -66,31 +67,27 @@ import {
   findCompleteStreets,
   getChurchIncomeBonusForPlayer,
   getArtsCouncilIncomeBonusForPlayer,
-  getArtsCouncilTakeoverInfluenceBonus,
   getFarmCoopIncomeBonusForPlayer,
-  getFarmCoopTakeoverInfluenceBonus,
   getPortAuthorityIncomeBonusForPlayer,
-  getPortAuthorityTakeoverInfluenceBonus,
   getTourismOfficeIncomeBonusForPlayer,
-  getTourismOfficeTakeoverInfluenceBonus,
   getInfluencersIncomeBonusForPlayer,
+  getNewsOutletIncomeBonusForPlayer,
   getMafiaIncomeBonusForPlayer,
   getMafiaLevyForIncomePlayer,
-  getMafiaTakeoverInfluenceBonus,
   getRegulationBureauIncomeBonusForPlayer,
+  getRegulationBureauIncomePenaltyForPlayer,
   getUnionIncomeBonusForOwner,
   getUnionIncomePenaltyForPlayer,
-  getRegulationBureauTakeoverAttackerBonus,
+  getAnchorInfluenceForAction,
   getScandalAttackerRollBonuses,
   getPlotsEligibleForScandal,
   getCityCouncilFreezeAttackerInfluence,
   getPoliceRaidAttackerInfluence,
-  getRezoningCivicInfluenceBoardWide,
-  getRemoveInvestorsRollBonuses,
   totalRemoveInvestorsBuyoutMillion,
   investorRemovalBuyoutMillion,
   computeInvestorIncomeAwardsForOwner,
   allocateInvestorPayoutsFromOwner,
+  allocateMafiaTributeFromOwner,
   type InvestorIncomeAwardDetail,
 } from '@/lib/utils'
 import { getInvestablePlots, getTakeoverTargetPlots } from '@/lib/investmentTargets'
@@ -423,7 +420,13 @@ function AppInner() {
     onFx: (fx) => onBoardFxRef.current(fx),
   })
 
-  const { boardPartyConnectionId, sendAction, sendFx } = partyBoardSync
+  const {
+    boardPartyConnectionId,
+    sendAction,
+    sendFx,
+    connectionStatus,
+    requestResync,
+  } = partyBoardSync
   const sendActionRef = useRef(sendAction)
   sendActionRef.current = sendAction
   const sendFxRef = useRef(sendFx)
@@ -544,11 +547,15 @@ function AppInner() {
     tourismOfficeBonusSourceLabels: string[]
     influencersIncomeBonus: number
     influencersBonusSourceLabels: string[]
+    newsOutletIncomeBonus: number
+    newsOutletBonusSourceLabels: string[]
     mafiaIncomeBonus: number
     mafiaBonusSourceLabels: string[]
     mafiaLevyTotal: number
     regulationBureauIncomeBonus: number
     regulationBureauBonusSourceLabels: string[]
+    regulationBureauIncomePenalty: number
+    rivalRegulationBureauPlotLabels: string[]
     unionIncomeBonus: number
     unionBonusSourceLabels: string[]
     unionIncomePenalty: number
@@ -571,11 +578,15 @@ function AppInner() {
     tourismOfficeBonusSourceLabels: [],
     influencersIncomeBonus: 0,
     influencersBonusSourceLabels: [],
+    newsOutletIncomeBonus: 0,
+    newsOutletBonusSourceLabels: [],
     mafiaIncomeBonus: 0,
     mafiaBonusSourceLabels: [],
     mafiaLevyTotal: 0,
     regulationBureauIncomeBonus: 0,
     regulationBureauBonusSourceLabels: [],
+    regulationBureauIncomePenalty: 0,
+    rivalRegulationBureauPlotLabels: [],
     unionIncomeBonus: 0,
     unionBonusSourceLabels: [],
     unionIncomePenalty: 0,
@@ -924,6 +935,7 @@ function AppInner() {
   const FINAL_TURN_BANNER_VISIBLE_MS = 5000
   const [showFinalTurnBanner, setShowFinalTurnBanner] = useState(false)
   const [rulesQuickOpen, setRulesQuickOpen] = useState(false)
+  const [anchorTenetsOpen, setAnchorTenetsOpen] = useState(false)
   const { compact: isCompactLayout, landscape: isLandscapeLayout } = useCompactGameLayout()
 
   useEffect(() => {
@@ -2202,7 +2214,7 @@ function AppInner() {
         }
         setRezoningMode({ phase: 'pick-property', actionInstanceId: actionInstanceIds[0] })
         toast.info(
-          'Rezoning: click a highlighted property card in your hand, then a vacant lot on the board. Roll — total 5–6 after civic influence approves the build.'
+          'Rezoning: click a highlighted property card, then a vacant lot. Roll a total of 5+ after applicable Anchor Tenet influence to approve the build.'
         )
         return
       }
@@ -2503,10 +2515,16 @@ function AppInner() {
             getTourismOfficeIncomeBonusForPlayer(currentPlayer.id, current.plots)
           const { bonus: influencersIncomeBonus, sourceLabels: influencersBonusSourceLabels } =
             getInfluencersIncomeBonusForPlayer(currentPlayer.id, current.plots)
+          const { bonus: newsOutletIncomeBonus, sourceLabels: newsOutletBonusSourceLabels } =
+            getNewsOutletIncomeBonusForPlayer(currentPlayer.id, current.plots)
           const { bonus: mafiaIncomeBonus, sourceLabels: mafiaBonusSourceLabels } =
             getMafiaIncomeBonusForPlayer(currentPlayer.id, current.plots)
           const { bonus: regulationBureauIncomeBonus, sourceLabels: regulationBureauBonusSourceLabels } =
             getRegulationBureauIncomeBonusForPlayer(currentPlayer.id, current.plots)
+          const {
+            penalty: regulationBureauIncomePenalty,
+            sourceLabels: rivalRegulationBureauPlotLabels,
+          } = getRegulationBureauIncomePenaltyForPlayer(currentPlayer.id, current.plots)
           const { bonus: unionIncomeBonus, sourceLabels: unionBonusSourceLabels } = getUnionIncomeBonusForOwner(
             currentPlayer.id,
             current.plots
@@ -2524,9 +2542,11 @@ function AppInner() {
             artsCouncilIncomeBonus +
             tourismOfficeIncomeBonus +
             influencersIncomeBonus +
+            newsOutletIncomeBonus +
             mafiaIncomeBonus +
             regulationBureauIncomeBonus +
             unionIncomeBonus -
+            regulationBureauIncomePenalty -
             unionIncomePenalty
           const totalIncome = Math.max(0, grossIncomePool)
 
@@ -2546,11 +2566,15 @@ function AppInner() {
             tourismOfficeBonusSourceLabels,
             influencersIncomeBonus,
             influencersBonusSourceLabels,
+            newsOutletIncomeBonus,
+            newsOutletBonusSourceLabels,
             mafiaIncomeBonus,
             mafiaBonusSourceLabels,
             mafiaLevyTotal,
             regulationBureauIncomeBonus,
             regulationBureauBonusSourceLabels,
+            regulationBureauIncomePenalty,
+            rivalRegulationBureauPlotLabels,
             unionIncomeBonus,
             unionBonusSourceLabels,
             unionIncomePenalty,
@@ -3379,7 +3403,13 @@ function AppInner() {
         return current
       }
 
-      const { bonus, labels } = getRemoveInvestorsRollBonuses(ownerId, current.plots, row, col)
+      const { bonus, labels } = getAnchorInfluenceForAction(
+        ownerId,
+        current.plots,
+        'remove-investors',
+        row,
+        col
+      )
 
       setRemoveInvestorsSelectMode({ active: false, validPlots: [], actionInstanceId: null })
       setRollDieDialogState({
@@ -3398,8 +3428,9 @@ function AppInner() {
         scandalContext: undefined,
         removeInvestorsContext: { row, col },
       })
-      if (bonus > 0) {
-        toast.success(`+${bonus} on Remove Investors roll — ${labels.join(', ')}.`)
+      if (bonus !== 0) {
+        const prefix = bonus > 0 ? `+${bonus}` : `${bonus}`
+        toast.info(`${prefix} on Remove Investors roll — ${labels.join(', ')}.`)
       }
       toast.info(`Roll total 5+ to remove all investors. On success, pay $${buyoutNeeded}M total in 50% buyouts. No investor counter-roll.`)
 
@@ -3554,9 +3585,16 @@ function AppInner() {
       toast.error(`You need $${buildCost}M to complete this build if the roll succeeds.`)
       return
     }
-    const { bonus, labels } = getRezoningCivicInfluenceBoardWide(player.id, safeGameState.plots)
-    if (bonus > 0) {
-      toast.success(`+${bonus} rezoning influence — civic holdings anywhere on the board: ${labels.join(' & ')}.`)
+    const { bonus, labels } = getAnchorInfluenceForAction(
+      player.id,
+      safeGameState.plots,
+      'rezoning',
+      row,
+      col
+    )
+    if (bonus !== 0) {
+      const prefix = bonus > 0 ? `+${bonus}` : `${bonus}`
+      toast.info(`${prefix} rezoning influence — ${labels.join(', ')}.`)
     }
     setRezoningMode({ phase: 'inactive' })
     setRollDieDialogState({
@@ -3656,65 +3694,21 @@ function AppInner() {
     })
 
     setTakeoverSelectMode({ active: false, validPlots: [], actionInstanceId: null })
-    const farmTakeover = getFarmCoopTakeoverInfluenceBonus(
+    const { bonus: takeoverBonus, labels: takeoverLabels } = getAnchorInfluenceForAction(
       attackerPreview.id,
       safeGameState.plots,
+      'takeover',
       row,
       col
     )
-    const portTakeover = getPortAuthorityTakeoverInfluenceBonus(
-      attackerPreview.id,
-      safeGameState.plots,
-      row,
-      col
-    )
-    const artsTakeover = getArtsCouncilTakeoverInfluenceBonus(
-      attackerPreview.id,
-      safeGameState.plots,
-      row,
-      col
-    )
-    const tourismTakeover = getTourismOfficeTakeoverInfluenceBonus(
-      attackerPreview.id,
-      safeGameState.plots,
-      row,
-      col
-    )
-    const mafiaTakeover = getMafiaTakeoverInfluenceBonus(
-      attackerPreview.id,
-      safeGameState.plots,
-      row,
-      col
-    )
-    const regulationTakeover = getRegulationBureauTakeoverAttackerBonus(
-      attackerPreview.id,
-      safeGameState.plots,
-      row,
-      col
-    )
-    const takeoverBonus =
-      farmTakeover.bonus +
-      portTakeover.bonus +
-      artsTakeover.bonus +
-      tourismTakeover.bonus +
-      mafiaTakeover.bonus +
-      regulationTakeover.bonus
-    const takeoverLabels = [
-      ...farmTakeover.labels,
-      ...portTakeover.labels,
-      ...artsTakeover.labels,
-      ...tourismTakeover.labels,
-      ...mafiaTakeover.labels,
-      ...regulationTakeover.labels,
-    ]
     setRollDieDialogState({
       open: true,
       mode: 'hostile-takeover-attacker',
       actionInstanceId: instId,
       takeoverContext: { row, col, ownerPlayerId, payment120Million: payment120 },
       targetPlayerId: undefined,
-      influenceBonus: takeoverBonus > 0 ? takeoverBonus : undefined,
-      influenceLabels: takeoverBonus > 0 ? takeoverLabels : undefined,
+      influenceBonus: takeoverBonus !== 0 ? takeoverBonus : undefined,
+      influenceLabels: takeoverBonus !== 0 ? takeoverLabels : undefined,
       councilFreezeAttackerRollsCompleted: undefined,
       councilFreezeAttackerLastNatural: undefined,
       councilFreezeFailAuto: undefined,
@@ -3722,10 +3716,9 @@ function AppInner() {
       rezoningContext: undefined,
       scandalContext: undefined,
     })
-    if (takeoverBonus > 0) {
-      toast.success(
-        `+${takeoverBonus} takeover influence from ${takeoverLabels.join(' + ')}.`
-      )
+    if (takeoverBonus !== 0) {
+      const prefix = takeoverBonus > 0 ? `+${takeoverBonus}` : `${takeoverBonus}`
+      toast.info(`${prefix} takeover influence — ${takeoverLabels.join(', ')}.`)
     }
     toast.success(
       `You paid $1M to ${ownerName}. The die must be rolled in the dialog — 5–6 is a Successful Take Over; 1–4 is Unsuccessful.`
@@ -3851,11 +3844,15 @@ function AppInner() {
       tourismOfficeBonusSourceLabels: [],
       influencersIncomeBonus: 0,
       influencersBonusSourceLabels: [],
+      newsOutletIncomeBonus: 0,
+      newsOutletBonusSourceLabels: [],
       mafiaIncomeBonus: 0,
       mafiaBonusSourceLabels: [],
       mafiaLevyTotal: 0,
       regulationBureauIncomeBonus: 0,
       regulationBureauBonusSourceLabels: [],
+      regulationBureauIncomePenalty: 0,
+      rivalRegulationBureauPlotLabels: [],
       unionIncomeBonus: 0,
       unionBonusSourceLabels: [],
       unionIncomePenalty: 0,
@@ -4002,22 +3999,23 @@ function AppInner() {
       ? computeInvestorIncomeAwardsForOwner(safeGameState.plots, incomeOwnerPreview.id)
       : { payoutByPlayerId: {} as Record<number, number>, awards: [] as InvestorIncomeAwardDetail[] }
 
-    const { scaled: scaledInvestorPayout, ownerKeeps } = allocateInvestorPayoutsFromOwner(
-      earnedIncome,
-      isPropertyRoll ? rawInvestorPayout : {}
+    const { scaled: scaledInvestorPayout, ownerKeeps: afterInvestorsPreview } =
+      allocateInvestorPayoutsFromOwner(earnedIncome, isPropertyRoll ? rawInvestorPayout : {})
+    const mafiaOwedPreview =
+      incomeResolution === 'property-roll'
+        ? getMafiaLevyForIncomePlayer(incomeOwnerPreview.id, safeGameState.plots).recipientAmounts
+        : {}
+    const { scaled: mafiaForToast, ownerKeeps: afterMafiaPreview } = allocateMafiaTributeFromOwner(
+      afterInvestorsPreview,
+      mafiaOwedPreview
     )
-    const cashToAdd = pendingTax ? Math.max(0, ownerKeeps - levy) : ownerKeeps
+    const cashToAdd = pendingTax ? Math.max(0, afterMafiaPreview - levy) : afterMafiaPreview
 
     const totalInvestorPayout =
       Object.values(scaledInvestorPayout).reduce((a, b) => a + b, 0)
     const totalInvestorOwed =
       Object.values(rawInvestorPayout).reduce((a, b) => a + b, 0)
     const investorsProRated = isPropertyRoll && totalInvestorOwed > 0 && totalInvestorPayout < totalInvestorOwed
-
-    const mafiaForToast: Record<number, number> =
-      incomeResolution === 'property-roll'
-        ? getMafiaLevyForIncomePlayer(incomeOwnerPreview.id, safeGameState.plots).recipientAmounts
-        : {}
 
     const resetIncomeDialog = () =>
       setIncomeDialogState({
@@ -4036,11 +4034,15 @@ function AppInner() {
         tourismOfficeBonusSourceLabels: [],
         influencersIncomeBonus: 0,
         influencersBonusSourceLabels: [],
+        newsOutletIncomeBonus: 0,
+        newsOutletBonusSourceLabels: [],
         mafiaIncomeBonus: 0,
         mafiaBonusSourceLabels: [],
         mafiaLevyTotal: 0,
         regulationBureauIncomeBonus: 0,
         regulationBureauBonusSourceLabels: [],
+        regulationBureauIncomePenalty: 0,
+        rivalRegulationBureauPlotLabels: [],
         unionIncomeBonus: 0,
         unionBonusSourceLabels: [],
         unionIncomePenalty: 0,
@@ -4068,17 +4070,20 @@ function AppInner() {
       const { payoutByPlayerId } = isPropertyRoll
         ? computeInvestorIncomeAwardsForOwner(current.plots, ownerIdResolved)
         : { payoutByPlayerId: {} as Record<number, number> }
-      const { scaled: scaledInner, ownerKeeps: ownerKeepsInner } = allocateInvestorPayoutsFromOwner(
+      const { scaled: scaledInner, ownerKeeps: afterInvestors } = allocateInvestorPayoutsFromOwner(
         earnedIncome,
         isPropertyRoll ? payoutByPlayerId : {}
       )
-      const cashFromIncome = pendingTax ? Math.max(0, ownerKeepsInner - levy) : ownerKeepsInner
-      const updatedMoney = currentPlayer.money + cashFromIncome
-
-      const { recipientAmounts: mafiaRecipientAmounts } =
+      const { recipientAmounts: mafiaOwed } =
         incomeResolution === 'property-roll'
           ? getMafiaLevyForIncomePlayer(ownerIdResolved, current.plots)
           : { recipientAmounts: {} as Record<number, number> }
+      const { scaled: mafiaRecipientAmounts, ownerKeeps: afterMafia } = allocateMafiaTributeFromOwner(
+        afterInvestors,
+        mafiaOwed
+      )
+      const cashFromIncome = pendingTax ? Math.max(0, afterMafia - levy) : afterMafia
+      const updatedMoney = currentPlayer.money + cashFromIncome
 
       let updatedActionCards = currentPlayer.actionCards.filter(
         c => c.instanceId !== incomeDialogState.actionInstanceId
@@ -4232,11 +4237,15 @@ function AppInner() {
       tourismOfficeBonusSourceLabels: [],
       influencersIncomeBonus: 0,
       influencersBonusSourceLabels: [],
+      newsOutletIncomeBonus: 0,
+      newsOutletBonusSourceLabels: [],
       mafiaIncomeBonus: 0,
       mafiaBonusSourceLabels: [],
       mafiaLevyTotal: 0,
       regulationBureauIncomeBonus: 0,
       regulationBureauBonusSourceLabels: [],
+      regulationBureauIncomePenalty: 0,
+      rivalRegulationBureauPlotLabels: [],
       unionIncomeBonus: 0,
       unionBonusSourceLabels: [],
       unionIncomePenalty: 0,
@@ -6278,6 +6287,68 @@ function AppInner() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden game-table" style={{ backgroundColor: '#000000' }}>
+      {partyBoardConfig ? (
+        <button
+          type="button"
+          onClick={partyBoardConfig.role === 'guest' ? requestResync : undefined}
+          title={
+            partyBoardConfig.role === 'guest'
+              ? 'Online table connection — click to resync'
+              : 'Online table connection'
+          }
+          aria-live="polite"
+          className="fixed right-2 top-2 z-[80] inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] shadow-lg backdrop-blur-md sm:right-3 sm:top-3"
+          style={{
+            pointerEvents: 'auto',
+            cursor: partyBoardConfig.role === 'guest' ? 'pointer' : 'default',
+            color:
+              connectionStatus === 'connected'
+                ? '#bbf7d0'
+                : connectionStatus === 'error'
+                  ? '#fecaca'
+                  : '#fde68a',
+            borderColor:
+              connectionStatus === 'connected'
+                ? 'rgba(74,222,128,0.45)'
+                : connectionStatus === 'error'
+                  ? 'rgba(248,113,113,0.5)'
+                  : 'rgba(251,191,36,0.5)',
+            background:
+              connectionStatus === 'connected'
+                ? 'rgba(6,78,59,0.88)'
+                : connectionStatus === 'error'
+                  ? 'rgba(127,29,29,0.9)'
+                  : 'rgba(120,53,15,0.9)',
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 8,
+              height: 8,
+              flexShrink: 0,
+              borderRadius: 999,
+              backgroundColor:
+                connectionStatus === 'connected'
+                  ? '#4ade80'
+                  : connectionStatus === 'error'
+                    ? '#f87171'
+                    : '#fbbf24',
+              boxShadow:
+                connectionStatus === 'connected' ? '0 0 8px rgba(74,222,128,0.8)' : undefined,
+            }}
+          />
+          {connectionStatus === 'connected'
+            ? 'Online'
+            : connectionStatus === 'resyncing'
+              ? 'Resyncing…'
+              : connectionStatus === 'stale'
+                ? 'Connection stale'
+                : connectionStatus === 'error'
+                  ? 'Connection error'
+                  : 'Connecting…'}
+        </button>
+      ) : null}
       <div style={{ flexShrink: 0, backgroundColor: '#000000' }}>
       {/* Header bar */}
       <header style={{
@@ -6478,6 +6549,15 @@ function AppInner() {
               >
                 <BookOpen size={16} weight="duotone" />
               </button>
+              <button
+                type="button"
+                aria-label="Open Anchor Tenets summary"
+                title="Anchor Tenets"
+                onClick={() => setAnchorTenetsOpen(true)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#d8b75a]"
+              >
+                <Anchor size={16} weight="duotone" />
+              </button>
             </div>
             {safeGameState.players.map((player, index) => {
               const isActive = index === safeGameState.currentPlayerIndex
@@ -6586,6 +6666,15 @@ function AppInner() {
                 className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#a8b0c8] transition-colors hover:border-[#5ac8fa]/40 hover:bg-[#1a1a24] hover:text-[#e0e8ff]"
               >
                 <BookOpen size={20} weight="duotone" />
+              </button>
+              <button
+                type="button"
+                aria-label="Open Anchor Tenets summary"
+                title="Anchor Tenets"
+                onClick={() => setAnchorTenetsOpen(true)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#d8b75a]/25 bg-[#d8b75a]/[0.06] text-[#d8b75a] transition-colors hover:border-[#d8b75a]/55 hover:bg-[#d8b75a]/[0.12] hover:text-[#f1df9d]"
+              >
+                <Anchor size={20} weight="duotone" />
               </button>
             </div>
           </div>
@@ -6927,6 +7016,7 @@ function AppInner() {
 
       <Toaster />
       <RulesQuickSheet open={rulesQuickOpen} onOpenChange={setRulesQuickOpen} />
+      <AnchorTenetsQuickSheet open={anchorTenetsOpen} onOpenChange={setAnchorTenetsOpen} />
       <InvestmentOrphanDialog
         open={actionCriteriaDialog.open}
         cardName={actionCriteriaDialog.cardName}
@@ -6984,11 +7074,15 @@ function AppInner() {
           tourismOfficeBonusSourceLabels={incomeDialogState.tourismOfficeBonusSourceLabels}
           influencersIncomeBonus={incomeDialogState.influencersIncomeBonus}
           influencersBonusSourceLabels={incomeDialogState.influencersBonusSourceLabels}
+          newsOutletIncomeBonus={incomeDialogState.newsOutletIncomeBonus}
+          newsOutletBonusSourceLabels={incomeDialogState.newsOutletBonusSourceLabels}
           mafiaIncomeBonus={incomeDialogState.mafiaIncomeBonus}
           mafiaBonusSourceLabels={incomeDialogState.mafiaBonusSourceLabels}
           mafiaLevyTotal={incomeDialogState.mafiaLevyTotal}
           regulationBureauIncomeBonus={incomeDialogState.regulationBureauIncomeBonus}
           regulationBureauBonusSourceLabels={incomeDialogState.regulationBureauBonusSourceLabels}
+          regulationBureauIncomePenalty={incomeDialogState.regulationBureauIncomePenalty}
+          rivalRegulationBureauPlotLabels={incomeDialogState.rivalRegulationBureauPlotLabels}
           unionIncomeBonus={incomeDialogState.unionIncomeBonus}
           unionBonusSourceLabels={incomeDialogState.unionBonusSourceLabels}
           unionIncomePenalty={incomeDialogState.unionIncomePenalty}

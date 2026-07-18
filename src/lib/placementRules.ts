@@ -153,11 +153,16 @@ export function getValidPlotsForProperty(
 
 /** Vacant city lots where a Rezoning build may be attempted (ignores normal zoning / district match). */
 export function getVacantCityLotsForRezoning(plots: Plot[]): Plot[] {
-  return plots.filter(
-    (plot) =>
-      plot.type === 'city' &&
-      plot.building !== undefined &&
-      plot.building !== '' &&
-      (plot.builtProperty === undefined || plot.builtProperty === '')
-  )
+  return plots.filter((plot) => {
+    if (plot.type !== 'city') return false
+    if (!plot.building) return false
+    if (plot.builtProperty) return false
+    // Anchor Tenet / Union centers stay reserved for Anchor cards.
+    if (plot.lotCategory === 'AT') return false
+    if (plot.isAnchor === true) return false
+    if (plot.building === 'Union' || plot.building === 'Anchor' || plot.building === 'Anchor Tenet') {
+      return false
+    }
+    return true
+  })
 }

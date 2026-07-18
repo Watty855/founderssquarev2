@@ -919,7 +919,7 @@ export const propertyCards: PropertyCard[] = [
     copies: 2,
     buildLocations: ['Any center anchor except Union'],
     specialAbility:
-      'INFLUENCE: +1 (entire board; max +1 from Church toward any single roll)\n' +
+      'INFLUENCE: +1 citywide on Hostile Takeover and Rezoning rolls\n' +
       'INCOME: +1 (block) — each of your other built properties in the same city block as a Church anchor you own gains +1 during Income\n' +
       'Screen notification: Church affiliation created!\n' +
       'End game value: 6M (only if played and built or banked)\n' +
@@ -932,16 +932,15 @@ export const propertyCards: PropertyCard[] = [
     name: 'Farm Bureau',
     subtitle: 'Anchor tenet',
     buildCost: 4,
-    buildIncome: 2,
-    influence: 2,
+    buildIncome: 0,
+    influence: 1,
     bankValue: 3,
     endGameValue: 2,
     copies: 3,
     buildLocations: ['Any anchor adjacent to farmland except Union'],
     specialAbility:
-      'INFLUENCE: +1 (Farmland; max +1 from Farm Bureau toward Hostile Takeover on eligible Farmland targets)\n' +
+      'INFLUENCE: +1 in Farmland on Hostile Takeover, Rezoning, and Remove Investors rolls\n' +
       'INCOME: +1 (block) — your other owned properties in the same city block gain +1 income during Income roll\n' +
-      'TAKEOVER (Hostile Takeover): +1 attacker influence when the target lot is Farmland — counted only on that property’s city block with other anchor takeover modifiers\n' +
       'Screen notification: Farm Bureau formed!\n' +
       'End game value: 2M (only if played and built or banked)\n' +
       'Build: Any center anchor tenet adjacent to farmland, except Union and already-built anchor tenets',
@@ -960,9 +959,8 @@ export const propertyCards: PropertyCard[] = [
     copies: 3,
     buildLocations: ['Any center AT adjacent to the railway district except Union'],
     specialAbility:
-      'INFLUENCE: +1 (Railway district; max +1 toward Hostile Takeover on eligible Railway targets)\n' +
+      'INFLUENCE: +1 in the Railway district on Hostile Takeover, Rezoning, and Remove Investors rolls\n' +
       'INCOME: +1 (block) — your other owned properties in the same city block gain +1 income during Income roll\n' +
-      'TAKEOVER (Hostile Takeover): +1 attacker influence when the target lot is in the Railway district — counted only on that property’s city block\n' +
       'Screen notification: Port Authority engineered!\n' +
       'End game value: 2M (only if played and built or banked)\n' +
       'Build: Any center anchor tenet adjacent to the railway district, except Union and already-built anchor tenets',
@@ -981,9 +979,8 @@ export const propertyCards: PropertyCard[] = [
     copies: 3,
     buildLocations: ['Any center AT adjacent to the riverfront district except Union'],
     specialAbility:
-      'INFLUENCE: +1 (River Front; max +1 toward Hostile Takeover on eligible River Front targets)\n' +
+      'INFLUENCE: +1 in River Parkway on Hostile Takeover, Rezoning, and Remove Investors rolls\n' +
       'INCOME: +1 (block) — your other owned properties in the same city block gain +1 income during Income roll\n' +
-      'TAKEOVER (Hostile Takeover): +1 attacker influence when the target lot is River Front — counted only on that property’s city block\n' +
       'Screen notification: Arts Council crafted!\n' +
       'End game value: 2M (only if played and built or banked)\n' +
       'Build: Any center anchor tenet adjacent to the riverfront district, except Union and already-built anchor tenets',
@@ -1002,9 +999,8 @@ export const propertyCards: PropertyCard[] = [
     copies: 3,
     buildLocations: ['Any center AT adjacent to the mountain cove district except Union'],
     specialAbility:
-      'INFLUENCE: +1 (Mountain Cove; max +1 toward Hostile Takeover on eligible Mountain Cove targets)\n' +
+      'INFLUENCE: +1 in Mountain Cove on Hostile Takeover, Rezoning, and Remove Investors rolls\n' +
       'INCOME: +1 (block) — your other owned properties in the same city block gain +1 income during Income roll\n' +
-      'TAKEOVER (Hostile Takeover): +1 attacker influence when the target lot is Mountain Cove — counted only on that property’s city block\n' +
       'Screen notification: Tourism office conceived!\n' +
       'End game value: 2M (only if played and built or banked)\n' +
       'Build: Any center anchor tenet adjacent to the mountain cove district, except Union and already-built anchor tenets',
@@ -1023,7 +1019,7 @@ export const propertyCards: PropertyCard[] = [
     copies: 4,
     buildLocations: ['Any center anchor except Union'],
     specialAbility:
-      'INFLUENCE: +1 (Hostile Takeover) — max +1 toward takeover when the target lot shares a city block with your built Mafia\n' +
+      'INFLUENCE: +1 citywide on Hostile Takeover, Rezoning, and Remove Investors rolls\n' +
       'INCOME: +1 (block) — your other owned properties in the same city block gain +1 income during your Income roll\n' +
       'EXTORTION: +$1M income from others — each opposing business property (non-anchor built lot) in the same city block as your built Mafia pays you $1M when that owner resolves Income\n' +
       'Screen notification: Mafia infiltrated!\n' +
@@ -1084,8 +1080,8 @@ export const propertyCards: PropertyCard[] = [
     copies: 4,
     buildLocations: ['Any center anchor except Union'],
     specialAbility:
-      'INFLUENCE: +1 for your passive modifier / −1 takeover influence for rivals’ lots on this city block — Hostile Takeover attackers gain +1 per distinct Regulation Bureau owner in the block who is not the defender\n' +
-      'INCOME: +1 (block) — your other owned properties in the same city block gain +1 income during your Income roll\n' +
+      'INFLUENCE: +1 citywide on your Hostile Takeover, Rezoning, and Remove Investors rolls; rivals suffer −1 on Hostile Takeover and Remove Investors rolls in this Bureau’s block\n' +
+      'INCOME: +1 (block) for your other owned properties; rivals’ properties in this block lose −1 during their Income roll\n' +
       'Screen notification: Regulation Bureau established!\n' +
       'End game value: 0M (only if played and built or banked)\n' +
       'Build: Any center anchor tenet (AT) except Union and already-built anchor tenets',
@@ -1123,7 +1119,7 @@ export const propertyCards: PropertyCard[] = [
     copies: 4,
     buildLocations: ['Union designated anchors only'],
     specialAbility:
-      'INFLUENCE: +1 (district where this Union anchor was played)\n' +
+      'INFLUENCE: +1 in the district where this Union was played on Hostile Takeover, Rezoning, and Remove Investors rolls\n' +
       'INCOME (Income resolution): Same block formula as Church Affiliation — +$1M per other built property you own on this Union anchor’s city block (Union cell excluded). Each built property another founder owns on that block suffers −$1M for their Income roll only — lost income; nothing is paid to you.\n' +
       'End game value: 0M (only if played and built or banked)\n' +
       'Build: Union designated anchors only',
@@ -1156,10 +1152,10 @@ export const actionCards: ActionCard[] = [
     bankValue: 5,
     copies: 8,
     diceRequired: true,
-    diceRollRule: 'Roll 5–6 after civic influence (board-wide civic): success',
+    diceRollRule: 'Roll total 5+ after applicable Anchor Tenet influence: success',
     placementRule: 'Choose a property card, then a vacant lot; roll to approve build',
     actions:
-      'Pick a property card in your hand (not an anchor), then a vacant city lot. Roll the die: total 5–6 succeeds — build that property there for its build cost (income and end values follow the card). With max +1 influence from owning any built civic property anywhere on the board, natural 4–6 succeeds. 1–3 fails (or 1–3 without civic bonus): Rezoning is discarded and you cannot complete a build on that lot this attempt.',
+      'Pick a property card in your hand (not an anchor), then a vacant city lot. Roll the die: total 5+ after applicable citywide and district Anchor Tenet influence succeeds — build that property there for its build cost. A lower total discards Rezoning and the build fails on that lot.',
   },
   {
     id: 'double-income',

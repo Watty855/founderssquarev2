@@ -18,7 +18,7 @@ export function GameEndDialog({ open, scores, onNewGame }: GameEndDialogProps) {
   return (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
-        className="max-w-2xl [&>button:first-child]:hidden"
+        className="w-[min(96vw,68rem)] !max-w-[68rem] max-h-[92vh] overflow-y-auto [&>button:first-child]:hidden"
         style={{
           backgroundColor: '#141418',
           border: '1px solid rgba(255,255,255,0.1)',
@@ -143,27 +143,28 @@ export function GameEndDialog({ open, scores, onNewGame }: GameEndDialogProps) {
                           {score.player.name}
                         </span>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 24, fontSize: 13 }}>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ color: '#666680', fontSize: 11 }}>Cash</div>
-                          <div style={{ fontWeight: 600, color: '#f0f0f5' }}>${score.cashInHand}M</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 28, fontSize: 14, flexShrink: 0 }}>
+                        <div style={{ textAlign: 'right', minWidth: 76 }}>
+                          <div style={{ color: '#666680', fontSize: 12, whiteSpace: 'nowrap' }}>Cash</div>
+                          <div style={{ fontWeight: 600, color: '#f0f0f5', whiteSpace: 'nowrap' }}>${score.cashInHand}M</div>
                         </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ color: '#666680', fontSize: 11 }}>Properties</div>
-                          <div style={{ fontWeight: 600, color: '#f0f0f5' }}>${score.propertyValue}M</div>
+                        <div style={{ textAlign: 'right', minWidth: 90 }}>
+                          <div style={{ color: '#666680', fontSize: 12, whiteSpace: 'nowrap' }}>Properties</div>
+                          <div style={{ fontWeight: 600, color: '#f0f0f5', whiteSpace: 'nowrap' }}>${score.propertyValue}M</div>
                         </div>
-                        <div style={{ textAlign: 'right', minWidth: 60 }}>
-                          <div style={{ color: '#666680', fontSize: 11 }}>Bonus</div>
+                        <div style={{ textAlign: 'right', minWidth: 76 }}>
+                          <div style={{ color: '#666680', fontSize: 12, whiteSpace: 'nowrap' }}>Bonus</div>
                           <div style={{
                             fontWeight: 600,
+                            whiteSpace: 'nowrap',
                             color: score.bonusMillion > 0 ? score.player.color : '#f0f0f5',
                           }}>
                             ${score.bonusMillion}M
                           </div>
                         </div>
-                        <div style={{ textAlign: 'right', minWidth: 70 }}>
-                          <div style={{ color: '#666680', fontSize: 11 }}>Total</div>
-                          <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f0f5' }}>${score.totalScore}M</div>
+                        <div style={{ textAlign: 'right', minWidth: 90 }}>
+                          <div style={{ color: '#666680', fontSize: 12, whiteSpace: 'nowrap' }}>Total</div>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: '#f0f0f5', whiteSpace: 'nowrap' }}>${score.totalScore}M</div>
                         </div>
                       </div>
                     </div>

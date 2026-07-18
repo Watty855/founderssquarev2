@@ -5,7 +5,7 @@ import type { PropertyCard } from './cardTypes'
 import { getOrthogonalCityNeighborsIncludingStreetSpan } from './boardAdjacency'
 import { isPlotInCityBlock, plotSupportsInvestmentIncome } from './investmentTargets'
 import { Plot, COLUMNS } from './types'
-import { getPlotDistricts } from './districts'
+import { getPlotDistricts, type District } from './districts'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -242,21 +242,22 @@ export function findCompleteStreets(plots: Plot[]): StreetBonus[] {
   return out
 }
 
-/** +1 total if the player owns a built City Hall and/or Courthouse lot (single influence bonus, not per building). */
+/** +1 total if the player owns built City Hall, Courthouse, and/or Police (single bonus, not per building). */
 export function getCityCouncilFreezeAttackerInfluence(
   playerId: number,
   plots: Plot[]
 ): { bonus: number; ownedCivicLabels: string[] } {
-  const hasCityHall = plots.some(
-    (p) => p.claimedBy === playerId && p.builtProperty === 'city-hall'
-  )
-  const hasCourthouse = plots.some(
-    (p) => p.claimedBy === playerId && p.builtProperty === 'courthouse'
-  )
   const ownedCivicLabels: string[] = []
-  if (hasCityHall) ownedCivicLabels.push('City Hall')
-  if (hasCourthouse) ownedCivicLabels.push('Courthouse')
-  const bonus = hasCityHall || hasCourthouse ? 1 : 0
+  for (const [id, label] of [
+    ['city-hall', 'City Hall'],
+    ['courthouse', 'Courthouse'],
+    ['police', 'Police'],
+  ] as const) {
+    if (plots.some((p) => p.claimedBy === playerId && p.builtProperty === id)) {
+      ownedCivicLabels.push(label)
+    }
+  }
+  const bonus = ownedCivicLabels.length > 0 ? 1 : 0
   return { bonus, ownedCivicLabels }
 }
 
@@ -279,48 +280,6 @@ export function getPoliceRaidAttackerInfluence(
     if (!labels.includes(nm)) labels.push(nm)
   }
   return { bonus: labels.length > 0 ? 1 : 0, labels }
-}
-
-/**
- * Remove Investors die roll only — civic bonus in the **same city block** as the target lot.
- * Rezoning’s own approval roll uses {@link getRezoningCivicInfluenceBoardWide} instead (board-wide civic).
- */
-export function getRezoningCivicInfluenceInBlock(
-  playerId: number,
-  plots: Plot[],
-  targetRow: number,
-  targetCol: string
-): { bonus: number; labels: string[] } {
-  const labels: string[] = []
-  for (const p of plots) {
-    if (p.type !== 'city' || p.claimedBy !== playerId || !p.builtProperty) continue
-    if (!isPlotInCityBlock(p, targetRow, targetCol)) continue
-    const pc = propertyCards.find((c) => c.id === p.builtProperty)
-    if (pc?.category === 'civic' && !labels.includes(pc.name)) {
-      labels.push(pc.name)
-    }
-  }
-  const bonus = labels.length > 0 ? 1 : 0
-  return { bonus, labels }
-}
-
-/**
- * Rezoning approval roll: +1 max if the player owns any built civic-category property **anywhere** on the board.
- */
-export function getRezoningCivicInfluenceBoardWide(
-  playerId: number,
-  plots: Plot[]
-): { bonus: number; labels: string[] } {
-  const labels: string[] = []
-  for (const p of plots) {
-    if (p.type !== 'city' || p.claimedBy !== playerId || !p.builtProperty) continue
-    const pc = propertyCards.find((c) => c.id === p.builtProperty)
-    if (pc?.category === 'civic' && !labels.includes(pc.name)) {
-      labels.push(pc.name)
-    }
-  }
-  const bonus = labels.length > 0 ? 1 : 0
-  return { bonus, labels }
 }
 
 /**
@@ -501,6 +460,27 @@ export function getInfluencersIncomeBonusForPlayer(
 }
 
 /**
+ * News Outlet income bonus:
+ * +1 income to each of the player's built properties in the same city block as an active News Outlet.
+ */
+export function getNewsOutletIncomeBonusForPlayer(
+  playerId: number,
+  plots: Plot[]
+): { bonus: number; sourceLabels: string[] } {
+  const outlets = activeAnchorSourcePlots(plots, playerId, 'news-outlet')
+  if (outlets.length === 0) return { bonus: 0, sourceLabels: [] }
+
+  const sourceLabels = outlets.map((p) => `${p.col}${p.row}`)
+  let bonus = 0
+  for (const p of plots) {
+    if (p.type !== 'city' || p.claimedBy !== playerId || !p.builtProperty) continue
+    if (p.builtProperty === 'news-outlet') continue
+    if (outlets.some((src) => isPlotInCityBlock(p, src.row, src.col))) bonus += 1
+  }
+  return { bonus, sourceLabels }
+}
+
+/**
  * Mafia income bonus:
  * +1 income to each of the player's built properties in the same city block as a built Mafia they own.
  */
@@ -546,6 +526,32 @@ export function getRegulationBureauIncomeBonusForPlayer(
   }
 
   return { bonus, sourceLabels }
+}
+
+/**
+ * Regulation Bureau pressure: each rival property in an active Bureau's block loses $1M
+ * from its owner's Income base. Multiple Bureaus covering one property do not stack.
+ */
+export function getRegulationBureauIncomePenaltyForPlayer(
+  incomePlayerId: number,
+  plots: Plot[]
+): { penalty: number; sourceLabels: string[] } {
+  const rivalBureaus = plots.filter(
+    (p) =>
+      p.type === 'city' &&
+      p.claimedBy !== undefined &&
+      p.claimedBy !== incomePlayerId &&
+      p.builtProperty === 'regulation-bureau' &&
+      !p.anchorInfluenceSuppressed
+  )
+  if (rivalBureaus.length === 0) return { penalty: 0, sourceLabels: [] }
+
+  let penalty = 0
+  for (const p of plots) {
+    if (p.type !== 'city' || p.claimedBy !== incomePlayerId || !p.builtProperty) continue
+    if (rivalBureaus.some((src) => isPlotInCityBlock(p, src.row, src.col))) penalty += 1
+  }
+  return { penalty, sourceLabels: rivalBureaus.map((p) => `${p.col}${p.row}`) }
 }
 
 /**
@@ -605,41 +611,72 @@ export function getUnionIncomePenaltyForPlayer(
   return { penalty, rivalUnionPlotLabels }
 }
 
+export type AnchorInfluenceAction = 'takeover' | 'rezoning' | 'remove-investors'
+
 /**
- * Hostile Takeover attacker: +1 per distinct active Regulation Bureau in the target's city block that is **not**
- * owned by the **defender** (rival lots in the block suffer −1 takeover influence → easier takeover for the attacker).
+ * Anchor Tenet influence from the reference card.
+ *
+ * Citywide: Church (T/R), Mafia (T/R/IR), Regulation Bureau (T/R/IR).
+ * District: Farm Bureau, Port Authority, Arts Council, Tourism Office, and Union (T/R/IR).
+ * Block pressure: an opponent Regulation Bureau applies −1 on T/IR in its block.
+ *
+ * Each Anchor identity contributes at most once to a roll, even if the player owns
+ * multiple copies. Different applicable identities stack.
  */
-export function getRegulationBureauTakeoverAttackerBonus(
-  attackerPlayerId: number,
+export function getAnchorInfluenceForAction(
+  playerId: number,
   plots: Plot[],
+  action: AnchorInfluenceAction,
   targetRow: number,
   targetCol: string
 ): { bonus: number; labels: string[] } {
-  const targetPlot = plots.find((q) => q.row === targetRow && q.col === targetCol)
-  if (!targetPlot?.builtProperty || targetPlot.claimedBy === undefined) return { bonus: 0, labels: [] }
-  const defenderId = targetPlot.claimedBy
-  if (defenderId === attackerPlayerId) return { bonus: 0, labels: [] }
-
-  const bureausInBlock = plots.filter(
-    (b) =>
-      b.type === 'city' &&
-      b.builtProperty === 'regulation-bureau' &&
-      b.claimedBy !== undefined &&
-      b.claimedBy !== defenderId &&
-      !b.anchorInfluenceSuppressed &&
-      isPlotInCityBlock(targetPlot, b.row, b.col)
-  )
-  if (bureausInBlock.length === 0) return { bonus: 0, labels: [] }
-
-  const distinctOwners = new Set(bureausInBlock.map((b) => b.claimedBy!))
-  const bonus = distinctOwners.size
-  return {
-    bonus,
-    labels:
-      bonus === 1
-        ? ["Regulation Bureau (rivals' takeover pressure in block)"]
-        : [`Regulation Bureau ×${bonus} (rivals' takeover pressure in block)`],
+  let bonus = 0
+  const labels: string[] = []
+  const add = (amount: number, label: string) => {
+    bonus += amount
+    labels.push(label)
   }
+  const has = (id: string) => activeAnchorSourcePlots(plots, playerId, id).length > 0
+
+  if ((action === 'takeover' || action === 'rezoning') && has('church')) {
+    add(1, 'Church Affiliation (citywide)')
+  }
+  if (has('mafia')) add(1, 'Mafia (citywide)')
+  if (has('regulation-bureau')) add(1, 'Regulation Bureau (citywide)')
+
+  const targetDistricts = getPlotDistricts(targetRow, targetCol)
+  const regional: Array<{ id: string; district: District; label: string }> = [
+    { id: 'farm-coop', district: 'Farmland', label: 'Farm Bureau (Farmland)' },
+    { id: 'port-authority', district: 'Railway District', label: 'Port Authority (Railway)' },
+    { id: 'arts-council', district: 'Riverfront', label: 'Arts Council (River Parkway)' },
+    { id: 'tourism-office', district: 'Mountain Cove', label: 'Tourism Office (Mountain Cove)' },
+  ]
+  for (const entry of regional) {
+    if (targetDistricts.includes(entry.district) && has(entry.id)) {
+      add(1, entry.label)
+    }
+  }
+
+  const unionCoversTarget = activeAnchorSourcePlots(plots, playerId, 'union').some((union) => {
+    const unionDistricts = getPlotDistricts(union.row, union.col)
+    return unionDistricts.some((district) => targetDistricts.includes(district))
+  })
+  if (unionCoversTarget) add(1, 'Union (played district)')
+
+  if (action === 'takeover' || action === 'remove-investors') {
+    const rivalBureauInBlock = plots.some(
+      (bureau) =>
+        bureau.type === 'city' &&
+        bureau.claimedBy !== undefined &&
+        bureau.claimedBy !== playerId &&
+        bureau.builtProperty === 'regulation-bureau' &&
+        !bureau.anchorInfluenceSuppressed &&
+        isPlotInCityBlock(bureau, targetRow, targetCol)
+    )
+    if (rivalBureauInBlock) add(-1, 'rival Regulation Bureau (block)')
+  }
+
+  return { bonus, labels }
 }
 
 /**
@@ -678,27 +715,6 @@ export function getMafiaLevyForIncomePlayer(
   }
 
   return { levyTotal, recipientAmounts }
-}
-
-/**
- * Mafia takeover bonus: +1 attacker influence when the target is in the same city block as your built Mafia.
- */
-export function getMafiaTakeoverInfluenceBonus(
-  playerId: number,
-  plots: Plot[],
-  targetRow: number,
-  targetCol: string
-): { bonus: number; labels: string[] } {
-  const mafias = activeAnchorSourcePlots(plots, playerId, 'mafia')
-  if (mafias.length === 0) return { bonus: 0, labels: [] }
-
-  const targetPlot = plots.find((q) => q.row === targetRow && q.col === targetCol)
-  if (!targetPlot || targetPlot.type !== 'city') return { bonus: 0, labels: [] }
-
-  const inBlock = mafias.some((m) => isPlotInCityBlock(targetPlot, m.row, m.col))
-  if (!inBlock) return { bonus: 0, labels: [] }
-
-  return { bonus: 1, labels: ['Mafia (same city block)'] }
 }
 
 /**
@@ -800,6 +816,44 @@ export function allocateInvestorPayoutsFromOwner(
 }
 
 /**
+ * Mafia tribute is paid only from income remaining after investor shares.
+ * If remaining cash cannot cover the full levy, recipients are pro-rated so money is never created.
+ */
+export function allocateMafiaTributeFromOwner(
+  availableMillion: number,
+  recipientAmounts: Record<number, number>
+): { scaled: Record<number, number>; ownerKeeps: number; paidTotal: number } {
+  const entries = Object.entries(recipientAmounts).filter(([, v]) => v > 0)
+  const totalOwed = entries.reduce((s, [, v]) => s + v, 0)
+  if (entries.length === 0 || totalOwed <= 0) {
+    return { scaled: {}, ownerKeeps: availableMillion, paidTotal: 0 }
+  }
+  if (availableMillion <= 0) {
+    const scaled: Record<number, number> = {}
+    for (const [idStr] of entries) scaled[Number(idStr)] = 0
+    return { scaled, ownerKeeps: 0, paidTotal: 0 }
+  }
+  if (availableMillion >= totalOwed) {
+    const scaled: Record<number, number> = {}
+    for (const [idStr, v] of entries) scaled[Number(idStr)] = v
+    return { scaled, ownerKeeps: availableMillion - totalOwed, paidTotal: totalOwed }
+  }
+  let allocated = 0
+  const scaled: Record<number, number> = {}
+  entries.forEach(([idStr, owed], idx) => {
+    const id = Number(idStr)
+    if (idx === entries.length - 1) {
+      scaled[id] = availableMillion - allocated
+    } else {
+      const x = Math.floor((availableMillion * owed) / totalOwed)
+      scaled[id] = x
+      allocated += x
+    }
+  })
+  return { scaled, ownerKeeps: 0, paidTotal: availableMillion }
+}
+
+/**
  * When a founder resolves Income on properties they own, each investment stripe (other players only)
  * accrues 25% of the contributed amount ($M) per stripe per resolution — paid from the owner's
  * collected income (see allocateInvestorPayoutsFromOwner). Park, Museum, Civic Center lots,
@@ -835,130 +889,4 @@ export function computeInvestorIncomeAwardsForOwner(
   }
   awards.sort((a, b) => a.investorId - b.investorId)
   return { payoutByPlayerId, awards }
-}
-
-/**
- * Remove Investors — property owner's die roll: +1 per distinct anchor tenet they own in the **same city block**
- * as the lot being cleared, plus +1 when they have any built civic-category property in that block (Rezoning rule).
- */
-export function getRemoveInvestorsRollBonuses(
-  ownerPlayerId: number,
-  plots: Plot[],
-  targetRow: number,
-  targetCol: string
-): { bonus: number; labels: string[] } {
-  const labels: string[] = []
-  let bonus = 0
-
-  const civic = getRezoningCivicInfluenceInBlock(ownerPlayerId, plots, targetRow, targetCol)
-  if (civic.bonus > 0) {
-    bonus += civic.bonus
-    for (const L of civic.labels) {
-      labels.push(`${L} (civic, same block)`)
-    }
-  }
-
-  const anchorIds: readonly string[] = [
-    'church',
-    'farm-coop',
-    'port-authority',
-    'arts-council',
-    'tourism-office',
-    'media',
-    'news-outlet',
-    'mafia',
-    'regulation-bureau',
-    'union',
-  ]
-
-  for (const anchorId of anchorIds) {
-    const sources = activeAnchorSourcePlots(plots, ownerPlayerId, anchorId)
-    const inBlock = sources.some((src) => isPlotInCityBlock(src, targetRow, targetCol))
-    if (!inBlock) continue
-    const card = propertyCards.find((c) => c.id === anchorId) as PropertyCard | undefined
-    bonus += 1
-    labels.push(`${card?.name ?? anchorId} (same block)`)
-  }
-
-  return { bonus, labels }
-}
-
-/**
- * Farm Bureau takeover bonus:
- * +1 to the attacker's hostile takeover die when targeting a Farmland lot
- * and the attacker owns at least one built Farm Bureau.
- */
-export function getFarmCoopTakeoverInfluenceBonus(
-  playerId: number,
-  plots: Plot[],
-  targetRow: number,
-  targetCol: string
-): { bonus: number; labels: string[] } {
-  const inFarmland = getPlotDistricts(targetRow, targetCol).includes('Farmland')
-  if (!inFarmland) return { bonus: 0, labels: [] }
-
-  const farmCoops = activeAnchorSourcePlots(plots, playerId, 'farm-coop')
-  if (farmCoops.length === 0) return { bonus: 0, labels: [] }
-
-  return { bonus: 1, labels: ['Farm Bureau (Farmland)'] }
-}
-
-/**
- * Port Authority takeover bonus:
- * +1 to the attacker's hostile takeover die when targeting a Railway District lot
- * and the attacker owns at least one built Port Authority.
- */
-export function getPortAuthorityTakeoverInfluenceBonus(
-  playerId: number,
-  plots: Plot[],
-  targetRow: number,
-  targetCol: string
-): { bonus: number; labels: string[] } {
-  const inRailway = getPlotDistricts(targetRow, targetCol).includes('Railway District')
-  if (!inRailway) return { bonus: 0, labels: [] }
-
-  const ports = activeAnchorSourcePlots(plots, playerId, 'port-authority')
-  if (ports.length === 0) return { bonus: 0, labels: [] }
-
-  return { bonus: 1, labels: ['Port Authority (Rail district)'] }
-}
-
-/**
- * Arts Council takeover bonus:
- * +1 to the attacker's hostile takeover die when targeting a Riverfront lot
- * and the attacker owns at least one built Arts Council.
- */
-export function getArtsCouncilTakeoverInfluenceBonus(
-  playerId: number,
-  plots: Plot[],
-  targetRow: number,
-  targetCol: string
-): { bonus: number; labels: string[] } {
-  const inRiverfront = getPlotDistricts(targetRow, targetCol).includes('Riverfront')
-  if (!inRiverfront) return { bonus: 0, labels: [] }
-
-  const arts = activeAnchorSourcePlots(plots, playerId, 'arts-council')
-  if (arts.length === 0) return { bonus: 0, labels: [] }
-
-  return { bonus: 1, labels: ['Arts Council (River Front)'] }
-}
-
-/**
- * Tourism Office takeover bonus:
- * +1 to the attacker's hostile takeover die when targeting a Mountain Cove lot
- * and the attacker owns at least one built Tourism Office.
- */
-export function getTourismOfficeTakeoverInfluenceBonus(
-  playerId: number,
-  plots: Plot[],
-  targetRow: number,
-  targetCol: string
-): { bonus: number; labels: string[] } {
-  const inMountainCove = getPlotDistricts(targetRow, targetCol).includes('Mountain Cove')
-  if (!inMountainCove) return { bonus: 0, labels: [] }
-
-  const tourism = activeAnchorSourcePlots(plots, playerId, 'tourism-office')
-  if (tourism.length === 0) return { bonus: 0, labels: [] }
-
-  return { bonus: 1, labels: ['Tourism Office (Mountain Cove)'] }
 }

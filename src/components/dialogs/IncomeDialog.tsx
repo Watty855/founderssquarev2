@@ -29,12 +29,16 @@ interface IncomeDialogProps {
   tourismOfficeBonusSourceLabels?: string[]
   influencersIncomeBonus?: number
   influencersBonusSourceLabels?: string[]
+  newsOutletIncomeBonus?: number
+  newsOutletBonusSourceLabels?: string[]
   mafiaIncomeBonus?: number
   mafiaBonusSourceLabels?: string[]
   /** Subtracted from rolled property income only (not when banking the Income card). */
   mafiaLevyTotal?: number
   regulationBureauIncomeBonus?: number
   regulationBureauBonusSourceLabels?: string[]
+  regulationBureauIncomePenalty?: number
+  rivalRegulationBureauPlotLabels?: string[]
   unionIncomeBonus?: number
   unionBonusSourceLabels?: string[]
   /** −$M applied to property-income pool before the die roll (lost income; not paid to Union owner). */
@@ -104,11 +108,15 @@ export function IncomeDialog({
   tourismOfficeBonusSourceLabels = [],
   influencersIncomeBonus = 0,
   influencersBonusSourceLabels = [],
+  newsOutletIncomeBonus = 0,
+  newsOutletBonusSourceLabels = [],
   mafiaIncomeBonus = 0,
   mafiaBonusSourceLabels = [],
   mafiaLevyTotal = 0,
   regulationBureauIncomeBonus = 0,
   regulationBureauBonusSourceLabels = [],
+  regulationBureauIncomePenalty = 0,
+  rivalRegulationBureauPlotLabels = [],
   unionIncomeBonus = 0,
   unionBonusSourceLabels = [],
   unionIncomePenalty = 0,
@@ -204,10 +212,11 @@ export function IncomeDialog({
     if (doubleIncomeActive) {
       amount = amount * 2
     }
-    amount = Math.max(0, amount - mafiaLevyTotal)
+    // Keep the gross rolled amount here. Mafia tribute is settled from remaining
+    // cash after investors so recipients never receive more than the payer can fund.
 
     setIncomeResult({ percentage, amount, status, event })
-  }, [diceValue, totalIncome, doubleIncomeActive, mafiaLevyTotal])
+  }, [diceValue, totalIncome, doubleIncomeActive])
 
   const aiIncomeHandledRef = useRef(false)
   const incomeAiCollectSentRef = useRef<string | null>(null)
@@ -396,8 +405,10 @@ export function IncomeDialog({
                         artsCouncilIncomeBonus > 0 ||
                         tourismOfficeIncomeBonus > 0 ||
                         influencersIncomeBonus > 0 ||
+                        newsOutletIncomeBonus > 0 ||
                         mafiaIncomeBonus > 0 ||
                         regulationBureauIncomeBonus > 0 ||
+                        regulationBureauIncomePenalty > 0 ||
                         unionIncomeBonus > 0 ||
                         unionIncomePenalty > 0
                           ? ' (includes anchor modifiers)'
@@ -507,6 +518,18 @@ export function IncomeDialog({
                         Influencer bonus: +${influencersIncomeBonus}M across covered city block lots.
                       </div>
                     )}
+                    {newsOutletIncomeBonus > 0 && (
+                      <div
+                        title={
+                          newsOutletBonusSourceLabels.length > 0
+                            ? `News Outlet anchors at ${newsOutletBonusSourceLabels.join(', ')}`
+                            : undefined
+                        }
+                        style={{ marginBottom: 6, fontSize: 11, color: '#67e8f9', lineHeight: 1.35 }}
+                      >
+                        News Outlet bonus: +${newsOutletIncomeBonus}M across covered city block lots.
+                      </div>
+                    )}
                     {mafiaIncomeBonus > 0 && (
                       <div
                         title={
@@ -539,6 +562,18 @@ export function IncomeDialog({
                         }}
                       >
                         Regulation Bureau bonus: +${regulationBureauIncomeBonus}M across covered city block lots.
+                      </div>
+                    )}
+                    {regulationBureauIncomePenalty > 0 && (
+                      <div
+                        title={
+                          rivalRegulationBureauPlotLabels.length > 0
+                            ? `Rival Regulation Bureau anchor(s) at ${rivalRegulationBureauPlotLabels.join(', ')}`
+                            : undefined
+                        }
+                        style={{ marginBottom: 6, fontSize: 11, color: '#c4b5fd', lineHeight: 1.35 }}
+                      >
+                        Regulation Bureau pressure: −${regulationBureauIncomePenalty}M on your lots in rival Bureau blocks.
                       </div>
                     )}
                     {unionIncomeBonus > 0 && (
@@ -744,6 +779,11 @@ export function IncomeDialog({
                         Influencer bonus included: +${influencersIncomeBonus}M
                       </div>
                     )}
+                    {newsOutletIncomeBonus > 0 && (
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#67e8f9', marginBottom: 8 }}>
+                        News Outlet bonus included: +${newsOutletIncomeBonus}M
+                      </div>
+                    )}
                     {mafiaIncomeBonus > 0 && (
                       <div
                         style={{
@@ -766,6 +806,11 @@ export function IncomeDialog({
                         }}
                       >
                         Regulation Bureau bonus included: +${regulationBureauIncomeBonus}M
+                      </div>
+                    )}
+                    {regulationBureauIncomePenalty > 0 && (
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#c4b5fd', marginBottom: 8 }}>
+                        Regulation Bureau pressure applied before roll: −${regulationBureauIncomePenalty}M
                       </div>
                     )}
                     {unionIncomeBonus > 0 && (
@@ -805,10 +850,17 @@ export function IncomeDialog({
                       </div>
                     )}
                     <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 10, marginTop: 6 }}>
-                      <div style={{ fontSize: 11, color: '#8888a0', marginBottom: 2 }}>You receive</div>
+                      <div style={{ fontSize: 11, color: '#8888a0', marginBottom: 2 }}>
+                        {mafiaLevyTotal > 0 ? 'Rolled income (before Mafia tribute / investors)' : 'You receive'}
+                      </div>
                       <div style={{ fontSize: 'clamp(22px, 5vw, 28px)', fontWeight: 300, color: '#1eaedb' }}>
                         ${incomeResult.amount}M
                       </div>
+                      {mafiaLevyTotal > 0 ? (
+                        <div style={{ marginTop: 6, fontSize: 11, color: '#f87171', lineHeight: 1.35 }}>
+                          Mafia tribute up to −${mafiaLevyTotal}M is paid from remaining cash after investor shares.
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 

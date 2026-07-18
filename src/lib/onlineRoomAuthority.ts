@@ -14,12 +14,14 @@ import type { PrivateHandPayload } from '@/lib/onlinePublicState'
  */
 export type OnlineAuthorityStore = {
   gameRev: number
+  /** Changes whenever the host starts a fresh authority session. */
+  authorityId: string | null
   gameHostId: string | null
   gameStateJson: string | null
 }
 
 export function createAuthorityStore(): OnlineAuthorityStore {
-  return { gameRev: 0, gameHostId: null, gameStateJson: null }
+  return { gameRev: 0, authorityId: null, gameHostId: null, gameStateJson: null }
 }
 
 export function authorityIsLive(store: OnlineAuthorityStore): boolean {
@@ -203,6 +205,10 @@ export function authorityInitGame(
     const raw = JSON.stringify(parsed)
     if (raw.length > 6_000_000) return { ok: false, error: 'Board snapshot too large to sync.' }
     store.gameHostId = hostSessionId
+    store.authorityId =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `auth_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
     store.gameRev = 1
     store.gameStateJson = raw
   } catch {
@@ -215,6 +221,7 @@ export function authorityInitGame(
 export function authorityClearGame(store: OnlineAuthorityStore, hostSessionId: string): boolean {
   if (store.gameHostId !== hostSessionId) return false
   store.gameHostId = null
+  store.authorityId = null
   store.gameRev = 0
   store.gameStateJson = null
   return true

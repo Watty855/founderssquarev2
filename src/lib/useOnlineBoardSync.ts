@@ -25,6 +25,17 @@ import { toPublicGameState } from '@/lib/onlinePublicState'
 import { boardTopic, getDeviceConnectionId, getRealtimeClient, normalizeRoomCode } from '@/lib/realtimeClient'
 
 export type SendActionOptions = { skipOptimistic?: boolean }
+export type OnlineConnectionStatus =
+  | 'offline'
+  | 'connecting'
+  | 'connected'
+  | 'resyncing'
+  | 'stale'
+  | 'error'
+
+const REVISION_HEARTBEAT_MS = 2_500
+const REVISION_STALE_MS = 8_000
+const SNAPSHOT_REQUEST_COOLDOWN_MS = 1_500
 
 /** Wire envelope on the board channel (Supabase Realtime broadcast event "board"). */
 type BoardWire =
@@ -34,6 +45,7 @@ type BoardWire =
   | { kind: 'action_rejected'; to: string; actionId: string; rev: number; error: string; code?: string }
   | { kind: 'game_action'; from: string; actionId: string; action: GameAction }
   | { kind: 'game_request'; from: string }
+  | { kind: 'revision_heartbeat'; rev: number; authorityId: string }
   | { kind: 'game_cleared' }
   | { kind: 'fx'; fx: BoardFx }
 
@@ -72,13 +84,23 @@ export function useOnlineBoardSync(params: {
   } = params
 
   const [boardPartyConnectionId, setBoardPartyConnectionId] = useState<string | null>(null)
+  const [connectionStatus, setConnectionStatus] = useState<OnlineConnectionStatus>(
+    config ? 'connecting' : 'offline'
+  )
 
   const channelRef = useRef<RealtimeChannel | null>(null)
   const hostInitSentRef = useRef(false)
   const lastRevRef = useRef(0)
+  const lastAuthorityIdRef = useRef<string | null>(null)
+  const lastHeartbeatAtRef = useRef(0)
+  const lastSnapshotRequestAtRef = useRef(0)
   const latestPublicRef = useRef<PublicGameState | null>(null)
+  const latestPublicJsonRef = useRef('')
   /** Hands this device may hold: its own seat plus AI seats when hosting. */
   const latestHandsRef = useRef<Map<number, PrivateHandPayload>>(new Map())
+  const latestHandJsonRef = useRef<Map<number, string>>(new Map())
+  const latestHandRevRef = useRef<Map<number, number>>(new Map())
+  const lastAppliedViewKeyRef = useRef('')
   const pendingRollbackRef = useRef<Map<string, GameState>>(new Map())
   /** Action ids whose events already fired optimistically on this device — skip the authoritative echo. */
   const optimisticEventsFiredRef = useRef<Set<string>>(new Set())
@@ -108,9 +130,17 @@ export function useOnlineBoardSync(params: {
   const applyMergedView = useCallback(() => {
     const pub = latestPublicRef.current
     if (!pub) return
+    const viewerId = resolveViewerId()
+    const handKey = [...latestHandJsonRef.current.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([playerId, json]) => `${playerId}:${json}`)
+      .join('|')
+    const viewKey = `${latestPublicJsonRef.current}|${viewerId ?? 'spectator'}|${handKey}`
+    if (viewKey === lastAppliedViewKeyRef.current) return
+    lastAppliedViewKeyRef.current = viewKey
     const merged = mergePublicAndPrivateHands(
       pub,
-      resolveViewerId(),
+      viewerId,
       [...latestHandsRef.current.values()]
     )
     // The opening narration is a per-device intro; once this device dismissed
@@ -127,16 +157,28 @@ export function useOnlineBoardSync(params: {
   const ingestPublicState = useCallback(
     (rev: number, raw: unknown) => {
       if (!raw || typeof raw !== 'object') return
-      if (rev <= lastRevRef.current) return
-      lastRevRef.current = rev
+      if (rev < lastRevRef.current) return
+      const json = JSON.stringify(raw)
+      const sameSnapshot = rev === lastRevRef.current && json === latestPublicJsonRef.current
+      lastRevRef.current = Math.max(lastRevRef.current, rev)
+      lastHeartbeatAtRef.current = Date.now()
+      setConnectionStatus('connected')
+      if (sameSnapshot) return
       latestPublicRef.current = raw as PublicGameState
+      latestPublicJsonRef.current = json
       applyMergedView()
     },
     [applyMergedView]
   )
 
   const ingestPrivateHand = useCallback(
-    (hand: PrivateHandPayload) => {
+    (hand: PrivateHandPayload, rev: number) => {
+      const previousRev = latestHandRevRef.current.get(hand.playerId) ?? -1
+      if (rev < previousRev) return
+      const json = JSON.stringify(hand)
+      if (rev === previousRev && json === latestHandJsonRef.current.get(hand.playerId)) return
+      latestHandRevRef.current.set(hand.playerId, rev)
+      latestHandJsonRef.current.set(hand.playerId, json)
       latestHandsRef.current.set(hand.playerId, hand)
       applyMergedView()
     },
@@ -148,6 +190,20 @@ export function useOnlineBoardSync(params: {
     if (!ch) return
     void ch.send({ type: 'broadcast', event: 'board', payload: msg })
   }, [])
+
+  const requestSnapshot = useCallback(
+    (force = false) => {
+      if (cfgRef.current?.role !== 'guest') return
+      const from = boardConnIdRef.current
+      if (!from || !channelRef.current) return
+      const now = Date.now()
+      if (!force && now - lastSnapshotRequestAtRef.current < SNAPSHOT_REQUEST_COOLDOWN_MS) return
+      lastSnapshotRequestAtRef.current = now
+      setConnectionStatus('resyncing')
+      sendWire({ kind: 'game_request', from })
+    },
+    [sendWire]
+  )
 
   const rollbackAction = useCallback(
     (actionId: string, error?: string) => {
@@ -198,7 +254,7 @@ export function useOnlineBoardSync(params: {
           if (m.sessionId === myId) ingestPublicState(m.rev, m.state)
           else sendWire({ kind: 'public_state', rev: m.rev, state: m.state })
         } else if (m.type === 'private_hand') {
-          if (m.sessionId === myId) ingestPrivateHand(m.hand)
+          if (m.sessionId === myId) ingestPrivateHand(m.hand, m.rev)
           else sendWire({ kind: 'private_hand', rev: m.rev, to: m.sessionId, hand: m.hand })
         } else if (m.type === 'action_rejected') {
           if (m.sessionId === myId) rollbackAction(m.actionId, m.error)
@@ -220,6 +276,7 @@ export function useOnlineBoardSync(params: {
 
   const handleWire = useCallback(
     (msg: BoardWire) => {
+      lastHeartbeatAtRef.current = Date.now()
       const myId = boardConnIdRef.current
       const cfg = cfgRef.current
       const isHost = cfg?.role === 'host'
@@ -229,7 +286,7 @@ export function useOnlineBoardSync(params: {
           ingestPublicState(msg.rev, msg.state)
           return
         case 'private_hand':
-          if (msg.to === myId) ingestPrivateHand(msg.hand)
+          if (msg.to === myId) ingestPrivateHand(msg.hand, msg.rev)
           return
         case 'action_applied': {
           ingestPublicState(msg.rev, msg.state)
@@ -263,17 +320,55 @@ export function useOnlineBoardSync(params: {
           if (messages.length > 0) deliverOutbound(messages)
           return
         }
+        case 'revision_heartbeat':
+          if (!isHost) {
+            const authorityChanged =
+              lastAuthorityIdRef.current != null && lastAuthorityIdRef.current !== msg.authorityId
+            if (authorityChanged) {
+              lastRevRef.current = 0
+              latestPublicRef.current = null
+              latestPublicJsonRef.current = ''
+              latestHandsRef.current.clear()
+              latestHandJsonRef.current.clear()
+              latestHandRevRef.current.clear()
+              lastAppliedViewKeyRef.current = ''
+            }
+            lastAuthorityIdRef.current = msg.authorityId
+            const viewerId = resolveViewerId()
+            const handRev =
+              viewerId == null ? msg.rev : (latestHandRevRef.current.get(viewerId) ?? -1)
+            if (authorityChanged || msg.rev > lastRevRef.current || handRev < msg.rev) {
+              setConnectionStatus('stale')
+              requestSnapshot()
+            } else {
+              setConnectionStatus('connected')
+            }
+          }
+          return
         case 'game_cleared':
           lastRevRef.current = 0
+          lastAuthorityIdRef.current = null
           latestPublicRef.current = null
+          latestPublicJsonRef.current = ''
           latestHandsRef.current.clear()
+          latestHandJsonRef.current.clear()
+          latestHandRevRef.current.clear()
+          lastAppliedViewKeyRef.current = ''
           return
         case 'fx':
           if (msg.fx) onFxRef.current?.(msg.fx)
           return
       }
     },
-    [ingestPublicState, ingestPrivateHand, rollbackAction, deliverOutbound, sendWire]
+    [
+      ingestPublicState,
+      ingestPrivateHand,
+      rollbackAction,
+      deliverOutbound,
+      sendWire,
+      requestSnapshot,
+      resolveViewerId,
+    ]
   )
   const handleWireRef = useRef(handleWire)
   handleWireRef.current = handleWire
@@ -343,12 +438,20 @@ export function useOnlineBoardSync(params: {
   useEffect(() => {
     hostInitSentRef.current = false
     lastRevRef.current = 0
+    lastAuthorityIdRef.current = null
     latestPublicRef.current = null
+    latestPublicJsonRef.current = ''
     latestHandsRef.current.clear()
+    latestHandJsonRef.current.clear()
+    latestHandRevRef.current.clear()
+    lastAppliedViewKeyRef.current = ''
     pendingRollbackRef.current.clear()
     optimisticEventsFiredRef.current.clear()
+    lastHeartbeatAtRef.current = Date.now()
+    lastSnapshotRequestAtRef.current = 0
     authorityRef.current = createAuthorityStore()
     setBoardPartyConnectionId(null)
+    setConnectionStatus(config ? 'connecting' : 'offline')
 
     const cfg = cfgRef.current
     const client = getRealtimeClient()
@@ -375,14 +478,13 @@ export function useOnlineBoardSync(params: {
 
     ch.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
+        boardConnIdRef.current = myId
         setBoardPartyConnectionId(myId)
+        lastHeartbeatAtRef.current = Date.now()
         if (cfgRef.current?.role === 'guest') {
-          void ch.send({
-            type: 'broadcast',
-            event: 'board',
-            payload: { kind: 'game_request', from: myId } satisfies BoardWire,
-          })
+          requestSnapshot(true)
         } else if (cfgRef.current?.role === 'host' && authorityIsLive(authorityRef.current)) {
+          setConnectionStatus('connected')
           const gs = authorityLoadState(authorityRef.current)
           if (gs) {
             void ch.send({
@@ -395,7 +497,15 @@ export function useOnlineBoardSync(params: {
               } satisfies BoardWire,
             })
           }
+        } else {
+          setConnectionStatus('connected')
         }
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        // Keep boardPartyConnectionId so guests stay in online-authoritative mode
+        // instead of falling through to local-only mutations while reconnecting.
+        setConnectionStatus('error')
+      } else if (status === 'CLOSED') {
+        setConnectionStatus('connecting')
       }
     })
 
@@ -404,12 +514,59 @@ export function useOnlineBoardSync(params: {
       if (channelRef.current === ch) channelRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configKey])
+  }, [configKey, requestSnapshot])
+
+  // The host advertises only its revision. Guests that missed a large state
+  // payload can detect the gap and request a targeted hydrate.
+  useEffect(() => {
+    if (config?.role !== 'host' || !boardPartyConnectionId) return
+    const sendHeartbeat = () => {
+      const store = authorityRef.current
+      if (!authorityIsLive(store) || !store.authorityId) return
+      sendWire({
+        kind: 'revision_heartbeat',
+        rev: store.gameRev,
+        authorityId: store.authorityId,
+      })
+    }
+    sendHeartbeat()
+    const id = window.setInterval(sendHeartbeat, REVISION_HEARTBEAT_MS)
+    return () => window.clearInterval(id)
+  }, [config?.role, boardPartyConnectionId, sendWire])
+
+  // A quiet or backgrounded WebSocket can look connected while no longer
+  // receiving table traffic. Mark it stale and ask the host for a fresh view.
+  useEffect(() => {
+    if (config?.role !== 'guest' || !boardPartyConnectionId) return
+    const id = window.setInterval(() => {
+      if (Date.now() - lastHeartbeatAtRef.current <= REVISION_STALE_MS) return
+      setConnectionStatus('stale')
+      requestSnapshot()
+    }, REVISION_HEARTBEAT_MS)
+    return () => window.clearInterval(id)
+  }, [config?.role, boardPartyConnectionId, requestSnapshot])
+
+  // iOS suspends WebSockets while backgrounded. Force a hydrate whenever the
+  // app becomes visible/online again; SUBSCRIBED also requests one after rejoin.
+  useEffect(() => {
+    if (config?.role !== 'guest') return
+    const onResume = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) requestSnapshot(true)
+    }
+    document.addEventListener('visibilitychange', onResume)
+    window.addEventListener('online', onResume)
+    return () => {
+      document.removeEventListener('visibilitychange', onResume)
+      window.removeEventListener('online', onResume)
+    }
+  }, [config?.role, requestSnapshot])
 
   useEffect(() => {
     if (!latestPublicRef.current) return
     applyMergedView()
   }, [boardPartyConnectionId, resolveSeatPlayerId, applyMergedView])
+
+  const requestResync = useCallback(() => requestSnapshot(true), [requestSnapshot])
 
   // Host seeds the authority once the local table finishes setup.
   useEffect(() => {
@@ -433,6 +590,8 @@ export function useOnlineBoardSync(params: {
     boardPartyConnectionId,
     sendAction,
     sendFx,
+    connectionStatus,
+    requestResync,
     isOnline: config != null && getRealtimeClient() != null,
   }
 }

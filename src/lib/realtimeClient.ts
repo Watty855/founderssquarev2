@@ -23,7 +23,10 @@ export function getRealtimeClient(): SupabaseClient | null {
     url && key
       ? createClient(url, key, {
           auth: { persistSession: false, autoRefreshToken: false },
-          realtime: { params: { eventsPerSecond: 20 } },
+          // A single game action fans out public state, private hands, events,
+          // and table effects. Keep the client-side limiter comfortably above
+          // those bursts; Supabase still enforces the project's server limits.
+          realtime: { params: { eventsPerSecond: 100 } },
         })
       : null
   return cached

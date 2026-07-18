@@ -200,11 +200,11 @@ function RollDieDialogInner({
 
   const description =
     mode === 'council-freeze-attacker'
-      ? 'Roll the die. Total 5–6 after civic influence succeeds (+1 max if you own built City Hall and/or Courthouse anywhere). First roll is free; each extra roll costs $5M (up to 3 rolls). If all three miss, the freeze fails.'
+      ? 'Roll the die. Total 5–6 after civic influence succeeds (+1 max if you own built City Hall, Courthouse, and/or Police anywhere). First roll is free; each extra roll costs $5M (up to 3 rolls). If all three miss, the freeze fails.'
       : mode === 'council-freeze-defender'
         ? `${defenderName ?? 'The target player'} rolls once. A 6 negates the freeze.`
         : mode === 'hostile-takeover-attacker'
-          ? 'The die must be rolled to resolve the attempt. Anchor takeover modifiers apply using only the target property’s city block (natural roll + bonuses: 5–6 succeeds). 1–4 before bonuses fails if bonuses cannot reach 5+. On success, the owner rolls once — only a 6 blocks; otherwise you pay 120% of end value and the lot becomes yours.'
+          ? 'Roll the die; total 5+ succeeds. Citywide, district, and block Anchor Tenet modifiers apply to the target lot. On success, the owner rolls once — only a 6 blocks; otherwise you pay 120% of end value and the lot becomes yours.'
           : mode === 'hostile-takeover-defender'
             ? `${defenderName ?? 'The property owner'} rolls once. A 6 blocks the takeover and keeps the property.`
             : mode === 'scandal-attacker'
@@ -212,17 +212,18 @@ function RollDieDialogInner({
               : mode === 'scandal-defender'
                 ? `${defenderName ?? 'The anchor owner'} rolls once. A 6 negates the scandal; any other result discontinues this anchor’s influence on this lot.`
                 : mode === 'rezoning'
-                  ? 'Roll 5–6 to approve Rezoning. Max +1 civic influence applies board-wide — any built civic you own anywhere lets natural 4–6 succeed. On 1–3 without that bonus (or lower totals), zoning stays the same, Rezoning is discarded, and this build fails on that lot.'
+                  ? 'Roll a total of 5+ to approve Rezoning. Applicable citywide and district Anchor Tenet influence modifies this roll. On a lower total, zoning stays the same, Rezoning is discarded, and this build fails on that lot.'
                   : mode === 'police-raid-attacker'
                     ? 'Roll the die. Total 5+ succeeds (including max +1 raid influence when you own built Police, City Hall, and/or Courthouse anywhere). On success, the Mafia owner counters — they need 6 if you had no raid influence, or 5–6 if you did.'
                     : mode === 'police-raid-defender'
                       ? `${defenderName ?? 'The Mafia owner'} rolls once to counter. ${influenceBonus > 0 ? 'They need 5–6 because you had raid influence (+1).' : 'They need a 6.'}`
                       : mode === 'remove-investors'
-                        ? 'Roll the die. Total 5+ counts your natural roll plus anchor and civic influence from your city block around the property you selected. No investor counter-roll. If you succeed, pay each investor 50% of their contribution ($M), then all stripes on that lot are cleared. Below 5 — investors stay and this card is discarded.'
+                        ? 'Roll the die. Total 5+ includes applicable citywide, district, and rival Regulation Bureau block influence. No investor counter-roll. If you succeed, pay each investor 50% of their contribution, then clear all stripes on that lot.'
                         : 'Click to roll and see your result'
 
   const total =
     diceValue !== null ? diceValue + influenceBonus : null
+  const signedInfluence = influenceBonus > 0 ? `+ ${influenceBonus}` : `− ${Math.abs(influenceBonus)}`
   const attackerSuccess = mode === 'council-freeze-attacker' && total !== null && total >= 5
   const attackerFail = mode === 'council-freeze-attacker' && total !== null && total < 5
 
@@ -544,12 +545,18 @@ function RollDieDialogInner({
                 +{influenceBonus} influence on this roll from built {influenceLabels.join(' & ')} anywhere on the board (max +1).
               </p>
             )}
-            {mode === 'rezoning' && influenceBonus > 0 && influenceLabels.length > 0 && (
-              <p style={{ fontSize: 12, color: '#1eaedb', marginBottom: 8, lineHeight: 1.4 }}>
-                +{influenceBonus} influence on this roll from built civic anywhere on the board (max +1):{' '}
-                {influenceLabels.join(' & ')}.
+            {mode === 'rezoning' && influenceBonus !== 0 && influenceLabels.length > 0 && (
+              <p style={{ fontSize: 12, color: influenceBonus > 0 ? '#1eaedb' : '#fca5a5', marginBottom: 8, lineHeight: 1.4 }}>
+                {signedInfluence} Anchor Tenet influence on this roll: {influenceLabels.join(', ')}.
               </p>
             )}
+            {(mode === 'hostile-takeover-attacker' || mode === 'remove-investors') &&
+              influenceBonus !== 0 &&
+              influenceLabels.length > 0 && (
+                <p style={{ fontSize: 12, color: influenceBonus > 0 ? '#1eaedb' : '#fca5a5', marginBottom: 8, lineHeight: 1.4 }}>
+                  {signedInfluence} Anchor Tenet influence on this roll: {influenceLabels.join(', ')}.
+                </p>
+              )}
             {mode === 'scandal-attacker' && influenceBonus > 0 && influenceLabels.length > 0 && (
               <p style={{ fontSize: 12, color: '#e879f9', marginBottom: 8, lineHeight: 1.4 }}>
                 +{influenceBonus} on this scandal roll from {influenceLabels.join(' & ')}.
@@ -574,9 +581,9 @@ function RollDieDialogInner({
               {diceValue !== null && (
                 <div style={{ textAlign: 'center', fontSize: 'clamp(22px, 5vw, 28px)', fontWeight: 300, color: '#1eaedb', padding: '6px 0' }}>
                   You rolled: {diceValue}
-                  {(mode === 'council-freeze-attacker' || mode === 'rezoning') && influenceBonus > 0 && (
+                  {(mode === 'council-freeze-attacker' || mode === 'rezoning') && influenceBonus !== 0 && (
                     <div style={{ fontSize: 16, fontWeight: 500, color: 'rgba(240,240,245,0.75)', marginTop: 8 }}>
-                      + {influenceBonus} civic influence → total {total}
+                      {signedInfluence} influence → total {total}
                     </div>
                   )}
                   {mode === 'scandal-attacker' && influenceBonus > 0 && (
@@ -609,9 +616,9 @@ function RollDieDialogInner({
               {hostileTakeoverAttackerSuccess && (
                 <p style={{ textAlign: 'center', fontSize: 15, fontWeight: 600, color: '#6ee7b7', margin: 0 }}>
                   Successful Take Over.
-                  {hostileTakeoverTotal !== null && influenceBonus > 0 && (
+                  {hostileTakeoverTotal !== null && influenceBonus !== 0 && (
                     <span style={{ display: 'block', marginTop: 6, fontSize: 12, fontWeight: 500, color: '#86efac' }}>
-                      {diceValue} + {influenceBonus} influence = {hostileTakeoverTotal}
+                      {diceValue} {signedInfluence} influence = {hostileTakeoverTotal}
                     </span>
                   )}
                 </p>
@@ -619,9 +626,9 @@ function RollDieDialogInner({
               {hostileTakeoverAttackerFail && (
                 <p style={{ textAlign: 'center', fontSize: 15, fontWeight: 600, color: '#fca5a5', margin: 0 }}>
                   Unsuccessful Take Over.
-                  {hostileTakeoverTotal !== null && influenceBonus > 0 && (
+                  {hostileTakeoverTotal !== null && influenceBonus !== 0 && (
                     <span style={{ display: 'block', marginTop: 6, fontSize: 12, fontWeight: 500, color: '#fca5a5' }}>
-                      {diceValue} + {influenceBonus} influence = {hostileTakeoverTotal}
+                      {diceValue} {signedInfluence} influence = {hostileTakeoverTotal}
                     </span>
                   )}
                 </p>
@@ -682,9 +689,9 @@ function RollDieDialogInner({
               {removeInvestorsSuccess && (
                 <p style={{ textAlign: 'center', fontSize: 15, fontWeight: 600, color: '#6ee7b7', margin: 0 }}>
                   Investors will be removed — you pay each investor 50% of their stake.
-                  {removeInvestorsTotal !== null && influenceBonus > 0 && (
+                  {removeInvestorsTotal !== null && influenceBonus !== 0 && (
                     <span style={{ display: 'block', marginTop: 6, fontSize: 12, fontWeight: 500, color: '#86efac' }}>
-                      {diceValue} + {influenceBonus} block influence = {removeInvestorsTotal}
+                      {diceValue} {signedInfluence} influence = {removeInvestorsTotal}
                     </span>
                   )}
                 </p>
