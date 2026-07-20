@@ -3,6 +3,7 @@ import type { GameAction, GameEvent } from '@/lib/onlineGameActions'
 import { applyGameAction } from '@/lib/gameEngine/applyGameAction'
 import { parsePartyGameState } from '@/lib/partyBoardSync'
 import { findHostSeatIndexForConnection } from '@/lib/partyBoardView'
+import { resolveGuestSeatForRemap } from '@/lib/partySeatIds'
 import { buildPrivateHandForPlayer } from '@/lib/partyGameBroadcast'
 import { toPublicGameState, type PublicGameState } from '@/lib/onlinePublicState'
 import type { PrivateHandPayload } from '@/lib/onlinePublicState'
@@ -65,10 +66,42 @@ export type AuthorityOutbound =
     }
   | { target: 'client'; sessionId: string; type: 'system'; text: string }
 
+/**
+ * Soft-bind a guest's board session id onto their seat when the lobby id and
+ * board id drifted (or only the display name still matches). Does not bump rev.
+ */
+export function authorityBindGuestSession(
+  store: OnlineAuthorityStore,
+  sessionId: string,
+  displayName?: string
+): boolean {
+  const gs = authorityLoadState(store)
+  if (!gs || store.gameHostId == null) return false
+  const cid = sessionId.trim()
+  if (!cid) return false
+  if (findHostSeatIndexForConnection(gs, cid) >= 0) return false
+
+  const byName = displayName?.trim()
+    ? resolveGuestSeatForRemap(gs, displayName)
+    : null
+  if (!byName || byName.isAi) return false
+
+  const next: GameState = {
+    ...gs,
+    players: gs.players.map((p) =>
+      p.id === byName.id ? { ...p, partySeatConnectionId: cid } : p
+    ),
+  }
+  authoritySaveState(store, next)
+  return true
+}
+
 export function authorityHydrateForClient(
   store: OnlineAuthorityStore,
-  sessionId: string
+  sessionId: string,
+  displayName?: string
 ): AuthorityOutbound[] {
+  authorityBindGuestSession(store, sessionId, displayName)
   const gs = authorityLoadState(store)
   if (!gs || store.gameHostId == null) return []
   const out: AuthorityOutbound[] = [
@@ -102,19 +135,19 @@ export function authorityBroadcastAfterState(
   meta?: { actionId: string; events: GameEvent[] }
 ): AuthorityOutbound[] {
   const pub = toPublicGameState(gs)
-  const out: AuthorityOutbound[] = [
-    { target: 'all', type: 'public_state', rev: store.gameRev, state: pub },
-  ]
-  if (meta) {
-    out.push({
-      target: 'all',
-      type: 'action_applied',
-      rev: store.gameRev,
-      actionId: meta.actionId,
-      state: pub,
-      events: meta.events,
-    })
-  }
+  // One full public payload per action — action_applied already carries state.
+  const out: AuthorityOutbound[] = meta
+    ? [
+        {
+          target: 'all',
+          type: 'action_applied',
+          rev: store.gameRev,
+          actionId: meta.actionId,
+          state: pub,
+          events: meta.events,
+        },
+      ]
+    : [{ target: 'all', type: 'public_state', rev: store.gameRev, state: pub }]
   for (const sessionId of authorityListHumanSessionIds(gs)) {
     const idx = findHostSeatIndexForConnection(gs, sessionId)
     if (idx < 0) continue

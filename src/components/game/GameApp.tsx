@@ -434,11 +434,23 @@ function AppInner() {
 
   const isOnlineActor = Boolean(partyBoardConfig && boardPartyConnectionId)
 
+  const pendingOnlineCommitRef = useRef<GameState | null>(null)
+  const onlineCommitScheduledRef = useRef(false)
+
   const commitOnlineAfterState = useCallback(
     (state: GameState) => {
-      if (partyBoardConfig && boardPartyConnectionId) {
-        sendActionRef.current({ type: 'commit_actor_state', state }, { skipOptimistic: true })
-      }
+      if (!partyBoardConfig || !boardPartyConnectionId) return
+      // Coalesce bursty local patches into one authority commit per tick.
+      pendingOnlineCommitRef.current = state
+      if (onlineCommitScheduledRef.current) return
+      onlineCommitScheduledRef.current = true
+      queueMicrotask(() => {
+        onlineCommitScheduledRef.current = false
+        const next = pendingOnlineCommitRef.current
+        pendingOnlineCommitRef.current = null
+        if (!next) return
+        sendActionRef.current({ type: 'commit_actor_state', state: next }, { skipOptimistic: true })
+      })
     },
     [partyBoardConfig, boardPartyConnectionId]
   )
@@ -448,7 +460,7 @@ function AppInner() {
       setGameState((prev) => {
         const next = typeof updater === 'function' ? updater(prev) : updater
         if (partyBoardConfig && boardPartyConnectionId && next !== prev) {
-          queueMicrotask(() => commitOnlineAfterState(next))
+          commitOnlineAfterState(next)
         }
         return next
       })

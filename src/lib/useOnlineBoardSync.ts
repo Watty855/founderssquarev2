@@ -36,15 +36,16 @@ export type OnlineConnectionStatus =
 const REVISION_HEARTBEAT_MS = 2_500
 const REVISION_STALE_MS = 8_000
 const SNAPSHOT_REQUEST_COOLDOWN_MS = 1_500
+const RESYNC_GIVE_UP_MS = 10_000
 
 /** Wire envelope on the board channel (Supabase Realtime broadcast event "board"). */
 type BoardWire =
-  | { kind: 'public_state'; rev: number; state: unknown }
+  | { kind: 'public_state'; rev: number; state: unknown; to?: string }
   | { kind: 'private_hand'; rev: number; to: string; hand: PrivateHandPayload }
   | { kind: 'action_applied'; rev: number; actionId: string; state: unknown; events?: GameEvent[] }
   | { kind: 'action_rejected'; to: string; actionId: string; rev: number; error: string; code?: string }
   | { kind: 'game_action'; from: string; actionId: string; action: GameAction }
-  | { kind: 'game_request'; from: string }
+  | { kind: 'game_request'; from: string; displayName?: string }
   | { kind: 'revision_heartbeat'; rev: number; authorityId: string }
   | { kind: 'game_cleared' }
   | { kind: 'fx'; fx: BoardFx }
@@ -94,6 +95,7 @@ export function useOnlineBoardSync(params: {
   const lastAuthorityIdRef = useRef<string | null>(null)
   const lastHeartbeatAtRef = useRef(0)
   const lastSnapshotRequestAtRef = useRef(0)
+  const resyncStartedAtRef = useRef(0)
   const latestPublicRef = useRef<PublicGameState | null>(null)
   const latestPublicJsonRef = useRef('')
   /** Hands this device may hold: its own seat plus AI seats when hosting. */
@@ -157,11 +159,19 @@ export function useOnlineBoardSync(params: {
   const ingestPublicState = useCallback(
     (rev: number, raw: unknown) => {
       if (!raw || typeof raw !== 'object') return
-      if (rev < lastRevRef.current) return
+      // Older hydrate after a newer live update must not leave the badge stuck
+      // on "Resyncing…" — we are already ahead of that snapshot.
+      if (rev < lastRevRef.current) {
+        lastHeartbeatAtRef.current = Date.now()
+        resyncStartedAtRef.current = 0
+        setConnectionStatus('connected')
+        return
+      }
       const json = JSON.stringify(raw)
       const sameSnapshot = rev === lastRevRef.current && json === latestPublicJsonRef.current
       lastRevRef.current = Math.max(lastRevRef.current, rev)
       lastHeartbeatAtRef.current = Date.now()
+      resyncStartedAtRef.current = 0
       setConnectionStatus('connected')
       if (sameSnapshot) return
       latestPublicRef.current = raw as PublicGameState
@@ -198,9 +208,23 @@ export function useOnlineBoardSync(params: {
       if (!from || !channelRef.current) return
       const now = Date.now()
       if (!force && now - lastSnapshotRequestAtRef.current < SNAPSHOT_REQUEST_COOLDOWN_MS) return
+      // Manual / resume / silence-forced requests reset the give-up window.
+      if (force) resyncStartedAtRef.current = 0
+      // Avoid hammering the host forever when hydrates keep failing (host asleep,
+      // authority not live, or seat still unbound).
+      if (
+        !force &&
+        resyncStartedAtRef.current > 0 &&
+        now - resyncStartedAtRef.current > RESYNC_GIVE_UP_MS
+      ) {
+        setConnectionStatus('stale')
+        return
+      }
       lastSnapshotRequestAtRef.current = now
+      if (resyncStartedAtRef.current === 0) resyncStartedAtRef.current = now
       setConnectionStatus('resyncing')
-      sendWire({ kind: 'game_request', from })
+      const displayName = cfgRef.current?.displayName?.trim() || undefined
+      sendWire({ kind: 'game_request', from, displayName })
     },
     [sendWire]
   )
@@ -249,10 +273,10 @@ export function useOnlineBoardSync(params: {
           }
           continue
         }
-        // Targeted messages
+        // Targeted messages — public hydrate includes `to` so other guests ignore it.
         if (m.type === 'public_state') {
           if (m.sessionId === myId) ingestPublicState(m.rev, m.state)
-          else sendWire({ kind: 'public_state', rev: m.rev, state: m.state })
+          else sendWire({ kind: 'public_state', rev: m.rev, state: m.state, to: m.sessionId })
         } else if (m.type === 'private_hand') {
           if (m.sessionId === myId) ingestPrivateHand(m.hand, m.rev)
           else sendWire({ kind: 'private_hand', rev: m.rev, to: m.sessionId, hand: m.hand })
@@ -283,6 +307,7 @@ export function useOnlineBoardSync(params: {
 
       switch (msg.kind) {
         case 'public_state':
+          if (msg.to && msg.to !== myId) return
           ingestPublicState(msg.rev, msg.state)
           return
         case 'private_hand':
@@ -316,7 +341,11 @@ export function useOnlineBoardSync(params: {
         }
         case 'game_request': {
           if (!isHost) return
-          const messages = authorityHydrateForClient(authorityRef.current, msg.from)
+          const messages = authorityHydrateForClient(
+            authorityRef.current,
+            msg.from,
+            msg.displayName
+          )
           if (messages.length > 0) deliverOutbound(messages)
           return
         }
@@ -332,15 +361,22 @@ export function useOnlineBoardSync(params: {
               latestHandJsonRef.current.clear()
               latestHandRevRef.current.clear()
               lastAppliedViewKeyRef.current = ''
+              resyncStartedAtRef.current = 0
             }
             lastAuthorityIdRef.current = msg.authorityId
             const viewerId = resolveViewerId()
-            const handRev =
-              viewerId == null ? msg.rev : (latestHandRevRef.current.get(viewerId) ?? -1)
-            if (authorityChanged || msg.rev > lastRevRef.current || handRev < msg.rev) {
-              setConnectionStatus('stale')
+            // Only require private-hand catch-up after the host has successfully
+            // delivered a hand for this seat. Name-fallback viewer ids without a
+            // bound connection previously caused an infinite Resyncing… loop.
+            const hasHandBaseline =
+              viewerId != null && latestHandRevRef.current.has(viewerId)
+            const handBehind =
+              hasHandBaseline &&
+              (latestHandRevRef.current.get(viewerId) ?? -1) < msg.rev
+            if (authorityChanged || msg.rev > lastRevRef.current || handBehind) {
               requestSnapshot()
             } else {
+              resyncStartedAtRef.current = 0
               setConnectionStatus('connected')
             }
           }
@@ -449,6 +485,7 @@ export function useOnlineBoardSync(params: {
     optimisticEventsFiredRef.current.clear()
     lastHeartbeatAtRef.current = Date.now()
     lastSnapshotRequestAtRef.current = 0
+    resyncStartedAtRef.current = 0
     authorityRef.current = createAuthorityStore()
     setBoardPartyConnectionId(null)
     setConnectionStatus(config ? 'connecting' : 'offline')
@@ -540,8 +577,8 @@ export function useOnlineBoardSync(params: {
     if (config?.role !== 'guest' || !boardPartyConnectionId) return
     const id = window.setInterval(() => {
       if (Date.now() - lastHeartbeatAtRef.current <= REVISION_STALE_MS) return
-      setConnectionStatus('stale')
-      requestSnapshot()
+      // Force bypasses the cooldown so a true silence always sends a request.
+      requestSnapshot(true)
     }, REVISION_HEARTBEAT_MS)
     return () => window.clearInterval(id)
   }, [config?.role, boardPartyConnectionId, requestSnapshot])
