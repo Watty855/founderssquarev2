@@ -11,6 +11,7 @@ import {
 } from '@/lib/onlineSeatPlan'
 import type { PartyBoardSyncMeta, PartyBoardSyncConfig } from '@/lib/partyBoardSync'
 import { getDeviceConnectionId, normalizeRoomCode } from '@/lib/realtimeClient'
+import { loadLastOnlineSession } from '@/lib/onlineSessionMemory'
 import { usePartySeatPlanRoom } from '@/lib/usePartySeatPlanRoom'
 import { PlayerSetup } from '@/components/game/PlayerSetup'
 import { MultiplayerLobby, type OnlineLobbyRole } from '@/components/game/MultiplayerLobby'
@@ -63,11 +64,16 @@ function OpeningScreen({
   onPlayOnline,
   onNewGame,
   onJoinFriendsGame,
+  onRejoinLastRoom,
+  lastRoomLabel,
 }: {
   onPlayOnline: () => void
   onNewGame: () => void
   /** Join online flow from the Online card (“Join game”) — hydrate from host snapshot + PartyKit seat id. */
   onJoinFriendsGame?: () => void
+  /** Resume a previous online seat (same room code + seat name). */
+  onRejoinLastRoom?: () => void
+  lastRoomLabel?: string
 }) {
   const gold = '#c9a85c'
   const goldLight = '#e8d4a0'
@@ -194,6 +200,25 @@ function OpeningScreen({
               >
                 <PlugsConnected size={15} weight="duotone" color={goldLight} />
                 Join friend&apos;s game
+              </button>
+            ) : null}
+
+            {onRejoinLastRoom && lastRoomLabel ? (
+              <button
+                type="button"
+                onClick={onRejoinLastRoom}
+                style={{
+                  ...actionBtnBase,
+                  fontSize: 9,
+                  letterSpacing: '0.08em',
+                  border: `1px solid rgba(125, 211, 252, 0.55)`,
+                  background: 'rgba(14, 116, 144, 0.35)',
+                  color: '#e0f2fe',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
+                }}
+              >
+                <ArrowsClockwise size={15} weight="duotone" color="#7dd3fc" />
+                Rejoin {lastRoomLabel}
               </button>
             ) : null}
 
@@ -1472,6 +1497,9 @@ export function GameSetupWizard({
   /** After "Play on this device", mode picker hides Online (use Play online on title screen). */
   const [modeScreenDeviceOnly, setModeScreenDeviceOnly] = useState(false)
   const [lobbySuggestedRole, setLobbySuggestedRole] = useState<OnlineLobbyRole | undefined>(undefined)
+  const [lobbyPrefill, setLobbyPrefill] = useState<{ displayName: string; roomCode: string } | null>(
+    null
+  )
   const [onlineSession, setOnlineSession] = useState<{
     roomId: string
     displayName: string
@@ -1479,6 +1507,7 @@ export function GameSetupWizard({
     profile?: HelloProfile
     role?: OnlineLobbyRole
   } | null>(null)
+  const lastOnline = loadLastOnlineSession()
 
   return (
     <AnimatePresence mode="wait">
@@ -1495,6 +1524,7 @@ export function GameSetupWizard({
               setModeScreenDeviceOnly(false)
               setLobbyMode('online')
               setOnlineSession(null)
+              setLobbyPrefill(null)
               setLobbySuggestedRole('host')
               setPhase('multiplayer')
             }}
@@ -1508,11 +1538,28 @@ export function GameSetupWizard({
                     setModeScreenDeviceOnly(false)
                     setLobbyMode('online')
                     setOnlineSession(null)
+                    setLobbyPrefill(null)
                     setLobbySuggestedRole('guest')
                     setPhase('multiplayer')
                   }
                 : undefined
             }
+            onRejoinLastRoom={
+              onGuestJoined && lastOnline
+                ? () => {
+                    setModeScreenDeviceOnly(false)
+                    setLobbyMode('online')
+                    setOnlineSession(null)
+                    setLobbyPrefill({
+                      displayName: lastOnline.displayName,
+                      roomCode: lastOnline.roomId,
+                    })
+                    setLobbySuggestedRole(lastOnline.role === 'host' ? 'host' : 'guest')
+                    setPhase('multiplayer')
+                  }
+                : undefined
+            }
+            lastRoomLabel={lastOnline ? lastOnline.roomId : undefined}
           />
         </motion.div>
       )}
@@ -1566,8 +1613,11 @@ export function GameSetupWizard({
         >
           <MultiplayerLobby
             suggestedRole={lobbySuggestedRole}
+            initialDisplayName={lobbyPrefill?.displayName}
+            initialRoomCode={lobbyPrefill?.roomCode}
             onBack={() => {
               setOnlineSession(null)
+              setLobbyPrefill(null)
               setLobbySuggestedRole(undefined)
               setModeScreenDeviceOnly(false)
               setPhase('opening')

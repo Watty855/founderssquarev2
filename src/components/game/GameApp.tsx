@@ -109,6 +109,7 @@ import {
   type PartyBoardSyncConfig,
   type PartyBoardSyncMeta,
 } from '@/lib/partyBoardSync'
+import { saveLastOnlineSession, clearLastOnlineSession } from '@/lib/onlineSessionMemory'
 import { remapSeatPlanPartySocketIds, resolveGuestSeatForRemap } from '@/lib/partySeatIds'
 import { redactGameStateForGuestView } from '@/lib/partyBoardView'
 import { useOnlineBoardSync } from '@/lib/useOnlineBoardSync'
@@ -1250,6 +1251,11 @@ function AppInner() {
   }, [gameState])
 
   const handleGuestJoined = useCallback((gs: GameState, cfg: PartyBoardSyncConfig) => {
+    saveLastOnlineSession({
+      roomId: cfg.roomId,
+      displayName: cfg.displayName,
+      role: 'guest',
+    })
     setGameState(gs)
     setPartyBoardConfig(cfg)
   }, [])
@@ -1473,6 +1479,11 @@ function AppInner() {
 
   const handleSetupComplete = (players: Player[], partyBoard?: PartyBoardSyncMeta) => {
     if (partyBoard) {
+      saveLastOnlineSession({
+        roomId: partyBoard.roomId,
+        displayName: partyBoard.displayName,
+        role: 'host',
+      })
       setPartyBoardConfig({ ...partyBoard, role: 'host' })
     } else {
       setPartyBoardConfig(null)
@@ -3830,6 +3841,16 @@ function AppInner() {
   const handleNewGame = () => {
     if (partyBoardConfig?.role === 'host') {
       partyBoardSync.sendGameClear()
+      clearLastOnlineSession()
+    } else if (partyBoardConfig?.role === 'guest') {
+      saveLastOnlineSession({
+        roomId: partyBoardConfig.roomId,
+        displayName: partyBoardConfig.displayName,
+        role: 'guest',
+      })
+      toast.info(
+        `Left the table. Rejoin room ${partyBoardConfig.roomId} with seat name "${partyBoardConfig.displayName}" while the host stays online.`
+      )
     }
     setPartyBoardConfig(null)
     setGameState(initialGameState)
@@ -6300,66 +6321,108 @@ function AppInner() {
   return (
     <div className="h-screen flex flex-col overflow-hidden game-table" style={{ backgroundColor: '#000000' }}>
       {partyBoardConfig ? (
-        <button
-          type="button"
-          onClick={partyBoardConfig.role === 'guest' ? requestResync : undefined}
-          title={
-            partyBoardConfig.role === 'guest'
-              ? 'Online table connection — click to resync'
-              : 'Online table connection'
-          }
-          aria-live="polite"
-          className="fixed right-2 top-2 z-[80] inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] shadow-lg backdrop-blur-md sm:right-3 sm:top-3"
-          style={{
-            pointerEvents: 'auto',
-            cursor: partyBoardConfig.role === 'guest' ? 'pointer' : 'default',
-            color:
-              connectionStatus === 'connected'
-                ? '#bbf7d0'
-                : connectionStatus === 'error'
-                  ? '#fecaca'
-                  : '#fde68a',
-            borderColor:
-              connectionStatus === 'connected'
-                ? 'rgba(74,222,128,0.45)'
-                : connectionStatus === 'error'
-                  ? 'rgba(248,113,113,0.5)'
-                  : 'rgba(251,191,36,0.5)',
-            background:
-              connectionStatus === 'connected'
-                ? 'rgba(6,78,59,0.88)'
-                : connectionStatus === 'error'
-                  ? 'rgba(127,29,29,0.9)'
-                  : 'rgba(120,53,15,0.9)',
-          }}
+        <div
+          className="fixed right-2 top-2 z-[80] flex max-w-[min(92vw,20rem)] flex-col items-end gap-1.5 sm:right-3 sm:top-3"
+          style={{ pointerEvents: 'auto' }}
         >
-          <span
-            aria-hidden
+          <button
+            type="button"
+            onClick={partyBoardConfig.role === 'guest' ? requestResync : undefined}
+            title={
+              partyBoardConfig.role === 'guest'
+                ? 'Online table connection — click to resync'
+                : 'Online table connection — keep this device awake while hosting'
+            }
+            aria-live="polite"
+            className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] shadow-lg backdrop-blur-md"
             style={{
-              width: 8,
-              height: 8,
-              flexShrink: 0,
-              borderRadius: 999,
-              backgroundColor:
+              cursor: partyBoardConfig.role === 'guest' ? 'pointer' : 'default',
+              color:
                 connectionStatus === 'connected'
-                  ? '#4ade80'
+                  ? '#bbf7d0'
                   : connectionStatus === 'error'
-                    ? '#f87171'
-                    : '#fbbf24',
-              boxShadow:
-                connectionStatus === 'connected' ? '0 0 8px rgba(74,222,128,0.8)' : undefined,
+                    ? '#fecaca'
+                    : '#fde68a',
+              borderColor:
+                connectionStatus === 'connected'
+                  ? 'rgba(74,222,128,0.45)'
+                  : connectionStatus === 'error'
+                    ? 'rgba(248,113,113,0.5)'
+                    : 'rgba(251,191,36,0.5)',
+              background:
+                connectionStatus === 'connected'
+                  ? 'rgba(6,78,59,0.88)'
+                  : connectionStatus === 'error'
+                    ? 'rgba(127,29,29,0.9)'
+                    : 'rgba(120,53,15,0.9)',
             }}
-          />
-          {connectionStatus === 'connected'
-            ? 'Online'
-            : connectionStatus === 'resyncing'
-              ? 'Resyncing…'
-              : connectionStatus === 'stale'
-                ? 'Connection stale'
-                : connectionStatus === 'error'
-                  ? 'Connection error'
-                  : 'Connecting…'}
-        </button>
+          >
+            <span
+              aria-hidden
+              style={{
+                width: 8,
+                height: 8,
+                flexShrink: 0,
+                borderRadius: 999,
+                backgroundColor:
+                  connectionStatus === 'connected'
+                    ? '#4ade80'
+                    : connectionStatus === 'error'
+                      ? '#f87171'
+                      : '#fbbf24',
+                boxShadow:
+                  connectionStatus === 'connected' ? '0 0 8px rgba(74,222,128,0.8)' : undefined,
+              }}
+            />
+            {connectionStatus === 'connected'
+              ? 'Online'
+              : connectionStatus === 'resyncing'
+                ? 'Resyncing…'
+                : connectionStatus === 'stale'
+                  ? 'Host unreachable'
+                  : connectionStatus === 'error'
+                    ? 'Connection error'
+                    : 'Connecting…'}
+          </button>
+          {partyBoardConfig.role === 'guest' &&
+          (connectionStatus === 'stale' ||
+            connectionStatus === 'error' ||
+            connectionStatus === 'resyncing') ? (
+            <div className="rounded-xl border border-amber-300/35 bg-black/85 px-3 py-2 text-left shadow-lg backdrop-blur-md">
+              <p className="m-0 mb-2 text-[11px] leading-snug text-amber-50/90">
+                {connectionStatus === 'resyncing'
+                  ? 'Catching up with the host…'
+                  : 'Host may be asleep or offline. Keep the host device on this game, then Resync — or Leave and rejoin the same room code.'}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={requestResync}
+                  className="rounded-full border border-sky-300/40 bg-sky-500/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-sky-100"
+                >
+                  Resync
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNewGame}
+                  className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-100"
+                >
+                  Leave table
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {partyBoardConfig.role === 'guest' && connectionStatus === 'connected' ? (
+            <button
+              type="button"
+              onClick={handleNewGame}
+              className="rounded-full border border-white/15 bg-black/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-300 shadow-lg backdrop-blur-md"
+              title={`Leave without ending the table. Rejoin room ${partyBoardConfig.roomId} later.`}
+            >
+              Leave table
+            </button>
+          ) : null}
+        </div>
       ) : null}
       <div style={{ flexShrink: 0, backgroundColor: '#000000' }}>
       {/* Header bar */}

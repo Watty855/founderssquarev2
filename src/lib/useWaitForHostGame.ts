@@ -68,7 +68,11 @@ export function useWaitForHostGame(opts: {
       void ch.send({
         type: 'broadcast',
         event: 'board',
-        payload: { kind: 'game_request', from: myId },
+        payload: {
+          kind: 'game_request',
+          from: myId,
+          displayName: displayName.trim() || undefined,
+        },
       })
     }
 
@@ -76,9 +80,17 @@ export function useWaitForHostGame(opts: {
     channelRef.current = ch
 
     ch.on('broadcast', { event: 'board' }, ({ payload }) => {
-      const msg = payload as { kind?: string; to?: string; state?: PublicGameState; hand?: PrivateHandPayload }
+      const msg = payload as {
+        kind?: string
+        to?: string
+        rev?: number
+        state?: PublicGameState
+        hand?: PrivateHandPayload
+      }
       if (!msg || typeof msg !== 'object') return
       if (msg.kind === 'public_state' || msg.kind === 'action_applied') {
+        // Ignore hydrates meant for another seat.
+        if (msg.kind === 'public_state' && msg.to && msg.to !== myId) return
         publicSnap = msg.state ?? null
         window.setTimeout(finish, 350)
       } else if (msg.kind === 'private_hand' && msg.to === myId) {

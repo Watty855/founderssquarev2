@@ -42,19 +42,26 @@ let deviceConnectionId: string | null = null
 
 /**
  * Stable per-device session id used as the presence key, seat-plan connection id,
- * and board sender id — one identity from lobby through live play, surviving
- * page reloads within the session.
+ * and board sender id — one identity from lobby through live play. Prefer
+ * localStorage so force-quit / app relaunch can reclaim the same seat.
  */
 export function getDeviceConnectionId(): string {
   if (deviceConnectionId) return deviceConnectionId
   try {
-    const existing = sessionStorage.getItem(CONNECTION_ID_STORAGE_KEY)
+    const existing =
+      localStorage.getItem(CONNECTION_ID_STORAGE_KEY) ??
+      sessionStorage.getItem(CONNECTION_ID_STORAGE_KEY)
     if (existing) {
       deviceConnectionId = existing
+      try {
+        localStorage.setItem(CONNECTION_ID_STORAGE_KEY, existing)
+      } catch {
+        /* noop */
+      }
       return existing
     }
   } catch {
-    /* sessionStorage unavailable — fall through to in-memory id */
+    /* storage unavailable — fall through to in-memory id */
   }
   const fresh =
     typeof crypto !== 'undefined' && crypto.randomUUID
@@ -62,9 +69,13 @@ export function getDeviceConnectionId(): string {
       : `conn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
   deviceConnectionId = fresh
   try {
-    sessionStorage.setItem(CONNECTION_ID_STORAGE_KEY, fresh)
+    localStorage.setItem(CONNECTION_ID_STORAGE_KEY, fresh)
   } catch {
-    /* noop */
+    try {
+      sessionStorage.setItem(CONNECTION_ID_STORAGE_KEY, fresh)
+    } catch {
+      /* noop */
+    }
   }
   return fresh
 }

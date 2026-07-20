@@ -36,7 +36,10 @@ export type OnlineConnectionStatus =
 const REVISION_HEARTBEAT_MS = 2_500
 const REVISION_STALE_MS = 8_000
 const SNAPSHOT_REQUEST_COOLDOWN_MS = 1_500
-const RESYNC_GIVE_UP_MS = 10_000
+/** Stop hammering the host after this long without a successful public ingest. */
+const RESYNC_GIVE_UP_MS = 12_000
+/** When stale, try one fresh hydrate this often in case the host woke up. */
+const STALE_RETRY_MS = 20_000
 
 /** Wire envelope on the board channel (Supabase Realtime broadcast event "board"). */
 type BoardWire =
@@ -88,6 +91,8 @@ export function useOnlineBoardSync(params: {
   const [connectionStatus, setConnectionStatus] = useState<OnlineConnectionStatus>(
     config ? 'connecting' : 'offline'
   )
+  const connectionStatusRef = useRef<OnlineConnectionStatus>(config ? 'connecting' : 'offline')
+  connectionStatusRef.current = connectionStatus
 
   const channelRef = useRef<RealtimeChannel | null>(null)
   const hostInitSentRef = useRef(false)
@@ -96,6 +101,7 @@ export function useOnlineBoardSync(params: {
   const lastHeartbeatAtRef = useRef(0)
   const lastSnapshotRequestAtRef = useRef(0)
   const resyncStartedAtRef = useRef(0)
+  const lastStaleRetryAtRef = useRef(0)
   const latestPublicRef = useRef<PublicGameState | null>(null)
   const latestPublicJsonRef = useRef('')
   /** Hands this device may hold: its own seat plus AI seats when hosting. */
@@ -202,18 +208,16 @@ export function useOnlineBoardSync(params: {
   }, [])
 
   const requestSnapshot = useCallback(
-    (force = false) => {
+    (force = false, opts?: { resetGiveUp?: boolean }) => {
       if (cfgRef.current?.role !== 'guest') return
       const from = boardConnIdRef.current
       if (!from || !channelRef.current) return
       const now = Date.now()
       if (!force && now - lastSnapshotRequestAtRef.current < SNAPSHOT_REQUEST_COOLDOWN_MS) return
-      // Manual / resume / silence-forced requests reset the give-up window.
-      if (force) resyncStartedAtRef.current = 0
-      // Avoid hammering the host forever when hydrates keep failing (host asleep,
-      // authority not live, or seat still unbound).
+      // Only manual Resync / app-resume should reopen the give-up window.
+      // Silence-forced retries must NOT reset it — that caused endless Resyncing….
+      if (opts?.resetGiveUp) resyncStartedAtRef.current = 0
       if (
-        !force &&
         resyncStartedAtRef.current > 0 &&
         now - resyncStartedAtRef.current > RESYNC_GIVE_UP_MS
       ) {
@@ -486,6 +490,7 @@ export function useOnlineBoardSync(params: {
     lastHeartbeatAtRef.current = Date.now()
     lastSnapshotRequestAtRef.current = 0
     resyncStartedAtRef.current = 0
+    lastStaleRetryAtRef.current = 0
     authorityRef.current = createAuthorityStore()
     setBoardPartyConnectionId(null)
     setConnectionStatus(config ? 'connecting' : 'offline')
@@ -519,7 +524,7 @@ export function useOnlineBoardSync(params: {
         setBoardPartyConnectionId(myId)
         lastHeartbeatAtRef.current = Date.now()
         if (cfgRef.current?.role === 'guest') {
-          requestSnapshot(true)
+          requestSnapshot(true, { resetGiveUp: true })
         } else if (cfgRef.current?.role === 'host' && authorityIsLive(authorityRef.current)) {
           setConnectionStatus('connected')
           const gs = authorityLoadState(authorityRef.current)
@@ -572,12 +577,21 @@ export function useOnlineBoardSync(params: {
   }, [config?.role, boardPartyConnectionId, sendWire])
 
   // A quiet or backgrounded WebSocket can look connected while no longer
-  // receiving table traffic. Mark it stale and ask the host for a fresh view.
+  // receiving table traffic. Ask for a hydrate — but do not reset give-up, so
+  // endless Resyncing… cannot loop when the host is asleep / force-quit.
   useEffect(() => {
     if (config?.role !== 'guest' || !boardPartyConnectionId) return
     const id = window.setInterval(() => {
-      if (Date.now() - lastHeartbeatAtRef.current <= REVISION_STALE_MS) return
-      // Force bypasses the cooldown so a true silence always sends a request.
+      const now = Date.now()
+      const quiet = now - lastHeartbeatAtRef.current > REVISION_STALE_MS
+      const status = connectionStatusRef.current
+      if (status === 'stale') {
+        if (now - lastStaleRetryAtRef.current < STALE_RETRY_MS) return
+        lastStaleRetryAtRef.current = now
+        requestSnapshot(true, { resetGiveUp: true })
+        return
+      }
+      if (!quiet) return
       requestSnapshot(true)
     }, REVISION_HEARTBEAT_MS)
     return () => window.clearInterval(id)
@@ -588,7 +602,9 @@ export function useOnlineBoardSync(params: {
   useEffect(() => {
     if (config?.role !== 'guest') return
     const onResume = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) requestSnapshot(true)
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        requestSnapshot(true, { resetGiveUp: true })
+      }
     }
     document.addEventListener('visibilitychange', onResume)
     window.addEventListener('online', onResume)
@@ -598,12 +614,39 @@ export function useOnlineBoardSync(params: {
     }
   }, [config?.role, requestSnapshot])
 
+  // Keep the host screen awake during online play so iOS is less likely to
+  // suspend the authority WebSocket mid-game.
+  useEffect(() => {
+    if (config?.role !== 'host') return
+    let lock: WakeLockSentinel | null = null
+    const requestLock = async () => {
+      try {
+        if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') return
+        lock = await navigator.wakeLock.request('screen')
+      } catch {
+        /* unsupported / denied */
+      }
+    }
+    void requestLock()
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void requestLock()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      void lock?.release()
+    }
+  }, [config?.role, boardPartyConnectionId])
+
   useEffect(() => {
     if (!latestPublicRef.current) return
     applyMergedView()
   }, [boardPartyConnectionId, resolveSeatPlayerId, applyMergedView])
 
-  const requestResync = useCallback(() => requestSnapshot(true), [requestSnapshot])
+  const requestResync = useCallback(
+    () => requestSnapshot(true, { resetGiveUp: true }),
+    [requestSnapshot]
+  )
 
   // Host seeds the authority once the local table finishes setup.
   useEffect(() => {

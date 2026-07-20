@@ -23,6 +23,9 @@ interface MultiplayerLobbyProps {
   onBack: () => void
   /** When set, the post-enter screen highlights host vs join (from title screen). */
   suggestedRole?: OnlineLobbyRole
+  /** Prefill from a previous seat (Leave table → Rejoin). */
+  initialDisplayName?: string
+  initialRoomCode?: string
   onSessionReady: (opts: OnlineSessionReadyMeta) => void
 }
 
@@ -36,9 +39,15 @@ const inputClass =
  * Online room lobby over Supabase Realtime. Everyone enters the same room code
  * and sees the live roster. Hosts configure the table; guests wait until Start.
  */
-export function MultiplayerLobby({ onBack, suggestedRole, onSessionReady }: MultiplayerLobbyProps) {
-  const [displayName, setDisplayName] = useState('')
-  const [roomCode, setRoomCode] = useState('')
+export function MultiplayerLobby({
+  onBack,
+  suggestedRole,
+  initialDisplayName,
+  initialRoomCode,
+  onSessionReady,
+}: MultiplayerLobbyProps) {
+  const [displayName, setDisplayName] = useState(initialDisplayName?.trim() ?? '')
+  const [roomCode, setRoomCode] = useState(initialRoomCode?.trim() ?? '')
   const [joined, setJoined] = useState(false)
 
   const roomId = normalizeRoomCode(roomCode)
@@ -91,7 +100,7 @@ export function MultiplayerLobby({ onBack, suggestedRole, onSessionReady }: Mult
           <h2 className="m-0 mb-4 text-center text-5xl font-semibold text-slate-100">Online room</h2>
           <p className="m-0 mb-10 text-center text-2xl leading-relaxed text-slate-400">
             {suggestedRole === 'guest'
-              ? 'Enter the host’s room code and your name — you’ll wait in the room until they start.'
+              ? 'Enter the host’s room code and your seat name. You can rejoin a game already in progress with the same code and name.'
               : 'Share one room code. Hosts set up the table; guests join and wait before Start game.'}
           </p>
           <label className="mb-2 block text-lg font-semibold uppercase tracking-[0.14em] text-slate-400">

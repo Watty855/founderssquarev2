@@ -120,8 +120,10 @@ export function GuestWaitingRoom({
         )}
 
         <p className="m-0 mb-6 text-center text-xs leading-relaxed text-slate-500">
-          You will enter the game automatically when the host clicks <span className="text-slate-300">Start game</span>.
-          Use the Founders Square app on this device — no browser URL needed once installed.
+          If the host already started, you will re-enter the live table automatically — use the{' '}
+          <span className="text-slate-300">same room code</span> and{' '}
+          <span className="text-slate-300">same seat name</span>. Otherwise you enter when they click{' '}
+          <span className="text-slate-300">Start game</span>.
         </p>
 
         <button

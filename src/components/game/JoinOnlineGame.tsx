@@ -86,11 +86,15 @@ export function JoinOnlineGame({
     })
   }
 
-  const requestSnapshot = (ch: RealtimeChannel, from: string) => {
+  const requestSnapshot = (ch: RealtimeChannel, from: string, seatName: string) => {
     void ch.send({
       type: 'broadcast',
       event: 'board',
-      payload: { kind: 'game_request', from },
+      payload: {
+        kind: 'game_request',
+        from,
+        displayName: seatName.trim() || undefined,
+      },
     })
   }
 
@@ -116,6 +120,7 @@ export function JoinOnlineGame({
       const msg = payload as { kind?: string; to?: string } & Record<string, unknown>
       if (!msg || typeof msg !== 'object') return
       if (msg.kind === 'public_state' || msg.kind === 'action_applied') {
+        if (msg.kind === 'public_state' && msg.to && msg.to !== myId) return
         publicRef.current = msg.state as PublicGameState
         // Give a targeted private_hand a beat to arrive before hydrating.
         window.setTimeout(() => finishJoin(roomId, name), 350)
@@ -126,10 +131,10 @@ export function JoinOnlineGame({
 
     ch.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        requestSnapshot(ch, myId)
+        requestSnapshot(ch, myId, name)
         retryRef.current = window.setInterval(() => {
           if (doneRef.current) return
-          requestSnapshot(ch, myIdRef.current ?? myId)
+          requestSnapshot(ch, myIdRef.current ?? myId, name)
         }, JOIN_RETRY_MS)
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         clearJoinTimers()
