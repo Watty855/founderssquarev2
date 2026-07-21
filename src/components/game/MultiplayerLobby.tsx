@@ -101,7 +101,7 @@ export function MultiplayerLobby({
           <p className="m-0 mb-10 text-center text-2xl leading-relaxed text-slate-400">
             {suggestedRole === 'guest'
               ? 'Enter the host’s room code and your seat name. You can rejoin a game already in progress with the same code and name.'
-              : 'Share one room code. Hosts set up the table; guests join and wait before Start game.'}
+              : 'Share one room code. The host device must stay in the game (screen awake) — it is the live table. For couch play, use Pass and play on one device instead.'}
           </p>
           <label className="mb-2 block text-lg font-semibold uppercase tracking-[0.14em] text-slate-400">
             Your name

@@ -12,6 +12,11 @@ import {
 import type { PartyBoardSyncMeta, PartyBoardSyncConfig } from '@/lib/partyBoardSync'
 import { getDeviceConnectionId, normalizeRoomCode } from '@/lib/realtimeClient'
 import { loadLastOnlineSession } from '@/lib/onlineSessionMemory'
+import {
+  hasResumableHostAuthority,
+  loadAuthoritySnapshot,
+} from '@/lib/onlineAuthorityMemory'
+import { parsePartyGameState } from '@/lib/partyBoardSync'
 import { usePartySeatPlanRoom } from '@/lib/usePartySeatPlanRoom'
 import { PlayerSetup } from '@/components/game/PlayerSetup'
 import { MultiplayerLobby, type OnlineLobbyRole } from '@/components/game/MultiplayerLobby'
@@ -28,6 +33,7 @@ import {
   Plus,
   ArrowsClockwise,
   PlugsConnected,
+  Crown,
 } from '@phosphor-icons/react'
 import {
   Dialog,
@@ -65,7 +71,9 @@ function OpeningScreen({
   onNewGame,
   onJoinFriendsGame,
   onRejoinLastRoom,
+  onResumeHostTable,
   lastRoomLabel,
+  resumeHostLabel,
 }: {
   onPlayOnline: () => void
   onNewGame: () => void
@@ -73,7 +81,10 @@ function OpeningScreen({
   onJoinFriendsGame?: () => void
   /** Resume a previous online seat (same room code + seat name). */
   onRejoinLastRoom?: () => void
+  /** Host: resume a mid-game table saved on this device. */
+  onResumeHostTable?: () => void
   lastRoomLabel?: string
+  resumeHostLabel?: string
 }) {
   const gold = '#c9a85c'
   const goldLight = '#e8d4a0'
@@ -200,6 +211,25 @@ function OpeningScreen({
               >
                 <PlugsConnected size={15} weight="duotone" color={goldLight} />
                 Join friend&apos;s game
+              </button>
+            ) : null}
+
+            {onResumeHostTable && resumeHostLabel ? (
+              <button
+                type="button"
+                onClick={onResumeHostTable}
+                style={{
+                  ...actionBtnBase,
+                  fontSize: 9,
+                  letterSpacing: '0.08em',
+                  border: `1px solid rgba(74, 222, 128, 0.55)`,
+                  background: 'rgba(6, 78, 59, 0.55)',
+                  color: '#d1fae5',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
+                }}
+              >
+                <Crown size={15} weight="duotone" color="#86efac" />
+                Resume table {resumeHostLabel}
               </button>
             ) : null}
 
@@ -1488,9 +1518,11 @@ function RulesDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: 
 export function GameSetupWizard({
   onComplete,
   onGuestJoined,
+  onResumeHostTable,
 }: {
   onComplete: (players: Player[], partyBoard?: PartyBoardSyncMeta) => void
   onGuestJoined?: (state: GameState, cfg: PartyBoardSyncConfig) => void
+  onResumeHostTable?: (state: GameState, cfg: PartyBoardSyncConfig) => void
 }) {
   const [phase, setPhase] = useState<SetupWizardPhase>('opening')
   const [lobbyMode, setLobbyMode] = useState<'single' | 'online'>('single')
@@ -1508,6 +1540,10 @@ export function GameSetupWizard({
     role?: OnlineLobbyRole
   } | null>(null)
   const lastOnline = loadLastOnlineSession()
+  const canResumeHost =
+    !!onResumeHostTable &&
+    lastOnline?.role === 'host' &&
+    hasResumableHostAuthority(lastOnline.roomId)
 
   return (
     <AnimatePresence mode="wait">
@@ -1544,8 +1580,38 @@ export function GameSetupWizard({
                   }
                 : undefined
             }
+            onResumeHostTable={
+              canResumeHost && lastOnline
+                ? () => {
+                    const snap = loadAuthoritySnapshot(lastOnline.roomId)
+                    if (!snap || !onResumeHostTable) {
+                      toast.error('Could not find a saved table on this device.')
+                      return
+                    }
+                    let raw: unknown
+                    try {
+                      raw = JSON.parse(snap.gameStateJson) as unknown
+                    } catch {
+                      toast.error('Saved table is corrupted.')
+                      return
+                    }
+                    const state = parsePartyGameState(raw)
+                    if (!state) {
+                      toast.error('Saved table is invalid.')
+                      return
+                    }
+                    onResumeHostTable(state, {
+                      roomId: lastOnline.roomId,
+                      displayName: lastOnline.displayName,
+                      myConnectionId: getDeviceConnectionId(),
+                      role: 'host',
+                    })
+                  }
+                : undefined
+            }
+            resumeHostLabel={canResumeHost && lastOnline ? lastOnline.roomId : undefined}
             onRejoinLastRoom={
-              onGuestJoined && lastOnline
+              onGuestJoined && lastOnline && lastOnline.role === 'guest'
                 ? () => {
                     setModeScreenDeviceOnly(false)
                     setLobbyMode('online')
@@ -1554,12 +1620,14 @@ export function GameSetupWizard({
                       displayName: lastOnline.displayName,
                       roomCode: lastOnline.roomId,
                     })
-                    setLobbySuggestedRole(lastOnline.role === 'host' ? 'host' : 'guest')
+                    setLobbySuggestedRole('guest')
                     setPhase('multiplayer')
                   }
                 : undefined
             }
-            lastRoomLabel={lastOnline ? lastOnline.roomId : undefined}
+            lastRoomLabel={
+              lastOnline?.role === 'guest' ? lastOnline.roomId : undefined
+            }
           />
         </motion.div>
       )}

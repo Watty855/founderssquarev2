@@ -17,12 +17,18 @@ import {
   authorityInitGame,
   authorityIsLive,
   authorityLoadState,
+  authorityResumeGame,
   createAuthorityStore,
   type AuthorityOutbound,
   type OnlineAuthorityStore,
 } from '@/lib/onlineRoomAuthority'
 import { toPublicGameState } from '@/lib/onlinePublicState'
 import { boardTopic, getDeviceConnectionId, getRealtimeClient, normalizeRoomCode } from '@/lib/realtimeClient'
+import {
+  clearAuthoritySnapshot,
+  loadAuthoritySnapshot,
+  saveAuthoritySnapshot,
+} from '@/lib/onlineAuthorityMemory'
 
 export type SendActionOptions = { skipOptimistic?: boolean }
 export type OnlineConnectionStatus =
@@ -34,12 +40,13 @@ export type OnlineConnectionStatus =
   | 'error'
 
 const REVISION_HEARTBEAT_MS = 2_500
-const REVISION_STALE_MS = 8_000
+const REVISION_STALE_MS = 12_000
 const SNAPSHOT_REQUEST_COOLDOWN_MS = 1_500
 /** Stop hammering the host after this long without a successful public ingest. */
 const RESYNC_GIVE_UP_MS = 12_000
 /** When stale, try one fresh hydrate this often in case the host woke up. */
-const STALE_RETRY_MS = 20_000
+const STALE_RETRY_MS = 15_000
+const AUTHORITY_PERSIST_DEBOUNCE_MS = 400
 
 /** Wire envelope on the board channel (Supabase Realtime broadcast event "board"). */
 type BoardWire =
@@ -102,6 +109,7 @@ export function useOnlineBoardSync(params: {
   const lastSnapshotRequestAtRef = useRef(0)
   const resyncStartedAtRef = useRef(0)
   const lastStaleRetryAtRef = useRef(0)
+  const authorityPersistTimerRef = useRef<number | null>(null)
   const latestPublicRef = useRef<PublicGameState | null>(null)
   const latestPublicJsonRef = useRef('')
   /** Hands this device may hold: its own seat plus AI seats when hosting. */
@@ -207,6 +215,32 @@ export function useOnlineBoardSync(params: {
     void ch.send({ type: 'broadcast', event: 'board', payload: msg })
   }, [])
 
+  const persistAuthoritySoon = useCallback(() => {
+    const cfg = cfgRef.current
+    if (cfg?.role !== 'host') return
+    const store = authorityRef.current
+    if (!authorityIsLive(store) || !store.authorityId || !store.gameHostId || !store.gameStateJson) {
+      return
+    }
+    if (authorityPersistTimerRef.current != null) {
+      window.clearTimeout(authorityPersistTimerRef.current)
+    }
+    authorityPersistTimerRef.current = window.setTimeout(() => {
+      authorityPersistTimerRef.current = null
+      const live = authorityRef.current
+      if (!authorityIsLive(live) || !live.authorityId || !live.gameHostId || !live.gameStateJson) {
+        return
+      }
+      saveAuthoritySnapshot({
+        roomId: cfg.roomId,
+        authorityId: live.authorityId,
+        gameRev: live.gameRev,
+        gameHostId: live.gameHostId,
+        gameStateJson: live.gameStateJson,
+      })
+    }, AUTHORITY_PERSIST_DEBOUNCE_MS)
+  }, [])
+
   const requestSnapshot = useCallback(
     (force = false, opts?: { resetGiveUp?: boolean }) => {
       if (cfgRef.current?.role !== 'guest') return
@@ -226,7 +260,10 @@ export function useOnlineBoardSync(params: {
       }
       lastSnapshotRequestAtRef.current = now
       if (resyncStartedAtRef.current === 0) resyncStartedAtRef.current = now
-      setConnectionStatus('resyncing')
+      // Soft catch-up: if we already have a board, keep the UI interactive
+      // ("Online") instead of locking the badge on endless Resyncing….
+      const hasBoard = lastRevRef.current > 0 && latestPublicRef.current != null
+      if (!hasBoard) setConnectionStatus('resyncing')
       const displayName = cfgRef.current?.displayName?.trim() || undefined
       sendWire({ kind: 'game_request', from, displayName })
     },
@@ -298,8 +335,9 @@ export function useOnlineBoardSync(params: {
         }
         // 'system' messages are host-side diagnostics; skip on the wire for now.
       }
+      persistAuthoritySoon()
     },
-    [sendWire, ingestPublicState, ingestPrivateHand, rollbackAction]
+    [sendWire, ingestPublicState, ingestPrivateHand, rollbackAction, persistAuthoritySoon]
   )
 
   const handleWire = useCallback(
@@ -426,6 +464,7 @@ export function useOnlineBoardSync(params: {
     const myId = boardConnIdRef.current
     if (cfg?.role !== 'host' || !myId) return
     if (authorityClearGame(authorityRef.current, myId)) {
+      clearAuthoritySnapshot(cfg.roomId)
       sendWire({ kind: 'game_cleared' })
     }
   }, [sendWire])
@@ -440,12 +479,30 @@ export function useOnlineBoardSync(params: {
       const connId = boardConnIdRef.current
       if (!connId) return actionId
 
+      const cfg = cfgRef.current
+      const status = connectionStatusRef.current
+      if (
+        cfg?.role === 'guest' &&
+        (status === 'stale' || status === 'error') &&
+        !opts?.skipOptimistic
+      ) {
+        onGameEventsRef.current?.([
+          {
+            type: 'toast',
+            level: 'error',
+            message:
+              'Host unreachable — ask them to reopen the game on their device, or Leave table and Rejoin.',
+          },
+        ])
+        return actionId
+      }
+
       pendingRollbackRef.current.set(actionId, gameStateRef.current)
 
       if (!opts?.skipOptimistic) {
         const optimistic = applyGameAction(gameStateRef.current, action, {
           senderConnectionId: connId,
-          senderIsHost: cfgRef.current?.role === 'host',
+          senderIsHost: cfg?.role === 'host',
         })
         if (optimistic.ok) {
           setGameState(optimistic.state)
@@ -456,19 +513,20 @@ export function useOnlineBoardSync(params: {
         }
       }
 
-      const cfg = cfgRef.current
       if (cfg?.role === 'host') {
         // The host IS the authority — apply directly, no network round trip.
         const result = authorityApplyGameAction(authorityRef.current, action, connId, actionId)
-        if (result.ok) deliverOutbound(result.messages)
-        else rollbackAction(actionId, result.error)
+        if (result.ok) {
+          deliverOutbound(result.messages)
+          persistAuthoritySoon()
+        } else rollbackAction(actionId, result.error)
       } else {
         sendWire({ kind: 'game_action', from: connId, actionId, action })
       }
 
       return actionId
     },
-    [setGameState, deliverOutbound, rollbackAction, sendWire]
+    [setGameState, deliverOutbound, rollbackAction, sendWire, persistAuthoritySoon]
   )
 
   const configKey = config
@@ -491,6 +549,10 @@ export function useOnlineBoardSync(params: {
     lastSnapshotRequestAtRef.current = 0
     resyncStartedAtRef.current = 0
     lastStaleRetryAtRef.current = 0
+    if (authorityPersistTimerRef.current != null) {
+      window.clearTimeout(authorityPersistTimerRef.current)
+      authorityPersistTimerRef.current = null
+    }
     authorityRef.current = createAuthorityStore()
     setBoardPartyConnectionId(null)
     setConnectionStatus(config ? 'connecting' : 'offline')
@@ -508,6 +570,20 @@ export function useOnlineBoardSync(params: {
 
     const myId = getDeviceConnectionId()
     const room = normalizeRoomCode(cfg.roomId)
+
+    // Host reopen: restore mid-game authority from localStorage before subscribe.
+    if (cfg.role === 'host') {
+      const snap = loadAuthoritySnapshot(room)
+      if (snap) {
+        const resumed = authorityResumeGame(authorityRef.current, snap, myId)
+        if (resumed.ok) {
+          hostInitSentRef.current = true
+          setGameState(resumed.state)
+          persistAuthoritySoon()
+        }
+      }
+    }
+
     const ch = client.channel(boardTopic(room), {
       config: { broadcast: { self: false } },
     })
@@ -538,6 +614,17 @@ export function useOnlineBoardSync(params: {
                 state: toPublicGameState(gs),
               } satisfies BoardWire,
             })
+            if (authorityRef.current.authorityId) {
+              void ch.send({
+                type: 'broadcast',
+                event: 'board',
+                payload: {
+                  kind: 'revision_heartbeat',
+                  rev: authorityRef.current.gameRev,
+                  authorityId: authorityRef.current.authorityId,
+                } satisfies BoardWire,
+              })
+            }
           }
         } else {
           setConnectionStatus('connected')
@@ -556,7 +643,7 @@ export function useOnlineBoardSync(params: {
       if (channelRef.current === ch) channelRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configKey, requestSnapshot])
+  }, [configKey, requestSnapshot, persistAuthoritySoon, setGameState])
 
   // The host advertises only its revision. Guests that missed a large state
   // payload can detect the gap and request a targeted hydrate.
@@ -615,10 +702,31 @@ export function useOnlineBoardSync(params: {
   }, [config?.role, requestSnapshot])
 
   // Keep the host screen awake during online play so iOS is less likely to
-  // suspend the authority WebSocket mid-game.
+  // suspend the authority WebSocket mid-game. Also burst heartbeats on resume.
   useEffect(() => {
     if (config?.role !== 'host') return
     let lock: WakeLockSentinel | null = null
+    const burstHeartbeats = () => {
+      const store = authorityRef.current
+      if (!authorityIsLive(store) || !store.authorityId) return
+      const sendOne = () =>
+        sendWire({
+          kind: 'revision_heartbeat',
+          rev: store.gameRev,
+          authorityId: store.authorityId!,
+        })
+      sendOne()
+      window.setTimeout(sendOne, 300)
+      window.setTimeout(sendOne, 800)
+      const gs = authorityLoadState(store)
+      if (gs) {
+        sendWire({
+          kind: 'public_state',
+          rev: store.gameRev,
+          state: toPublicGameState(gs),
+        })
+      }
+    }
     const requestLock = async () => {
       try {
         if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') return
@@ -629,14 +737,19 @@ export function useOnlineBoardSync(params: {
     }
     void requestLock()
     const onVis = () => {
-      if (document.visibilityState === 'visible') void requestLock()
+      if (document.visibilityState === 'visible') {
+        void requestLock()
+        burstHeartbeats()
+      }
     }
     document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('online', onVis)
     return () => {
       document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('online', onVis)
       void lock?.release()
     }
-  }, [config?.role, boardPartyConnectionId])
+  }, [config?.role, boardPartyConnectionId, sendWire])
 
   useEffect(() => {
     if (!latestPublicRef.current) return
@@ -648,22 +761,38 @@ export function useOnlineBoardSync(params: {
     [requestSnapshot]
   )
 
-  // Host seeds the authority once the local table finishes setup.
+  // Host seeds the authority once the local table finishes setup — or skips
+  // seeding when a mid-game authority was already resumed from storage.
   useEffect(() => {
     const cfg = cfgRef.current
     if (!cfg || cfg.role !== 'host') return
     if (!boardPartyConnectionId) return
     if (hostInitSentRef.current) return
+    if (authorityIsLive(authorityRef.current)) {
+      hostInitSentRef.current = true
+      persistAuthoritySoon()
+      return
+    }
     if (!gameState.isSetupComplete || gameState.players.length === 0) return
 
     hostInitSentRef.current = true
     const result = authorityInitGame(authorityRef.current, boardPartyConnectionId, gameState)
     if (result.ok) {
       deliverOutbound(result.messages)
+      persistAuthoritySoon()
     } else {
+      hostInitSentRef.current = false
       onGameEventsRef.current?.([{ type: 'toast', level: 'error', message: result.error }])
     }
-  }, [gameState.isSetupComplete, gameState.players.length, configKey, boardPartyConnectionId, gameState, deliverOutbound])
+  }, [
+    gameState.isSetupComplete,
+    gameState.players.length,
+    configKey,
+    boardPartyConnectionId,
+    gameState,
+    deliverOutbound,
+    persistAuthoritySoon,
+  ])
 
   return {
     sendGameClear,

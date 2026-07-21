@@ -109,7 +109,12 @@ import {
   type PartyBoardSyncConfig,
   type PartyBoardSyncMeta,
 } from '@/lib/partyBoardSync'
-import { saveLastOnlineSession, clearLastOnlineSession } from '@/lib/onlineSessionMemory'
+import { saveLastOnlineSession, clearLastOnlineSession, loadLastOnlineSession } from '@/lib/onlineSessionMemory'
+import {
+  clearAuthoritySnapshot,
+  hasResumableHostAuthority,
+} from '@/lib/onlineAuthorityMemory'
+import { getDeviceConnectionId } from '@/lib/realtimeClient'
 import { remapSeatPlanPartySocketIds, resolveGuestSeatForRemap } from '@/lib/partySeatIds'
 import { redactGameStateForGuestView } from '@/lib/partyBoardView'
 import { useOnlineBoardSync } from '@/lib/useOnlineBoardSync'
@@ -364,11 +369,30 @@ function makeDiscardFlight(
   }
 }
 
+function restoreHostOnlineConfig(): PartyBoardSyncConfig | null {
+  try {
+    const last = loadLastOnlineSession()
+    if (last?.role !== 'host') return null
+    if (!hasResumableHostAuthority(last.roomId)) return null
+    return {
+      roomId: last.roomId,
+      displayName: last.displayName,
+      myConnectionId: getDeviceConnectionId(),
+      role: 'host',
+    }
+  } catch {
+    return null
+  }
+}
+
 function AppInner() {
-  const [partyBoardConfig, setPartyBoardConfig] = useState<PartyBoardSyncConfig | null>(null)
+  const [partyBoardConfig, setPartyBoardConfig] = useState<PartyBoardSyncConfig | null>(
+    restoreHostOnlineConfig
+  )
   const [gameState, setGameState] = useGameState<GameState>('founders-square-game', initialGameState, {
     persist: partyBoardConfig?.role !== 'guest',
   })
+  const [hostAwayWarning, setHostAwayWarning] = useState(false)
   const [guestOnlineHintDismissed, setGuestOnlineHintDismissed] = useState(() => {
     if (typeof sessionStorage === 'undefined') return false
     try {
@@ -1056,7 +1080,42 @@ function AppInner() {
     prevFlightStateRef.current = null
     setCardFlights((q) => (q.length === 0 ? q : []))
     setHiddenInstanceIds((s) => (s.size === 0 ? s : new Set()))
+    // Clear local board-interaction shells that soft-lock a guest after desync.
+    // Pending online defenses re-open from shared state effects below.
+    setPlacementMode({
+      active: false,
+      propertyCardId: null,
+      housingHighDensity: undefined,
+      taxBuildActionInstanceId: undefined,
+      wildCardEmulatePropertyId: undefined,
+    })
+    setTakeoverSelectMode({ active: false, validPlots: [], actionInstanceId: null })
+    setScandalSelectMode({ active: false, validPlots: [], actionInstanceId: null })
+    setInvestmentSelectMode({
+      active: false,
+      validPlots: [],
+      actionInstanceId: null,
+      contributionMillion: 4,
+    })
+    setRemoveInvestorsSelectMode({ active: false, validPlots: [], actionInstanceId: null })
+    setDiscardPropertySelectMode({
+      active: false,
+      actionInstanceId: null,
+      selectedPropertyInstanceIds: [],
+    })
   }
+
+  // Host device: warn when the table authority is backgrounded (common freeze cause).
+  useEffect(() => {
+    if (partyBoardConfig?.role !== 'host') {
+      setHostAwayWarning(false)
+      return
+    }
+    const sync = () => setHostAwayWarning(document.visibilityState !== 'visible')
+    sync()
+    document.addEventListener('visibilitychange', sync)
+    return () => document.removeEventListener('visibilitychange', sync)
+  }, [partyBoardConfig?.role])
 
   const handleFlightDone = useCallback((flightId: string, instanceId: string | null) => {
     setCardFlights((prev) => prev.filter((f) => f.id !== flightId))
@@ -1258,6 +1317,17 @@ function AppInner() {
     })
     setGameState(gs)
     setPartyBoardConfig(cfg)
+  }, [])
+
+  const handleResumeHostTable = useCallback((gs: GameState, cfg: PartyBoardSyncConfig) => {
+    saveLastOnlineSession({
+      roomId: cfg.roomId,
+      displayName: cfg.displayName,
+      role: 'host',
+    })
+    setGameState(gs)
+    setPartyBoardConfig(cfg)
+    toast.success(`Resumed hosting room ${cfg.roomId}. Guests can Resync or Rejoin.`)
   }, [])
 
   /**
@@ -3841,6 +3911,7 @@ function AppInner() {
   const handleNewGame = () => {
     if (partyBoardConfig?.role === 'host') {
       partyBoardSync.sendGameClear()
+      clearAuthoritySnapshot(partyBoardConfig.roomId)
       clearLastOnlineSession()
     } else if (partyBoardConfig?.role === 'guest') {
       saveLastOnlineSession({
@@ -5769,7 +5840,11 @@ function AppInner() {
   if (!setupReady || currentPlayerMaybe == null) {
     return (
       <>
-        <GameSetupWizard onComplete={handleSetupComplete} onGuestJoined={handleGuestJoined} />
+        <GameSetupWizard
+          onComplete={handleSetupComplete}
+          onGuestJoined={handleGuestJoined}
+          onResumeHostTable={handleResumeHostTable}
+        />
         <Toaster />
       </>
     )
@@ -6322,7 +6397,7 @@ function AppInner() {
     <div className="h-screen flex flex-col overflow-hidden game-table" style={{ backgroundColor: '#000000' }}>
       {partyBoardConfig ? (
         <div
-          className="fixed right-2 top-2 z-[80] flex max-w-[min(92vw,20rem)] flex-col items-end gap-1.5 sm:right-3 sm:top-3"
+          className="fixed right-2 top-2 z-[80] flex max-w-[min(92vw,22rem)] flex-col items-end gap-1.5 sm:right-3 sm:top-3"
           style={{ pointerEvents: 'auto' }}
         >
           <button
@@ -6331,7 +6406,7 @@ function AppInner() {
             title={
               partyBoardConfig.role === 'guest'
                 ? 'Online table connection — click to resync'
-                : 'Online table connection — keep this device awake while hosting'
+                : 'You are the table host — keep this screen open'
             }
             aria-live="polite"
             className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] shadow-lg backdrop-blur-md"
@@ -6374,16 +6449,36 @@ function AppInner() {
                   connectionStatus === 'connected' ? '0 0 8px rgba(74,222,128,0.8)' : undefined,
               }}
             />
-            {connectionStatus === 'connected'
-              ? 'Online'
-              : connectionStatus === 'resyncing'
-                ? 'Resyncing…'
-                : connectionStatus === 'stale'
-                  ? 'Host unreachable'
-                  : connectionStatus === 'error'
-                    ? 'Connection error'
-                    : 'Connecting…'}
+            {partyBoardConfig.role === 'host'
+              ? connectionStatus === 'connected'
+                ? 'Hosting'
+                : 'Host reconnecting…'
+              : connectionStatus === 'connected'
+                ? 'Online'
+                : connectionStatus === 'resyncing'
+                  ? 'Resyncing…'
+                  : connectionStatus === 'stale'
+                    ? 'Host unreachable'
+                    : connectionStatus === 'error'
+                      ? 'Connection error'
+                      : 'Connecting…'}
           </button>
+          {partyBoardConfig.role === 'host' ? (
+            <div className="rounded-xl border border-sky-300/30 bg-black/85 px-3 py-2 text-left shadow-lg backdrop-blur-md">
+              <p className="m-0 text-[11px] leading-snug text-sky-50/90">
+                {hostAwayWarning
+                  ? 'Host screen was backgrounded — bring this app to the front so guests can play.'
+                  : `Room ${partyBoardConfig.roomId}: keep this device awake. Closing it freezes every guest.`}
+              </p>
+              <button
+                type="button"
+                onClick={handleNewGame}
+                className="mt-2 rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-100"
+              >
+                End table
+              </button>
+            </div>
+          ) : null}
           {partyBoardConfig.role === 'guest' &&
           (connectionStatus === 'stale' ||
             connectionStatus === 'error' ||
@@ -6391,8 +6486,8 @@ function AppInner() {
             <div className="rounded-xl border border-amber-300/35 bg-black/85 px-3 py-2 text-left shadow-lg backdrop-blur-md">
               <p className="m-0 mb-2 text-[11px] leading-snug text-amber-50/90">
                 {connectionStatus === 'resyncing'
-                  ? 'Catching up with the host…'
-                  : 'Host may be asleep or offline. Keep the host device on this game, then Resync — or Leave and rejoin the same room code.'}
+                  ? 'Catching up… you can still view the board. Actions wait until the host answers.'
+                  : 'Host may be asleep or the app was closed. Ask them to reopen Founders Square on their device (they can Resume the table), then Resync — or Leave and Rejoin the same room code.'}
               </p>
               <div className="flex flex-wrap gap-1.5">
                 <button
@@ -6407,7 +6502,7 @@ function AppInner() {
                   onClick={handleNewGame}
                   className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-100"
                 >
-                  Leave table
+                  Leave & rejoin later
                 </button>
               </div>
             </div>

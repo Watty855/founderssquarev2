@@ -42,6 +42,40 @@ export function authoritySaveState(store: OnlineAuthorityStore, gs: GameState) {
   store.gameStateJson = JSON.stringify(gs)
 }
 
+/**
+ * Restore a previously persisted host authority without resetting revision.
+ * Rebinds gameHostId to the current device session id when it changed.
+ */
+export function authorityResumeGame(
+  store: OnlineAuthorityStore,
+  snap: {
+    authorityId: string
+    gameRev: number
+    gameHostId: string
+    gameStateJson: string
+  },
+  hostSessionId: string
+):
+  | { ok: true; state: GameState }
+  | { ok: false; error: string } {
+  let raw: unknown
+  try {
+    raw = JSON.parse(snap.gameStateJson) as unknown
+  } catch {
+    return { ok: false, error: 'Saved table snapshot is invalid.' }
+  }
+  const parsed = parsePartyGameState(raw)
+  if (!parsed) return { ok: false, error: 'Saved table snapshot is invalid.' }
+  if (snap.gameStateJson.length > 6_000_000) {
+    return { ok: false, error: 'Saved table snapshot is too large.' }
+  }
+  store.authorityId = snap.authorityId
+  store.gameRev = Math.max(1, Math.floor(snap.gameRev))
+  store.gameHostId = hostSessionId.trim() || snap.gameHostId
+  store.gameStateJson = JSON.stringify(parsed)
+  return { ok: true, state: parsed }
+}
+
 export type AuthorityOutbound =
   | { target: 'all'; type: 'public_state'; rev: number; state: PublicGameState }
   | {
