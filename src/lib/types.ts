@@ -51,7 +51,10 @@ export interface GameState {
   propertyDiscard: CardInstance[]
   propertiesBuiltThisTurn: number
   actionsPlayedThisTurn: number
-  /** Builds, banks, and resolved action plays each consume one slot (max 3 per turn). */
+  /**
+   * Shared turn budget (max 3): each build, bank, or resolved action play consumes one slot.
+   * Successful Rezoning consumes two (action + included build). Turn ends at 3.
+   */
   turnActionsConsumed: number
   /** Set when the current founder finishes the Income dialog (roll or bank); blocks another Income play until end of turn. */
   incomeResolvedThisTurn?: boolean
@@ -61,12 +64,12 @@ export interface GameState {
   showNewCardsAnimation?: boolean
   gameEnded?: boolean
   winningSequence?: Array<{ row: number; col: string }>
-  /** Set when the 9-sequential trigger fires. The triggerer's current turn finishes, then every
-   *  founder (incl. triggerer) gets exactly one final turn before the game ends. */
+  /** Set when nine-in-a-row or a completed city block triggers the Final Round. The triggerer's
+   *  current turn finishes, then every founder (incl. triggerer) gets exactly one final turn. */
   endGameTriggered?: boolean
   /** Founder id whose build/rezoning move triggered the final round (used for the banner). */
   endGameTriggerPlayerId?: number
-  /** Coordinate of the qualifying 9-sequential placement that triggered the end (for highlight). */
+  /** Coordinate of the placement that completed the nine-in-a-row or city-block trigger. */
   endGameTriggerLocation?: { row: number; col: string }
   /** Snapshot before the current founder's last turn-consuming action (build or action card). */
   undoLastAction?: import('./undoLastAction').UndoLastAction

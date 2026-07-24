@@ -1155,7 +1155,7 @@ export const actionCards: ActionCard[] = [
     diceRollRule: 'Roll total 5+ after applicable Anchor Tenet influence: success',
     placementRule: 'Choose a property card, then a vacant lot; roll to approve build',
     actions:
-      'Pick a property card in your hand (not an anchor), then a vacant city lot. Roll the die: total 5+ after applicable citywide and district Anchor Tenet influence succeeds — build that property there for its build cost. A lower total discards Rezoning and the build fails on that lot.',
+      'Pick a property card in your hand (not an anchor), then a vacant city lot. Roll the die: total 5+ after applicable citywide and district Anchor Tenet influence succeeds — build that property there for its build cost (counts as 2 actions: the Rezoning play + the build). A lower total discards Rezoning for 1 action and the build fails on that lot.',
   },
   {
     id: 'double-income',

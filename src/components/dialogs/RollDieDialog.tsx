@@ -164,6 +164,27 @@ function RollDieDialogInner({
     return () => window.clearTimeout(t)
   }, [open, aiAutoplay, councilFreezeFlow, showCouncilFreezeIntro])
 
+  /** Founderbots / AI: initiate the roll themselves — host never has to tap Roll. */
+  useEffect(() => {
+    if (!open || !aiAutoplay || councilFreezeFailAuto) return
+    // Council-freeze already auto-rolls in the effect above.
+    if (councilFreezeFlow) return
+    if (isRolling || diceValue !== null || !isReady) return
+    const t = window.setTimeout(() => {
+      void roll()
+    }, 380)
+    return () => window.clearTimeout(t)
+  }, [
+    open,
+    aiAutoplay,
+    councilFreezeFailAuto,
+    councilFreezeFlow,
+    isRolling,
+    diceValue,
+    isReady,
+    roll,
+  ])
+
   const councilFreezeIntroTitle =
     mode === 'council-freeze-attacker'
       ? `City Council Freeze — ${actingPlayerName ?? 'You'}`
@@ -724,6 +745,11 @@ function RollDieDialogInner({
               )}
 
               {diceValue === null ? (
+                aiAutoplay ? (
+                  <p style={{ textAlign: 'center', fontSize: 13, color: '#93c5fd', margin: 0 }}>
+                    {isRolling || !isReady ? 'Computer is rolling…' : 'Computer initiating roll…'}
+                  </p>
+                ) : (
                 <button
                   onClick={() => {
                     if (mode === 'council-freeze-attacker') void runAttackerRoll()
@@ -750,7 +776,13 @@ function RollDieDialogInner({
                         ? 'Roll the die'
                         : 'Roll Die'}
                 </button>
+                )
               ) : singleContinueAfterRoll ? (
+                aiAutoplay ? (
+                  <p style={{ textAlign: 'center', fontSize: 13, color: '#93c5fd', margin: 0 }}>
+                    Computer resolving…
+                  </p>
+                ) : (
                 <button
                   onClick={() => diceValue !== null && onComplete(diceValue)}
                   className="btn-ps"
@@ -761,6 +793,7 @@ function RollDieDialogInner({
                 >
                   Continue
                 </button>
+                )
               ) : showAttackerFailChoices ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <button

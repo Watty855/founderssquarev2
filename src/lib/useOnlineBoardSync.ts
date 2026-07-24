@@ -215,6 +215,22 @@ export function useOnlineBoardSync(params: {
     void ch.send({ type: 'broadcast', event: 'board', payload: msg })
   }, [])
 
+  const writeAuthoritySnapshotNow = useCallback(() => {
+    const cfg = cfgRef.current
+    if (cfg?.role !== 'host') return
+    const live = authorityRef.current
+    if (!authorityIsLive(live) || !live.authorityId || !live.gameHostId || !live.gameStateJson) {
+      return
+    }
+    saveAuthoritySnapshot({
+      roomId: cfg.roomId,
+      authorityId: live.authorityId,
+      gameRev: live.gameRev,
+      gameHostId: live.gameHostId,
+      gameStateJson: live.gameStateJson,
+    })
+  }, [])
+
   const persistAuthoritySoon = useCallback(() => {
     const cfg = cfgRef.current
     if (cfg?.role !== 'host') return
@@ -227,19 +243,18 @@ export function useOnlineBoardSync(params: {
     }
     authorityPersistTimerRef.current = window.setTimeout(() => {
       authorityPersistTimerRef.current = null
-      const live = authorityRef.current
-      if (!authorityIsLive(live) || !live.authorityId || !live.gameHostId || !live.gameStateJson) {
-        return
-      }
-      saveAuthoritySnapshot({
-        roomId: cfg.roomId,
-        authorityId: live.authorityId,
-        gameRev: live.gameRev,
-        gameHostId: live.gameHostId,
-        gameStateJson: live.gameStateJson,
-      })
+      writeAuthoritySnapshotNow()
     }, AUTHORITY_PERSIST_DEBOUNCE_MS)
-  }, [])
+  }, [writeAuthoritySnapshotNow])
+
+  /** Immediate host snapshot flush — call before soft-leaving so Resume still works. */
+  const flushAuthorityPersist = useCallback(() => {
+    if (authorityPersistTimerRef.current != null) {
+      window.clearTimeout(authorityPersistTimerRef.current)
+      authorityPersistTimerRef.current = null
+    }
+    writeAuthoritySnapshotNow()
+  }, [writeAuthoritySnapshotNow])
 
   const requestSnapshot = useCallback(
     (force = false, opts?: { resetGiveUp?: boolean }) => {
@@ -801,6 +816,7 @@ export function useOnlineBoardSync(params: {
     sendFx,
     connectionStatus,
     requestResync,
+    flushAuthorityPersist,
     isOnline: config != null && getRealtimeClient() != null,
   }
 }

@@ -173,7 +173,7 @@ export function applyBuildAt(state: GameState, params: BuildAtParams): ApplyGame
     events.push({
       type: 'toast',
       level: 'success',
-      message: `${triggererName} reached nine sequential built properties — Final Round!`,
+      message: `${triggererName} completed nine properties in a row or a city block — Final Round!`,
     })
   }
 

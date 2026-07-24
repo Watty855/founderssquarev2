@@ -33,14 +33,14 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
   {
     title: 'Turn & income',
     lines: [
-      'You have a maximum of 3 actions per turn (see turn counter in play). Bank or play cards as allowed.',
-      'Only one Income action can be played per turn. Resolve Income when you play the Income action and roll — percentages apply to your property income for that resolution.',
+      'Each turn you get 3 actions: either 1 build + 2 other actions, or 0 builds + 3 actions. The turn ends as soon as all 3 are used.',
+      'Successful Rezoning includes a build and costs 2 actions; a failed Rezoning costs 1. Only one Income action can be played per turn.',
     ],
   },
   {
     title: 'Strategy',
     lines: [
-      'Strategically build properties to control the board and gain influence with anchor philosophies. Use action cards to disrupt or defend against other founders. Bank income to save for future builds. Aim for the final round by building 9 or more built-property streaks and receive bonuses.',
+      'Strategically build properties to control the board and gain influence with anchor philosophies. Use action cards to disrupt or defend against other founders. Bank income to save for future builds. Aim for the Final Round by completing nine properties in a row or a full city block.',
     ],
   },
   {
@@ -53,7 +53,7 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
   {
     title: 'End game',
     lines: [
-      'A successful build of 9 or more built-property streaks triggers a Final Round; then final scoring names districts like Squares and Streets.',
+      'Nine built properties in a straight row/column, or all nine lots in a city block, triggers the Final Round — then every player gets one additional turn before final scoring (Squares and Streets).',
     ],
   },
 ]

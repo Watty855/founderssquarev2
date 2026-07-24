@@ -3,8 +3,16 @@ import type { GameState } from './types'
 
 export const MAX_TURN_ACTIONS = 3
 
+/** Successful Rezoning spends an action slot and a build slot (two of the three turn actions). */
+export const REZONING_SUCCESS_ACTION_COST = 2
+
 export function turnLimitReached(turnActionsConsumed: number | undefined): boolean {
   return (turnActionsConsumed ?? 0) >= MAX_TURN_ACTIONS
+}
+
+/** True when a Rezoning attempt can still finish as action + build within the turn budget. */
+export function canAttemptRezoning(turnActionsConsumed: number | undefined): boolean {
+  return (turnActionsConsumed ?? 0) + REZONING_SUCCESS_ACTION_COST <= MAX_TURN_ACTIONS
 }
 
 export type ReplenishResult = { state: GameState; drew: number }

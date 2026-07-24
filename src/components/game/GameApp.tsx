@@ -101,6 +101,8 @@ import {
 import { getBuildCelebrationNotice, getPlotLotDisplayName } from '@/lib/buildCelebrationMessages'
 import {
   MAX_TURN_ACTIONS,
+  REZONING_SUCCESS_ACTION_COST,
+  canAttemptRezoning,
   replenishCurrentPlayerActionHand,
   turnLimitReached,
 } from '@/lib/turnActions'
@@ -164,10 +166,8 @@ function rollSeatIsAi(
       return playerIsAi(rd.takeoverContext?.ownerPlayerId)
     case 'scandal-defender':
       return playerIsAi(rd.scandalContext?.anchorOwnerPlayerId)
-    case 'police-raid-defender': {
-      const ownerId = gs.plots.find((p) => p.builtProperty === 'mafia' && p.claimedBy != null)?.claimedBy
-      return playerIsAi(ownerId ?? undefined)
-    }
+    case 'police-raid-defender':
+      return playerIsAi(rd.targetPlayerId)
     default:
       return currentSeat?.isAi === true
   }
@@ -246,11 +246,11 @@ function sumInvestmentBookForPlayer(plots: Plot[], investorId: number): number {
 }
 
 /**
- * If `newPlots` now contains a 9-sequential built run for a single founder AND the trigger has not yet
- * fired, returns the patch fields that mark the final round as started. Otherwise returns an empty object.
+ * If `newPlots` now contains nine built lots in a straight line OR a completed 3×3 city block for a
+ * single founder AND the trigger has not yet fired, returns the patch fields that start the Final Round.
  *
  * Invoke after ordinary placement, rezoning builds, or hostile takeover (any change that updates
- * ownership of built lots can complete the qualifying cluster).
+ * ownership of built lots can complete the qualifying pattern).
  * The triggerer's current turn finishes normally; `finalRoundTurnsRemaining = players.length + 1` lets
  * the next `applyFinalRoundCountdown` call decrement it down to N (the trigger turn end), then each of
  * the N follow-on turns decrements one more, ending the game after the last final turn.
@@ -451,6 +451,7 @@ function AppInner() {
     sendFx,
     connectionStatus,
     requestResync,
+    flushAuthorityPersist,
   } = partyBoardSync
   const sendActionRef = useRef(sendAction)
   sendActionRef.current = sendAction
@@ -1355,15 +1356,17 @@ function AppInner() {
       return
     }
 
+    const defender = gameState.players.find((p) => p.id === pending.targetPlayerId)
     if (announcedFreezeKeyRef.current !== pendingFreezeKey) {
       announcedFreezeKeyRef.current = pendingFreezeKey
       showBoardNotice(
         `🎲 City Council Freeze on ${pending.targetName}!`,
-        `${pending.attackerName} succeeded — ${pending.targetName} must roll a 6 to negate the freeze.`
+        defender?.isAi === true
+          ? `${pending.attackerName} succeeded — ${pending.targetName} (computer) rolls to negate.`
+          : `${pending.attackerName} succeeded — ${pending.targetName} must roll a 6 to negate the freeze.`
       )
     }
 
-    const defender = gameState.players.find((p) => p.id === pending.targetPlayerId)
     const controlsDefender =
       defender?.isAi === true
         ? partyBoardConfig?.role === 'host'
@@ -1418,6 +1421,7 @@ function AppInner() {
       return
     }
 
+    const defender = gameState.players.find((p) => p.id === pending.targetPlayerId)
     if (announcedRebuttalKeyRef.current !== pendingRebuttalKey) {
       announcedRebuttalKeyRef.current = pendingRebuttalKey
       const kindTitle =
@@ -1426,23 +1430,26 @@ function AppInner() {
           : pending.kind === 'hostile-takeover'
             ? 'Hostile Takeover'
             : 'Police Raid on Mafia'
-      showBoardNotice(
-        `🎲 ${kindTitle} — ${pending.targetName} must roll!`,
-        `${pending.attackerName} succeeded. ${pending.targetName} rolls on their own screen.`
-      )
+      const defenseDetail =
+        defender?.isAi === true
+          ? `${pending.attackerName} succeeded. ${pending.targetName} (computer) initiates the defense roll.`
+          : `${pending.attackerName} succeeded. ${pending.targetName} rolls on their own screen.`
+      showBoardNotice(`🎲 ${kindTitle} — ${pending.targetName} must roll!`, defenseDetail)
       broadcastBoardFx(
         {
           sound: 'cheer',
           notice: {
             title: `🎲 ${kindTitle} defense roll`,
-            detail: `${pending.targetName} is rolling.`,
+            detail:
+              defender?.isAi === true
+                ? `${pending.targetName} (computer) is rolling.`
+                : `${pending.targetName} is rolling.`,
           },
         },
         { localEcho: false }
       )
     }
 
-    const defender = gameState.players.find((p) => p.id === pending.targetPlayerId)
     const controlsDefender =
       defender?.isAi === true
         ? partyBoardConfig?.role === 'host'
@@ -2284,7 +2291,7 @@ function AppInner() {
         })
         if (safeGameState.propertiesBuiltThisTurn >= 1) {
           toast.error(
-            'You already built a property this turn. Rezoning completes a build — play it before you build from your hand.'
+            'You already built a property this turn. Successful Rezoning includes a build — play it before you build from your hand.'
           )
           return
         }
@@ -2301,13 +2308,15 @@ function AppInner() {
           toast.error('No vacant city lots are available — Rezoning cannot be used right now.')
           return
         }
-        if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-          toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+        if (!canAttemptRezoning(safeGameState.turnActionsConsumed)) {
+          toast.error(
+            `Successful Rezoning uses ${REZONING_SUCCESS_ACTION_COST} actions (the roll + the build). You need at least ${REZONING_SUCCESS_ACTION_COST} actions left this turn.`
+          )
           return
         }
         setRezoningMode({ phase: 'pick-property', actionInstanceId: actionInstanceIds[0] })
         toast.info(
-          'Rezoning: click a highlighted property card, then a vacant lot. Roll a total of 5+ after applicable Anchor Tenet influence to approve the build.'
+          'Rezoning: click a highlighted property card, then a vacant lot. Roll a total of 5+ after applicable Anchor Tenet influence to approve the build (success uses 2 actions).'
         )
         return
       }
@@ -2916,7 +2925,7 @@ function AppInner() {
           current.players.find((p) => p.id === triggerPatch.endGameTriggerPlayerId)?.name ?? 'A founder'
         setTimeout(() => {
           toast.success(
-            `${triggererName} reached nine sequential built properties — Final Round! Each founder gets one more turn.`
+            `${triggererName} completed nine properties in a row or a city block — Final Round! Each founder gets one more turn.`
           )
         }, 600)
       }
@@ -2924,7 +2933,7 @@ function AppInner() {
       if (turnLimitReached(newTurnActionsConsumed)) {
         setTimeout(() => {
           handleEndTurn()
-        }, 500)
+        }, 0)
       }
 
       return attachUndoSnapshotIfTurnAction(
@@ -3106,10 +3115,9 @@ function AppInner() {
   }
 
   /**
-   * Auto-end guard. Once a founder consumes all 3 turn actions (a build + 2 actions, or
-   * 3 action cards), end the turn automatically after a short beat. Only one auto-end may
-   * be pending at a time so the many resolution paths and the idle-state fallback effect
-   * can never double-advance to the next player.
+   * Auto-end guard. Once a founder consumes all 3 turn actions (1 build + 2 actions, or
+   * 0 builds + 3 actions), end the turn on the next tick. Only one auto-end may be pending
+   * at a time so resolution paths and the idle-state fallback never double-advance.
    */
   const autoEndTurnScheduledRef = useRef(false)
   const scheduleEndOfTurn = () => {
@@ -3118,7 +3126,7 @@ function AppInner() {
     window.setTimeout(() => {
       autoEndTurnScheduledRef.current = false
       handleEndTurn()
-    }, 500)
+    }, 0)
   }
 
   /**
@@ -3908,21 +3916,7 @@ function AppInner() {
     return
   }
 
-  const handleNewGame = () => {
-    if (partyBoardConfig?.role === 'host') {
-      partyBoardSync.sendGameClear()
-      clearAuthoritySnapshot(partyBoardConfig.roomId)
-      clearLastOnlineSession()
-    } else if (partyBoardConfig?.role === 'guest') {
-      saveLastOnlineSession({
-        roomId: partyBoardConfig.roomId,
-        displayName: partyBoardConfig.displayName,
-        role: 'guest',
-      })
-      toast.info(
-        `Left the table. Rejoin room ${partyBoardConfig.roomId} with seat name "${partyBoardConfig.displayName}" while the host stays online.`
-      )
-    }
+  const resetLocalUiToTitle = () => {
     setPartyBoardConfig(null)
     setGameState(initialGameState)
     setPlacementMode({
@@ -3991,12 +3985,12 @@ function AppInner() {
     setTaxBuildMode({ phase: 'inactive' })
     taxPromptResumeRef.current = null
     setTaxBuildPrompt({
-        open: false,
-        propertyInstanceId: null,
-        actionInstanceId: null,
-        housingHighDensity: undefined,
-        wildCardEmulatePropertyId: undefined,
-      })
+      open: false,
+      propertyInstanceId: null,
+      actionInstanceId: null,
+      housingHighDensity: undefined,
+      wildCardEmulatePropertyId: undefined,
+    })
     setActionCriteriaDialog(createClosedActionCriteriaDialog())
     setDoubleIncomeOrphanDialog({ open: false, instanceId: null })
     if (boardNoticeTimerRef.current) {
@@ -4004,6 +3998,55 @@ function AppInner() {
       boardNoticeTimerRef.current = null
     }
     setBoardNotice(null)
+  }
+
+  /** Soft leave — keeps host authority so the same table can be Resumed after a freeze/exit. */
+  const handleLeaveTable = () => {
+    if (partyBoardConfig?.role === 'host') {
+      flushAuthorityPersist()
+      saveLastOnlineSession({
+        roomId: partyBoardConfig.roomId,
+        displayName: partyBoardConfig.displayName,
+        role: 'host',
+      })
+      toast.info(
+        `Left hosting room ${partyBoardConfig.roomId}. Use Resume table on the title screen to re-enter the same game.`
+      )
+    } else if (partyBoardConfig?.role === 'guest') {
+      saveLastOnlineSession({
+        roomId: partyBoardConfig.roomId,
+        displayName: partyBoardConfig.displayName,
+        role: 'guest',
+      })
+      toast.info(
+        `Left the table. Rejoin room ${partyBoardConfig.roomId} with seat name "${partyBoardConfig.displayName}" while the host stays online.`
+      )
+    }
+    resetLocalUiToTitle()
+  }
+
+  /** Host-only: tear down the live table and delete the resume snapshot. */
+  const handleEndTable = () => {
+    if (partyBoardConfig?.role === 'host') {
+      partyBoardSync.sendGameClear()
+      clearAuthoritySnapshot(partyBoardConfig.roomId)
+      clearLastOnlineSession()
+      toast.info('Table ended. Guests can no longer rejoin this room.')
+    }
+    resetLocalUiToTitle()
+  }
+
+  /** Title / New Game control — soft-leave online tables so host/guest can Resume/Rejoin. */
+  const handleNewGame = () => {
+    if (partyBoardConfig && safeGameState.isSetupComplete) {
+      handleLeaveTable()
+      return
+    }
+    if (partyBoardConfig?.role === 'host') {
+      handleEndTable()
+      return
+    }
+    resetLocalUiToTitle()
     toast.info('Starting a new game...')
   }
 
@@ -4248,7 +4291,7 @@ function AppInner() {
       if (turnLimitReached(newTurnActionsConsumed)) {
         setTimeout(() => {
           handleEndTurn()
-        }, 500)
+        }, 0)
       }
 
       return withReplenishedActionHand(newState, current.currentPlayerIndex)
@@ -4989,7 +5032,7 @@ function AppInner() {
               'A founder'
             setTimeout(() => {
               toast.success(
-                `${triggererName} reached nine sequential built properties — Final Round! Each founder gets one more turn.`
+                `${triggererName} completed nine properties in a row or a city block — Final Round! Each founder gets one more turn.`
               )
             }, 600)
           }
@@ -5323,7 +5366,11 @@ function AppInner() {
         const actionDiscardPile = rezInst ? [...current.actionDiscard, rezInst] : current.actionDiscard
         const newProps = current.propertiesBuiltThisTurn + 1
         const newActions = current.actionsPlayedThisTurn + 1
-        const newTurnConsumed = (current.turnActionsConsumed ?? 0) + 1
+        // Success = action play + included build (two of the three turn actions).
+        const newTurnConsumed = Math.min(
+          MAX_TURN_ACTIONS,
+          (current.turnActionsConsumed ?? 0) + REZONING_SUCCESS_ACTION_COST
+        )
         const players = current.players.map((pl, i) =>
           i === cpIdx
             ? {
@@ -5345,7 +5392,7 @@ function AppInner() {
             sound: card.type === 'anchor' ? 'anchor' : 'construction',
             notice: {
               title: `🎲 Rezoning — ${notice.lotName}${notice.suffix}`,
-              detail: `${ctx.col}${ctx.row} · $${buildCost}M`,
+              detail: `${ctx.col}${ctx.row} · $${buildCost}M · 2 actions`,
             },
           })
         }
@@ -5373,7 +5420,7 @@ function AppInner() {
             current.players.find((p) => p.id === triggerPatch.endGameTriggerPlayerId)?.name ?? 'A founder'
           setTimeout(() => {
             toast.success(
-              `${triggererName} reached nine sequential built properties — Final Round! Each founder gets one more turn.`
+              `${triggererName} completed nine properties in a row or a city block — Final Round! Each founder gets one more turn.`
             )
           }, 600)
         }
@@ -6468,15 +6515,25 @@ function AppInner() {
               <p className="m-0 text-[11px] leading-snug text-sky-50/90">
                 {hostAwayWarning
                   ? 'Host screen was backgrounded — bring this app to the front so guests can play.'
-                  : `Room ${partyBoardConfig.roomId}: keep this device awake. Closing it freezes every guest.`}
+                  : `Room ${partyBoardConfig.roomId}: keep this device awake. Leave table to exit and Resume later if it freezes.`}
               </p>
-              <button
-                type="button"
-                onClick={handleNewGame}
-                className="mt-2 rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-100"
-              >
-                End table
-              </button>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleLeaveTable}
+                  className="rounded-full border border-emerald-300/40 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-100"
+                  title="Exit without ending the table. Resume from the title screen."
+                >
+                  Leave & resume later
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEndTable}
+                  className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-100"
+                >
+                  End table
+                </button>
+              </div>
             </div>
           ) : null}
           {partyBoardConfig.role === 'guest' &&
@@ -6499,7 +6556,7 @@ function AppInner() {
                 </button>
                 <button
                   type="button"
-                  onClick={handleNewGame}
+                  onClick={handleLeaveTable}
                   className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-100"
                 >
                   Leave & rejoin later
@@ -6510,7 +6567,7 @@ function AppInner() {
           {partyBoardConfig.role === 'guest' && connectionStatus === 'connected' ? (
             <button
               type="button"
-              onClick={handleNewGame}
+              onClick={handleLeaveTable}
               className="rounded-full border border-white/15 bg-black/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-300 shadow-lg backdrop-blur-md"
               title={`Leave without ending the table. Rejoin room ${partyBoardConfig.roomId} later.`}
             >

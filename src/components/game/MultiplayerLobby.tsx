@@ -100,7 +100,7 @@ export function MultiplayerLobby({
           <h2 className="m-0 mb-4 text-center text-5xl font-semibold text-slate-100">Online room</h2>
           <p className="m-0 mb-10 text-center text-2xl leading-relaxed text-slate-400">
             {suggestedRole === 'guest'
-              ? 'Enter the host’s room code and your seat name. You can rejoin a game already in progress with the same code and name.'
+              ? 'Enter the host’s room code and your seat name. You can rejoin a game already in progress with the same code and name. Hosts use Resume table on the title screen after Leave & resume later.'
               : 'Share one room code. The host device must stay in the game (screen awake) — it is the live table. For couch play, use Pass and play on one device instead.'}
           </p>
           <label className="mb-2 block text-lg font-semibold uppercase tracking-[0.14em] text-slate-400">
