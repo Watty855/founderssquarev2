@@ -1,9 +1,27 @@
 'use client'
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, type CSSProperties, type ReactNode } from 'react'
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+  lazy,
+  Suspense,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 import { useGameState } from '@/hooks/use-game-state'
 import { Player, Plot, GameState, PlayerScore } from '@/lib/types'
 import { attachUndoSnapshotIfTurnAction, canUndoLastAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
+import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
+import { applyEndTurn } from '@/lib/gameEngine/applyEndTurn'
+import { applyBankActionCards } from '@/lib/gameEngine/applyBankAction'
+import {
+  buildEndGameTriggerPatch,
+  applyFinalRoundCountdown,
+  clearCouncilFreezeIfEndingPlayer,
+} from '@/lib/gameEngine/statePatches'
 import { createInitialBoard } from '@/lib/boardData'
 import { createActionDeck, createPropertyDeck, drawCards, drawFromDeckWithDiscardReshuffle } from '@/lib/deckUtils'
 import { GameSetupWizard } from '@/components/game/GameSetupWizard'
@@ -62,7 +80,6 @@ import {
 import { trySimpleAiMainPhase } from '@/lib/bot/simpleAiTurn'
 import type { SimpleAiTurnHandlers, SimpleAiTurnUi } from '@/lib/bot/simpleAiTurn'
 import {
-  checkForNineSequentialProperties,
   findCompleteSquares,
   findCompleteStreets,
   getChurchIncomeBonusForPlayer,
@@ -124,7 +141,10 @@ import type { BoardFx, GameEvent } from '@/lib/onlineGameActions'
 
 // Statically imported in v2 (no SSR concerns in the Vite/Capacitor build).
 import { IncomeDialog } from '@/components/dialogs/IncomeDialog'
-import { RollDieDialog } from '@/components/dialogs/RollDieDialog'
+
+const RollDieDialog = lazy(() =>
+  import('@/components/dialogs/RollDieDialog').then((m) => ({ default: m.RollDieDialog }))
+)
 
 type ActionCriteriaDialogState = {
   open: boolean
@@ -227,14 +247,6 @@ function withReplenishedActionHand(gameState: GameState, playerIndex: number): G
   return nextState
 }
 
-function clearCouncilFreezeIfEndingPlayer(current: GameState, finishingPlayerIndex: number): Partial<GameState> {
-  const finisherId = current.players[finishingPlayerIndex]?.id
-  if (finisherId != null && current.councilFreezeBlockBuildForPlayerId === finisherId) {
-    return { councilFreezeBlockBuildForPlayerId: undefined }
-  }
-  return {}
-}
-
 function sumInvestmentBookForPlayer(plots: Plot[], investorId: number): number {
   let s = 0
   for (const p of plots) {
@@ -243,54 +255,6 @@ function sumInvestmentBookForPlayer(plots: Plot[], investorId: number): number {
     })
   }
   return s
-}
-
-/**
- * If `newPlots` now contains nine built lots in a straight line OR a completed 3×3 city block for a
- * single founder AND the trigger has not yet fired, returns the patch fields that start the Final Round.
- *
- * Invoke after ordinary placement, rezoning builds, or hostile takeover (any change that updates
- * ownership of built lots can complete the qualifying pattern).
- * The triggerer's current turn finishes normally; `finalRoundTurnsRemaining = players.length + 1` lets
- * the next `applyFinalRoundCountdown` call decrement it down to N (the trigger turn end), then each of
- * the N follow-on turns decrements one more, ending the game after the last final turn.
- */
-function buildEndGameTriggerPatch(
-  current: GameState,
-  newPlots: Plot[],
-  triggerLocation: { row: number; col: string }
-): {
-  endGameTriggered?: true
-  endGameTriggerPlayerId?: number
-  endGameTriggerLocation?: { row: number; col: string }
-  winningSequence?: Array<{ row: number; col: string }>
-  finalRoundTurnsRemaining?: number
-} {
-  if (current.endGameTriggered) return {}
-  const found = checkForNineSequentialProperties(newPlots)
-  if (!found) return {}
-  return {
-    endGameTriggered: true,
-    endGameTriggerPlayerId: found.triggeredByPlayerId,
-    endGameTriggerLocation: triggerLocation,
-    winningSequence: found.plots,
-    finalRoundTurnsRemaining: current.players.length + 1,
-  }
-}
-
-/**
- * Decrement the final-round counter by one when a turn ends. Returns the patch the caller must merge
- * into the state. When the counter hits 0, returns `{ gameEnded: true, finalRoundTurnsRemaining: 0 }`
- * and the caller MUST NOT advance the player index / draw new cards (the game is over).
- */
-function applyFinalRoundCountdown(current: GameState): {
-  gameEnded?: true
-  finalRoundTurnsRemaining?: number
-} {
-  if (current.finalRoundTurnsRemaining === undefined) return {}
-  const next = current.finalRoundTurnsRemaining - 1
-  if (next <= 0) return { gameEnded: true, finalRoundTurnsRemaining: 0 }
-  return { finalRoundTurnsRemaining: next }
 }
 
 let cardFlightCounter = 0
@@ -2757,126 +2721,33 @@ function AppInner() {
     }
 
     setGameState((current) => {
-      const currentPlayer = current.players[current.currentPlayerIndex]
-      if (current.councilFreezeBlockBuildForPlayerId === currentPlayer.id) {
-        toast.error('City Council Freeze is in effect — you cannot build properties this turn.')
+      const result = applyBuildAt(current, {
+        row,
+        col,
+        propertyInstanceId: propertyCardId,
+        ...plotPlacementMode,
+      })
+      if (!result.ok) {
+        toast.error(result.error)
         return current
       }
-      const instance = currentPlayer.propertyCards.find(c => c.instanceId === propertyCardId)
-
-      if (!instance) return current
-
-      const card = propertyCards.find(c => c.id === instance.cardId) as PropertyCard
-      if (!card) return current
-
-      const plotIndex = current.plots.findIndex(p => p.row === row && p.col === col)
-
-      if (plotIndex === -1) return current
-
-      const plot = current.plots[plotIndex]
-
-      const wildEmulate = placementMode.wildCardEmulatePropertyId
-      const isWildBuild = card.id === 'anchor-wild-card' && !!wildEmulate
-      const isCivicFlexBuild = isCivicFlexHandCard(card) && !!wildEmulate
-      const placementTemplate = resolvePropertyPlacementTemplate(card, wildEmulate)
-      if ((isWildBuild || isCivicFlexBuild) && !placementTemplate) {
-        toast.error(
-          isWildBuild
-            ? 'Anchor Wild Card lost its anchor choice. Cancel placement and try again.'
-            : 'Civic card lost its building choice. Cancel placement and try again.'
-        )
-        return current
-      }
-      const resolvedTemplate = placementTemplate ?? card
-
-      const validPlots = getValidPlotsForProperty(resolvedTemplate, current.plots, current.crossingTheLineActive)
-      const isValid = validPlots.some(p => p.row === row && p.col === col)
-
-      if (!isValid) {
-        toast.error(`Cannot build ${resolvedTemplate.name} here!`)
-        return current
-      }
-
-      const highDensityPlacement = placementMode.housingHighDensity === true && isHousingPropertyCard(card)
-      const ANCHOR_WILD_BUILD_COST_M = 6
-      const fullBuildCost = isWildBuild
-        ? ANCHOR_WILD_BUILD_COST_M
-        : getHousingBuildCost(card, highDensityPlacement)
-      const taxBuildActionInstanceId = placementMode.taxBuildActionInstanceId
-      const taxBuildCardInstance =
-        taxBuildActionInstanceId
-          ? currentPlayer.actionCards.find((c) => c.instanceId === taxBuildActionInstanceId)
-          : undefined
-      const usingTaxBuild =
-        taxBuildActionInstanceId != null && taxBuildCardInstance?.cardId === 'build-with-tax-dollars'
-      const buildCost = usingTaxBuild ? Math.ceil(fullBuildCost / 2) : fullBuildCost
-
-      if (currentPlayer.money < buildCost) {
-        toast.error(`Not enough money! Need $${buildCost}M`)
-        return current
-      }
-
-      if (turnLimitReached(current.turnActionsConsumed)) {
-        toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
-        return current
-      }
-
-      const newPlots = [...current.plots]
-      newPlots[plotIndex] = {
-        ...plot,
-        builtProperty: resolvedTemplate.id,
-        claimedBy: currentPlayer.id,
-        housingHighDensity: highDensityPlacement ? true : undefined,
-      }
-
-      const updatedMoney = currentPlayer.money - buildCost
-      const updatedPropertyCards = currentPlayer.propertyCards.filter(
-        (c) => c.instanceId !== instance.instanceId
-      )
-      const updatedPropertyDiscard = [...current.propertyDiscard, instance]
-      const updatedActionCards = usingTaxBuild
-        ? currentPlayer.actionCards.filter((c) => c.instanceId !== taxBuildActionInstanceId)
-        : currentPlayer.actionCards
-      const updatedActionDiscard = usingTaxBuild && taxBuildCardInstance
-        ? [...current.actionDiscard, taxBuildCardInstance]
-        : current.actionDiscard
-
-      const updatedPlayers = current.players.map((p, idx) =>
-        idx === current.currentPlayerIndex
-          ? { ...p, money: updatedMoney, propertyCards: updatedPropertyCards, actionCards: updatedActionCards }
-          : p
-      )
-
-      {
-        const celebration = getBuildCelebrationNotice(plot, resolvedTemplate, {
-          housingHighDensity: highDensityPlacement,
-        })
-        const isAnchorBuild = resolvedTemplate.type === 'anchor'
-        if (isAnchorBuild) {
+      for (const ev of result.events) {
+        if (ev.type === 'toast') {
+          if (ev.level === 'success') toast.success(ev.message)
+          else if (ev.level === 'error') toast.error(ev.message)
+          else toast.info(ev.message)
+        } else if (ev.type === 'build_celebration') {
+          const isAnchor = ev.suffix.includes('anchored')
           showBoardNotice(
             <>
-              ⚓ <strong>{resolvedTemplate.name}</strong> anchored!
+              {isAnchor ? '⚓ ' : ''}
+              <strong>{ev.lotName}</strong>
+              {ev.suffix}
             </>,
-            `${col}${row} · $${buildCost}M`
+            ev.detail
           )
-          playAnchorDropSound()
-        } else if (celebration) {
-          showBoardNotice(
-            <>
-              <strong>{celebration.lotName}</strong>
-              {celebration.suffix}
-            </>,
-            `${col}${row} · $${buildCost}M`
-          )
-          playConstructionSound()
-        } else {
-          showBoardNotice(
-            <>
-              Built <strong>{getPlotLotDisplayName(col, row, plot.building)}</strong>!
-            </>,
-            `${col}${row} · $${buildCost}M`
-          )
-          playConstructionSound()
+          if (isAnchor) playAnchorDropSound()
+          else playConstructionSound()
         }
       }
       setPlacementMode({
@@ -2886,60 +2757,21 @@ function AppInner() {
         taxBuildActionInstanceId: undefined,
         wildCardEmulatePropertyId: undefined,
       })
-      if (usingTaxBuild) {
-        toast.success(`Built with Tax Dollars at 50% cost ($${fullBuildCost}M → $${buildCost}M).`)
-      }
-
-      const newPropertiesBuiltThisTurn = current.propertiesBuiltThisTurn + 1
-      const newActionsPlayedThisTurn = current.actionsPlayedThisTurn + (usingTaxBuild ? 1 : 0)
-      const newTurnActionsConsumed = (current.turnActionsConsumed ?? 0) + 1 + (usingTaxBuild ? 1 : 0)
-
-      const newState: GameState = {
-        ...current,
-        players: updatedPlayers,
-        plots: newPlots,
-        actionDiscard: updatedActionDiscard,
-        propertyDiscard: updatedPropertyDiscard,
-        propertiesBuiltThisTurn: newPropertiesBuiltThisTurn,
-        actionsPlayedThisTurn: newActionsPlayedThisTurn,
-        turnActionsConsumed: newTurnActionsConsumed,
-        playedPropertyCardThisTurn: instance.instanceId,
-        lastBuiltProperty: {
-          row,
-          col,
-          propertyId: resolvedTemplate.id,
-          buildCost,
-          undoTitle: isWildBuild
-            ? `Anchor Wild Card (${resolvedTemplate.name})`
-            : isCivicFlexBuild
-              ? `Civic (${resolvedTemplate.name})`
-              : undefined,
-        },
-      }
-
-      const triggerPatch = buildEndGameTriggerPatch(current, newPlots, { row, col })
-      const stateWithTrigger: GameState = { ...newState, ...triggerPatch }
-
-      if (triggerPatch.endGameTriggered) {
+      if (result.state.endGameTriggered && !current.endGameTriggered) {
         const triggererName =
-          current.players.find((p) => p.id === triggerPatch.endGameTriggerPlayerId)?.name ?? 'A founder'
+          current.players.find((p) => p.id === result.state.endGameTriggerPlayerId)?.name ?? 'A founder'
         setTimeout(() => {
           toast.success(
             `${triggererName} completed nine properties in a row or a city block — Final Round! Each founder gets one more turn.`
           )
         }, 600)
       }
-
-      if (turnLimitReached(newTurnActionsConsumed)) {
+      if (turnLimitReached(result.state.turnActionsConsumed)) {
         setTimeout(() => {
           handleEndTurn()
         }, 0)
       }
-
-      return attachUndoSnapshotIfTurnAction(
-        current,
-        withReplenishedActionHand(stateWithTrigger, current.currentPlayerIndex)
-      )
+      return attachUndoSnapshotIfTurnAction(current, result.state)
     })
   }
 
@@ -2997,110 +2829,25 @@ function AppInner() {
       return
     }
     setGameState((current) => {
-      const currentPlayer = current.players[current.currentPlayerIndex]
-      let updatedActionCards = [...(currentPlayer.actionCards || [])]
-      let updatedPropertyCards = [...(currentPlayer.propertyCards || [])]
-      let updatedActionDeck = [...current.actionDeck]
-      let updatedPropertyDeck = [...current.propertyDeck]
-      let updatedPropertyDiscard = [...current.propertyDiscard]
-
-      if (current.playedPropertyCardThisTurn) {
-        const playedPropertyInstance = updatedPropertyCards.find(
-          c => c.instanceId === current.playedPropertyCardThisTurn
-        )
-        if (playedPropertyInstance) {
-          updatedPropertyCards = updatedPropertyCards.filter(
-            c => c.instanceId !== current.playedPropertyCardThisTurn
-          )
-          updatedPropertyDiscard.push(playedPropertyInstance)
+      const result = applyEndTurn(current)
+      if (!result.ok) {
+        toast.error(result.error)
+        return current
+      }
+      for (const ev of result.events) {
+        if (ev.type === 'discard_required') {
+          setDiscardDialogState({ open: true, numToDiscard: ev.numToDiscard })
+        } else if (ev.type === 'game_over') {
+          setTimeout(() => toast.success('Final Round complete — game over!'), 200)
+        } else if (ev.type === 'turn_changed') {
+          toast.info(ev.finalRound ? `${ev.playerName}'s final turn` : `${ev.playerName}'s turn`)
+        } else if (ev.type === 'toast') {
+          if (ev.level === 'success') toast.success(ev.message)
+          else if (ev.level === 'error') toast.error(ev.message)
+          else toast.info(ev.message)
         }
       }
-
-      const propertyCardsToDraw = Math.max(0, 5 - updatedPropertyCards.length)
-      if (propertyCardsToDraw > 0) {
-        const { drawn, remaining } = drawCards(updatedPropertyDeck, propertyCardsToDraw)
-        updatedPropertyCards = [...updatedPropertyCards, ...drawn]
-        updatedPropertyDeck = remaining
-      }
-
-      const totalActionCards = updatedActionCards.length
-
-      const updatedPlayers = current.players.map((p, idx) =>
-        idx === current.currentPlayerIndex
-          ? { ...p, actionCards: updatedActionCards, propertyCards: updatedPropertyCards }
-          : p
-      )
-
-      const newState = {
-        ...current,
-        players: updatedPlayers,
-        actionDeck: updatedActionDeck,
-        propertyDeck: updatedPropertyDeck,
-        propertyDiscard: updatedPropertyDiscard,
-        propertiesBuiltThisTurn: 0,
-        actionsPlayedThisTurn: 0,
-        turnActionsConsumed: 0,
-        incomeResolvedThisTurn: false,
-        crossingTheLineActive: false,
-        playedPropertyCardThisTurn: undefined,
-        undoLastAction: undefined,
-      }
-
-      if (totalActionCards > 8) {
-        setDiscardDialogState({ open: true, numToDiscard: totalActionCards - 8 })
-        return newState
-      }
-
-      const finalRoundPatch = applyFinalRoundCountdown(current)
-      if (finalRoundPatch.gameEnded) {
-        setTimeout(() => toast.success('Final Round complete — game over!'), 200)
-        return {
-          ...newState,
-          ...clearCouncilFreezeIfEndingPlayer(current, current.currentPlayerIndex),
-          ...finalRoundPatch,
-          lastBuiltProperty: undefined,
-        }
-      }
-
-      const nextPlayerIndex = (current.currentPlayerIndex + 1) % current.players.length
-      const nextPlayer = current.players[nextPlayerIndex]
-      const playRoundNumber = nextPlayRoundNumber(current, nextPlayerIndex)
-
-      const {
-        drawn: newActionCards,
-        deck: nextActionDeck,
-        discard: nextActionDiscard,
-      } = drawFromDeckWithDiscardReshuffle(updatedActionDeck, current.actionDiscard, 2)
-
-      const nextPlayerUpdated = {
-        ...nextPlayer,
-        actionCards: [...nextPlayer.actionCards, ...newActionCards]
-      }
-
-      const playersWithNewCards = newState.players.map((p, idx) =>
-        idx === nextPlayerIndex ? nextPlayerUpdated : p
-      )
-
-      const inFinalRound = finalRoundPatch.finalRoundTurnsRemaining !== undefined
-      toast.info(
-        inFinalRound
-          ? `${nextPlayer.name}'s final turn`
-          : `${nextPlayer.name}'s turn`
-      )
-
-      return {
-        ...newState,
-        ...clearCouncilFreezeIfEndingPlayer(current, current.currentPlayerIndex),
-        ...finalRoundPatch,
-        players: playersWithNewCards,
-        actionDeck: nextActionDeck,
-        actionDiscard: nextActionDiscard,
-        currentPlayerIndex: nextPlayerIndex,
-        playRoundNumber,
-        newCardsDrawn: newActionCards,
-        showNewCardsAnimation: true,
-        lastBuiltProperty: undefined,
-      }
+      return result.state
     })
 
     setTimeout(() => {
@@ -3548,29 +3295,15 @@ function AppInner() {
     }
     const banked = actionCriteriaDialog.bankValue
     patchGameState((current) => {
-      const cpIdx = current.currentPlayerIndex
-      const cp = current.players[cpIdx]
-      const inst = cp.actionCards.find((a) => a.instanceId === id)
-      const card = inst ? actionCards.find((c) => c.id === inst.cardId) : undefined
-      const bank = card?.bankValue ?? 0
-      const updatedActionCards = cp.actionCards.filter((c) => c.instanceId !== id)
-      const actionDiscardPile = inst ? [...current.actionDiscard, inst] : current.actionDiscard
-      const newActionsPlayed = current.actionsPlayedThisTurn + 1
-      const newTurnActionsConsumed = (current.turnActionsConsumed ?? 0) + 1
-      const players = current.players.map((p, i) =>
-        i === cpIdx ? { ...p, money: p.money + bank, actionCards: updatedActionCards } : p
-      )
-      const newState: GameState = {
-        ...current,
-        players,
-        actionDiscard: actionDiscardPile,
-        actionsPlayedThisTurn: newActionsPlayed,
-        turnActionsConsumed: newTurnActionsConsumed,
+      const result = applyBankActionCards(current, [id])
+      if (!result.ok) {
+        toast.error(result.error)
+        return current
       }
-      if (turnLimitReached(newTurnActionsConsumed)) {
+      if (turnLimitReached(result.state.turnActionsConsumed)) {
         scheduleEndOfTurn()
       }
-      return withReplenishedActionHand(newState, cpIdx)
+      return result.state
     })
     setActionCriteriaDialog(createClosedActionCriteriaDialog())
     toast.success(`Banked the card for $${banked}M.`)
@@ -5833,6 +5566,15 @@ function AppInner() {
     placementWildEmulatePropertyId: placementMode.wildCardEmulatePropertyId,
     placementHousingHighDensity: placementMode.housingHighDensity,
     actionCriteriaDialogOpen: actionCriteriaDialog.open,
+    selectValidPlots: takeoverSelectMode.active
+      ? takeoverSelectMode.validPlots
+      : scandalSelectMode.active
+        ? scandalSelectMode.validPlots
+        : investmentSelectMode.active
+          ? investmentSelectMode.validPlots
+          : removeInvestorsSelectMode.active
+            ? removeInvestorsSelectMode.validPlots
+            : undefined,
   }
 
   const aiPlayerReady =
@@ -7346,44 +7088,46 @@ function AppInner() {
         />
       )}
       {rollDieDialogState.open && (
-        <RollDieDialog
-          key={`${rollDieDialogState.mode}-${rollDieDialogState.actionInstanceId ?? ''}`}
-          open={rollDieDialogState.open}
-          mode={rollDieDialogState.mode}
-          influenceBonus={rollDieDialogState.influenceBonus ?? 0}
-          influenceLabels={rollDieDialogState.influenceLabels ?? []}
-          defenderName={
-            rollDieDialogState.mode === 'council-freeze-attacker' ||
-            rollDieDialogState.mode === 'council-freeze-defender'
-              ? rollDieDialogState.targetPlayerId != null
-                ? safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.name
-                : undefined
-              : rollDieDialogState.mode === 'hostile-takeover-defender'
-                ? safeGameState.players.find(
-                    (p) => p.id === rollDieDialogState.takeoverContext?.ownerPlayerId
-                  )?.name
-                : rollDieDialogState.mode === 'scandal-defender' &&
-                    rollDieDialogState.scandalContext != null
-                  ? safeGameState.players.find(
-                      (p) => p.id === rollDieDialogState.scandalContext!.anchorOwnerPlayerId
-                    )?.name
+        <Suspense fallback={null}>
+          <RollDieDialog
+            key={`${rollDieDialogState.mode}-${rollDieDialogState.actionInstanceId ?? ''}`}
+            open={rollDieDialogState.open}
+            mode={rollDieDialogState.mode}
+            influenceBonus={rollDieDialogState.influenceBonus ?? 0}
+            influenceLabels={rollDieDialogState.influenceLabels ?? []}
+            defenderName={
+              rollDieDialogState.mode === 'council-freeze-attacker' ||
+              rollDieDialogState.mode === 'council-freeze-defender'
+                ? rollDieDialogState.targetPlayerId != null
+                  ? safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.name
                   : undefined
-          }
-          actingPlayerName={currentPlayer.name}
-          councilFreezeAttackerRollsCompleted={rollDieDialogState.councilFreezeAttackerRollsCompleted}
-          attackerMoney={currentPlayer.money}
-          councilFreezeFailAuto={rollDieDialogState.councilFreezeFailAuto === true}
-          diceRetryNonce={rollDieDialogState.diceRetryNonce}
-          onAttackerDieSettled={handleAttackerDieSettled}
-          onCouncilFreezeAttackerRollAgain={handleCouncilFreezeAttackerRollAgain}
-          onCouncilFreezeFailDismiss={handleCouncilFreezeFailDismiss}
-          onComplete={handleRollDieComplete}
-          onCancel={handleRollDieCancel}
-          hostileTakeoverExchange={hostileTakeoverExchange}
-          rezoningSummary={rezoningSummaryForDialog}
-          scandalSummary={scandalSummaryForDialog}
-          aiAutoplay={rollDieAiAutoplay}
-        />
+                : rollDieDialogState.mode === 'hostile-takeover-defender'
+                  ? safeGameState.players.find(
+                      (p) => p.id === rollDieDialogState.takeoverContext?.ownerPlayerId
+                    )?.name
+                  : rollDieDialogState.mode === 'scandal-defender' &&
+                      rollDieDialogState.scandalContext != null
+                    ? safeGameState.players.find(
+                        (p) => p.id === rollDieDialogState.scandalContext!.anchorOwnerPlayerId
+                      )?.name
+                    : undefined
+            }
+            actingPlayerName={currentPlayer.name}
+            councilFreezeAttackerRollsCompleted={rollDieDialogState.councilFreezeAttackerRollsCompleted}
+            attackerMoney={currentPlayer.money}
+            councilFreezeFailAuto={rollDieDialogState.councilFreezeFailAuto === true}
+            diceRetryNonce={rollDieDialogState.diceRetryNonce}
+            onAttackerDieSettled={handleAttackerDieSettled}
+            onCouncilFreezeAttackerRollAgain={handleCouncilFreezeAttackerRollAgain}
+            onCouncilFreezeFailDismiss={handleCouncilFreezeFailDismiss}
+            onComplete={handleRollDieComplete}
+            onCancel={handleRollDieCancel}
+            hostileTakeoverExchange={hostileTakeoverExchange}
+            rezoningSummary={rezoningSummaryForDialog}
+            scandalSummary={scandalSummaryForDialog}
+            aiAutoplay={rollDieAiAutoplay}
+          />
+        </Suspense>
       )}
       <AlertDialog
         open={taxBuildPrompt.open}

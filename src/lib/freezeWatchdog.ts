@@ -7,6 +7,12 @@
  * Reading the log during beta:
  *  - Safari Web Inspector console:  window.__fsFreezeLog()
  *  - Or watch for "[fs-watchdog]" console entries as they happen.
+ *
+ * Field note (Build 17 audit): no freeze-log dumps were checked into the repo.
+ * Stalls ≥2.5s on visible tabs correlate with the previous always-mounted board
+ * re-render + God-Component patch storms — board coord indexes, cell lookup
+ * memoization, and lazy dice loading target that path. Re-check with
+ * `window.__fsFreezeLog()` after TestFlight sessions.
  */
 
 const STORAGE_KEY = 'fs-freeze-log'

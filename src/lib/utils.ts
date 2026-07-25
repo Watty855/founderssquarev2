@@ -3,6 +3,7 @@ import { twMerge } from "tailwind-merge"
 import { propertyCards } from './cardData'
 import type { PropertyCard } from './cardTypes'
 import { isCityBuildingCell } from './boardAdjacency'
+import { buildPlotIndex, getPlotAt } from './boardIndex'
 import { isPlotInCityBlock, plotSupportsInvestmentIncome } from './investmentTargets'
 import { Plot, COLUMNS } from './types'
 import { getPlotDistricts, type District } from './districts'
@@ -46,9 +47,10 @@ export interface WinningSequence {
 function ownedBuiltPlot(
   plots: Plot[],
   row: number,
-  col: string
+  col: string,
+  index?: Map<string, number>
 ): { ownerId: number } | null {
-  const p = plots.find((q) => q.row === row && q.col === col)
+  const p = getPlotAt(plots, col, row, index)
   if (!p || p.type !== 'city' || !p.builtProperty || p.claimedBy === undefined) return null
   return { ownerId: p.claimedBy }
 }
@@ -70,6 +72,7 @@ function checkForCompleteCityBlockTrigger(plots: Plot[]): WinningSequence | null
  * that still keep the line continuous (3+3+3 across two streets qualifies).
  */
 function checkForNineInAStraightLine(plots: Plot[]): WinningSequence | null {
+  const index = buildPlotIndex(plots)
   const cityRows: number[] = []
   for (let r = 2; r <= 20; r++) {
     if (!STREET_ROWS.has(r)) cityRows.push(r)
@@ -79,7 +82,7 @@ function checkForNineInAStraightLine(plots: Plot[]): WinningSequence | null {
   for (const row of cityRows) {
     const line = cityCols
       .filter((col) => isCityBuildingCell(row, col))
-      .map((col) => ({ row, col, owner: ownedBuiltPlot(plots, row, col)?.ownerId }))
+      .map((col) => ({ row, col, owner: ownedBuiltPlot(plots, row, col, index)?.ownerId }))
     let runStart = 0
     while (runStart < line.length) {
       const owner = line[runStart].owner
@@ -103,7 +106,7 @@ function checkForNineInAStraightLine(plots: Plot[]): WinningSequence | null {
   for (const col of cityCols) {
     const line = cityRows
       .filter((row) => isCityBuildingCell(row, col))
-      .map((row) => ({ row, col, owner: ownedBuiltPlot(plots, row, col)?.ownerId }))
+      .map((row) => ({ row, col, owner: ownedBuiltPlot(plots, row, col, index)?.ownerId }))
     let runStart = 0
     while (runStart < line.length) {
       const owner = line[runStart].owner

@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Plot, Player, COLUMNS } from '@/lib/types'
 import { getPlotDistricts } from '@/lib/districts'
 import { CHURCH_SURROUND_CELLS, CHURCH_BLOCK_CELLS } from '@/lib/boardData'
 import { propertyCards } from '@/lib/cardData'
 import { getPlotBoardLetter } from '@/lib/lotCategory'
 import { BOARD_ART } from '@/lib/boardArt'
+import { coordKeySet, plotCoordKey } from '@/lib/boardIndex'
 
 /** When true, the illustrated board image is the visual base; cells are interactive overlays.
  *  Kept off so builds, claim colors, and lot labels render as the integrated CSS board. */
@@ -327,6 +328,22 @@ export function GameBoard({
     return () => window.clearTimeout(t)
   }, [plots])
 
+  const validPlotKeys = useMemo(
+    () => (placementMode?.active ? coordKeySet(placementMode.validPlots) : new Set<string>()),
+    [placementMode?.active, placementMode?.validPlots]
+  )
+  const winningPlotKeys = useMemo(() => coordKeySet(winningSequence), [winningSequence])
+  const playerById = useMemo(() => {
+    const m = new Map<number, Player>()
+    for (const p of players) m.set(p.id, p)
+    return m
+  }, [players])
+  const propertyCardById = useMemo(() => {
+    const m = new Map<string, (typeof propertyCards)[number]>()
+    for (const c of propertyCards) m.set(c.id, c)
+    return m
+  }, [])
+
   const getPlotStyle = (plot: Plot): React.CSSProperties => {
     if (plot.anchorInfluenceSuppressed) {
       return {
@@ -337,7 +354,7 @@ export function GameBoard({
       }
     }
     if (plot.claimedBy !== undefined) {
-      const player = players.find(p => p.id === plot.claimedBy)
+      const player = playerById.get(plot.claimedBy)
       if (player) {
         const highDensityHousing =
           plot.housingHighDensity === true && plot.builtProperty?.startsWith('housing')
@@ -354,22 +371,14 @@ export function GameBoard({
     return {}
   }
 
-  const isClaimable = (plot: Plot): boolean => {
-    if (placementMode?.active) {
-      return placementMode.validPlots.some(p => p.row === plot.row && p.col === plot.col)
-    }
-    return false
-  }
+  const isClaimable = (plot: Plot): boolean =>
+    placementMode?.active === true && validPlotKeys.has(plotCoordKey(plot.col, plot.row))
 
-  const isValidPlacement = (plot: Plot): boolean => {
-    if (!placementMode?.active) return false
-    return placementMode.validPlots.some(p => p.row === plot.row && p.col === plot.col)
-  }
+  const isValidPlacement = (plot: Plot): boolean =>
+    placementMode?.active === true && validPlotKeys.has(plotCoordKey(plot.col, plot.row))
 
-  const isWinningPlot = (plot: Plot): boolean => {
-    if (!winningSequence) return false
-    return winningSequence.some(p => p.row === plot.row && p.col === plot.col)
-  }
+  const isWinningPlot = (plot: Plot): boolean =>
+    winningPlotKeys.has(plotCoordKey(plot.col, plot.row))
 
   const handlePlotClick = (plot: Plot) => {
     if (placementMode?.active) {
@@ -643,7 +652,7 @@ export function GameBoard({
             plot.building === 'Anchor' || plot.building === 'Anchor Tenet' || plot.building === 'Union'
           const isClaimed = plot.claimedBy !== undefined
           const builtPropertyCard = plot.builtProperty
-            ? propertyCards.find((c) => c.id === plot.builtProperty)
+            ? propertyCardById.get(plot.builtProperty)
             : undefined
           const anchorTenetTitle =
             isAnchor && builtPropertyCard?.type === 'anchor' ? builtPropertyCard.name : null

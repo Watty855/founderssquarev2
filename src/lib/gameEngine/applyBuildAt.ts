@@ -9,6 +9,7 @@ import { getBuildCelebrationNotice } from '@/lib/buildCelebrationMessages'
 import { MAX_TURN_ACTIONS, replenishCurrentPlayerActionHand, turnLimitReached } from '@/lib/turnActions'
 import type { ApplyGameActionResult, GameEvent } from '@/lib/onlineGameActions'
 import { buildEndGameTriggerPatch } from '@/lib/gameEngine/statePatches'
+import { getPlotIndexAt } from '@/lib/boardIndex'
 
 export type BuildAtParams = {
   row: number
@@ -33,7 +34,7 @@ export function applyBuildAt(state: GameState, params: BuildAtParams): ApplyGame
   const card = propertyCards.find((c) => c.id === instance.cardId) as PropertyCard | undefined
   if (!card) return { ok: false, error: 'Unknown property.', code: 'unknown_card' }
 
-  const plotIndex = state.plots.findIndex((p) => p.row === params.row && p.col === params.col)
+  const plotIndex = getPlotIndexAt(state.plots, params.col, params.row)
   if (plotIndex === -1) return { ok: false, error: 'Invalid plot.', code: 'invalid_plot' }
 
   const plot = state.plots[plotIndex]
