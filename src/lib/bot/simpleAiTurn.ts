@@ -39,7 +39,13 @@ export interface SimpleAiTurnHandlers {
     convertToCashInstanceIds: string[],
     options?: AiPlayOptions
   ) => void
+  /** Property-card placement only. */
   handlePlotSelect: (row: number, col: string) => void
+  /**
+   * Board click for the active mode (investment / takeover / scandal / rezoning / remove-investors /
+   * placement). Bots must use this so confrontational moves resolve without the host clicking.
+   */
+  handleBoardPlotSelect: (row: number, col: string) => void
 }
 
 export interface SimpleAiTurnUi {
@@ -65,6 +71,8 @@ export interface SimpleAiTurnUi {
   actionCriteriaDialogOpen: boolean
   /** Valid plots for the active select mode (takeover / scandal / investment / etc.). */
   selectValidPlots?: Plot[]
+  /** Cash required to finish an open Investment / Double Investment select. */
+  investmentContributionMillion?: number
 }
 
 function endGameProximityScore(plots: Plot[], playerId: number): number {
@@ -89,6 +97,52 @@ function pickRichestHumanTarget(gs: GameState, selfId: number): Player | null {
     return rivals.sort((a, b) => b.money - a.money)[0] ?? null
   }
   return [...humans].sort((a, b) => b.money - a.money)[0] ?? null
+}
+
+/** Rough wealth so the bot avoids feeding the current table leader with investment cash. */
+function playerWealthScore(gs: GameState, playerId: number): number {
+  const p = gs.players.find((x) => x.id === playerId)
+  if (!p) return 0
+  let propertyValue = 0
+  for (const plot of gs.plots) {
+    if (plot.claimedBy !== playerId || !plot.builtProperty) continue
+    propertyValue += propertyEndValue(plot.builtProperty)
+  }
+  return p.money + propertyValue
+}
+
+function tableLeaderId(gs: GameState, excludeId?: number): number | null {
+  let bestId: number | null = null
+  let best = -1
+  for (const p of gs.players) {
+    if (excludeId != null && p.id === excludeId) continue
+    const w = playerWealthScore(gs, p.id)
+    if (w > best) {
+      best = w
+      bestId = p.id
+    }
+  }
+  return bestId
+}
+
+/**
+ * Prefer investing in weaker (lower cash / property value) rivals — never feed the table leader.
+ * Among those, prefer cheaper lots so the stripe is cheap relative to the cash paid.
+ */
+function pickInvestmentTarget(gs: GameState, selfId: number, valid: Plot[]): Plot | null {
+  if (valid.length === 0) return null
+  const leaderId = tableLeaderId(gs, selfId)
+  const scored = valid.map((plot) => {
+    const ownerId = plot.claimedBy
+    const ownerWealth = ownerId != null ? playerWealthScore(gs, ownerId) : 0
+    const feedsLeader = ownerId != null && ownerId === leaderId ? 1 : 0
+    const lotValue = propertyEndValue(plot.builtProperty)
+    // Higher score = better for the bot. Penalize feeding the leader; prefer poorer owners & cheaper lots.
+    const score = -feedsLeader * 1000 - ownerWealth * 2 - lotValue
+    return { plot, score }
+  })
+  scored.sort((a, b) => b.score - a.score)
+  return scored[0]?.plot ?? null
 }
 
 function tryPlayConfrontation(
@@ -187,11 +241,14 @@ function tryPlayConfrontation(
     }
   }
 
-  // Investment / Double Investment — put money on high-value rival income lots.
-  const invest = has('double-investment') ?? has('investment')
-  if (invest && slotsLeft >= 1 && cp.money >= 4) {
+  // Investment / Double Investment — only when we can afford the contribution and have targets.
+  const doubleInvest = has('double-investment')
+  const singleInvest = has('investment')
+  const invest = doubleInvest && cp.money >= 8 ? doubleInvest : singleInvest && cp.money >= 4 ? singleInvest : null
+  if (invest && slotsLeft >= 1) {
+    const need = invest.cardId === 'double-investment' ? 8 : 4
     const targets = getInvestablePlots(gs.plots, cp.id)
-    if (targets.length > 0) {
+    if (targets.length > 0 && cp.money >= need && pickInvestmentTarget(gs, cp.id, targets)) {
       h.handlePlayCards(null, [invest.instanceId], [], undefined)
       return true
     }
@@ -235,7 +292,7 @@ function tryCompleteSelectMode(
     const best = [...valid].sort(
       (a, b) => propertyEndValue(b.builtProperty) - propertyEndValue(a.builtProperty)
     )[0]
-    h.handlePlotSelect(best.row, best.col)
+    h.handleBoardPlotSelect(best.row, best.col)
     return true
   }
 
@@ -248,19 +305,23 @@ function tryCompleteSelectMode(
     const prefer =
       (human && valid.find((p) => p.claimedBy === human.id)) ||
       [...valid].sort((a, b) => propertyEndValue(b.builtProperty) - propertyEndValue(a.builtProperty))[0]
-    h.handlePlotSelect(prefer.row, prefer.col)
+    h.handleBoardPlotSelect(prefer.row, prefer.col)
     return true
   }
 
   if (ui.investmentSelectActive) {
-    if (valid.length === 0) {
+    const need = ui.investmentContributionMillion ?? 4
+    if (valid.length === 0 || cp.money < need) {
+      // Insufficient cash / no targets — abandon select so the turn can continue.
       h.handleCancelInvestmentSelect()
       return true
     }
-    const best = [...valid].sort(
-      (a, b) => propertyEndValue(b.builtProperty) - propertyEndValue(a.builtProperty)
-    )[0]
-    h.handlePlotSelect(best.row, best.col)
+    const pick = pickInvestmentTarget(gs, cp.id, valid)
+    if (!pick) {
+      h.handleCancelInvestmentSelect()
+      return true
+    }
+    h.handleBoardPlotSelect(pick.row, pick.col)
     return true
   }
 
@@ -269,7 +330,7 @@ function tryCompleteSelectMode(
       h.handleCancelRemoveInvestorsSelect()
       return true
     }
-    h.handlePlotSelect(valid[0].row, valid[0].col)
+    h.handleBoardPlotSelect(valid[0].row, valid[0].col)
     return true
   }
 
@@ -280,7 +341,7 @@ function tryCompleteSelectMode(
       return true
     }
     lots.sort((a, b) => a.row - b.row || a.col.localeCompare(b.col))
-    h.handlePlotSelect(lots[0].row, lots[0].col)
+    h.handleBoardPlotSelect(lots[0].row, lots[0].col)
     return true
   }
 

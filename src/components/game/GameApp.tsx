@@ -674,6 +674,7 @@ function AppInner() {
     cancelPlacement: () => {},
     handlePlayCards: () => {},
     handlePlotSelect: () => {},
+    handleBoardPlotSelect: () => {},
   })
   const aiUiRef = useRef<SimpleAiTurnUi | null>(null)
 
@@ -3158,7 +3159,16 @@ function AppInner() {
     const contribution = sel.contributionMillion
     const investorPreview = safeGameState.players[safeGameState.currentPlayerIndex]
     if (investorPreview.money < contribution) {
-      toast.error(`Need $${contribution}M to complete this investment.`)
+      // Clear select mode so the turn cannot freeze (common for Founderbot / mid-turn cash drain).
+      setInvestmentSelectMode({
+        active: false,
+        validPlots: [],
+        actionInstanceId: null,
+        contributionMillion: 4,
+      })
+      toast.error(
+        `Need $${contribution}M to complete this investment — cancelled. Continue your turn or End Turn.`
+      )
       return
     }
     const plotPreview = safeGameState.plots.find((p) => p.row === row && p.col === col)
@@ -5544,10 +5554,13 @@ function AppInner() {
       }),
     handlePlayCards,
     handlePlotSelect,
+    /** Same routing as a human board click — required so bots finish investment/takeover/etc. */
+    handleBoardPlotSelect: handlePlotClaim,
   }
   aiUiRef.current = {
     undoActionDialogOpen,
-    boardNoticeActive: boardNotice != null,
+    // Notices are drama for humans; bots must keep resolving or select modes freeze the table.
+    boardNoticeActive: false,
     showNewCardsAnimation: !!safeGameState.showNewCardsAnimation,
     taxBuildPromptOpen: taxBuildPrompt.open,
     discardPropertyConfirmOpen,
@@ -5575,6 +5588,9 @@ function AppInner() {
           : removeInvestorsSelectMode.active
             ? removeInvestorsSelectMode.validPlots
             : undefined,
+    investmentContributionMillion: investmentSelectMode.active
+      ? investmentSelectMode.contributionMillion
+      : undefined,
   }
 
   const aiPlayerReady =
