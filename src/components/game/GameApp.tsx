@@ -75,7 +75,7 @@ import {
   playCrowdCheerSound,
   playInfluenceDwindleSound,
 } from '@/lib/soundEffects'
-import { trySimpleAiMainPhase } from '@/lib/bot/simpleAiTurn'
+import { trySimpleAiMainPhase, pickAiDiscardPropertyIds } from '@/lib/bot/simpleAiTurn'
 import type { SimpleAiTurnHandlers, SimpleAiTurnUi } from '@/lib/bot/simpleAiTurn'
 import {
   findCompleteSquares,
@@ -666,6 +666,7 @@ function AppInner() {
     handleCancelInvestmentSelect: () => {},
     handleCancelRemoveInvestorsSelect: () => {},
     handleCancelDiscardPropertySelect: () => {},
+    handleConfirmDiscardProperty: () => {},
     dismissTaxBuildPrompt: () => {},
     cancelPlacement: () => {},
     handlePlayCards: () => {},
@@ -2423,6 +2424,12 @@ function AppInner() {
           toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
           return
         }
+        const acting = safeGameState.players[cpIdx]
+        // Founderbots never use the host hand rail — resolve immediately so the table cannot freeze.
+        if (acting.isAi === true) {
+          handleConfirmDiscardProperty(pickAiDiscardPropertyIds(acting), actionInstanceIds[0])
+          return
+        }
         setDiscardPropertySelectMode({
           active: true,
           actionInstanceId: actionInstanceIds[0],
@@ -3192,21 +3199,41 @@ function AppInner() {
     })
   }
 
-  const handleConfirmDiscardProperty = () => {
+  /**
+   * Resolve Discard Property Cards for the acting seat.
+   * Optional overrides let Founderbots finish without the host hand UI
+   * (solo tables pin the human hand rail, so AI select mode looked like the host's cards).
+   */
+  const handleConfirmDiscardProperty = (
+    selectedPropertyInstanceIds?: string[],
+    actionInstanceIdOverride?: string
+  ) => {
     const mode = discardPropertySelectModeRef.current
-    if (!mode.active || !mode.actionInstanceId) return
-
     const cpIdx = safeGameState.currentPlayerIndex
     const previewPlayer = safeGameState.players[cpIdx]
-    const actionInstPreview = previewPlayer.actionCards.find((a) => a.instanceId === mode.actionInstanceId)
+    const actionInstanceId =
+      actionInstanceIdOverride ??
+      (mode.active ? mode.actionInstanceId : null) ??
+      previewPlayer.actionCards.find((a) => a.cardId === 'discard-property-cards')?.instanceId ??
+      null
+    if (!actionInstanceId) {
+      toast.error('That action is no longer in your hand.')
+      setDiscardPropertySelectMode({ active: false, actionInstanceId: null, selectedPropertyInstanceIds: [] })
+      setDiscardPropertyConfirmOpen(false)
+      return
+    }
+
+    const actionInstPreview = previewPlayer.actionCards.find((a) => a.instanceId === actionInstanceId)
     if (!actionInstPreview || actionInstPreview.cardId !== 'discard-property-cards') {
       toast.error('That action is no longer in your hand.')
       setDiscardPropertySelectMode({ active: false, actionInstanceId: null, selectedPropertyInstanceIds: [] })
       setDiscardPropertyConfirmOpen(false)
       return
     }
+
+    const selectedIds = selectedPropertyInstanceIds ?? mode.selectedPropertyInstanceIds
     const handIds = new Set(previewPlayer.propertyCards.map((c) => c.instanceId))
-    if (mode.selectedPropertyInstanceIds.some((id) => !handIds.has(id))) {
+    if (selectedIds.some((id) => !handIds.has(id))) {
       toast.error('Selection is out of date. Close the dialog and try again.')
       return
     }
@@ -3216,11 +3243,11 @@ function AppInner() {
     let drawnLen = 0
     patchGameState((current) => {
       const currentPlayer = current.players[current.currentPlayerIndex]
-      const actionInst = currentPlayer.actionCards.find((a) => a.instanceId === mode.actionInstanceId)
+      const actionInst = currentPlayer.actionCards.find((a) => a.instanceId === actionInstanceId)
       if (!actionInst || actionInst.cardId !== 'discard-property-cards') {
         return current
       }
-      const selectedSet = new Set(mode.selectedPropertyInstanceIds)
+      const selectedSet = new Set(selectedIds)
       const toDiscard = currentPlayer.propertyCards.filter((c) => selectedSet.has(c.instanceId))
       if (toDiscard.length !== selectedSet.size) {
         return current
@@ -3233,7 +3260,7 @@ function AppInner() {
       const discardIds = new Set(toDiscard.map((c) => c.instanceId))
       const remainingHand = currentPlayer.propertyCards.filter((c) => !discardIds.has(c.instanceId))
       const newPropertyDiscard = [...current.propertyDiscard, ...toDiscard]
-      const newActionCards = currentPlayer.actionCards.filter((a) => a.instanceId !== mode.actionInstanceId)
+      const newActionCards = currentPlayer.actionCards.filter((a) => a.instanceId !== actionInstanceId)
       const newActionsPlayed = current.actionsPlayedThisTurn + 1
       const newTurnConsumed = (current.turnActionsConsumed ?? 0) + 1
 
@@ -5693,6 +5720,17 @@ function AppInner() {
       handleCancelRemoveInvestorsSelect()
       clearedSelect = true
     }
+    if (discardPropertySelectMode.active || discardPropertyConfirmOpen) {
+      // Bots must spend the action (not cancel) or they re-play Discard Property Cards forever.
+      if (safeGameState.players[safeGameState.currentPlayerIndex]?.isAi === true) {
+        const bot = safeGameState.players[safeGameState.currentPlayerIndex]
+        handleConfirmDiscardProperty(pickAiDiscardPropertyIds(bot))
+        toast.success('Completed stuck Discard Property Cards for Founderbot.')
+        return
+      }
+      handleCancelDiscardPropertySelect()
+      clearedSelect = true
+    }
     if (rezoningMode.phase !== 'inactive') {
       handleCancelRezoning()
       clearedSelect = true
@@ -5833,6 +5871,7 @@ function AppInner() {
     handleCancelInvestmentSelect,
     handleCancelRemoveInvestorsSelect,
     handleCancelDiscardPropertySelect,
+    handleConfirmDiscardProperty,
     dismissTaxBuildPrompt: () => {
       taxPromptResumeRef.current = null
       setTaxBuildPrompt({
@@ -6419,14 +6458,19 @@ function AppInner() {
     if (discardPropertySelectMode.active) {
       return {
         id: 'dpc-pick',
-        title: 'Discard Property Cards — choose from hand',
-        detail:
-          'All property cards are highlighted. Tap to select (orange) or deselect. Confirm in the dialog to discard and draw replacements — or discard none and spend only the action.',
+        title: currentPlayer.isAi
+          ? 'Discard Property Cards — computer resolving'
+          : 'Discard Property Cards — choose from hand',
+        detail: currentPlayer.isAi
+          ? 'Founderbot is discarding from its own hand (not the host rail) — tap Unstick if this hangs.'
+          : 'All property cards are highlighted. Tap to select (orange) or deselect. Confirm in the dialog to discard and draw replacements — or discard none and spend only the action.',
         tone: 'info',
-        ctaLabel: 'Review / discard…',
-        onCta: () => setDiscardPropertyConfirmOpen(true),
-        cancelLabel: 'Cancel',
-        onCancel: handleCancelDiscardPropertySelect,
+        ctaLabel: currentPlayer.isAi ? 'Unstick' : 'Review / discard…',
+        onCta: currentPlayer.isAi
+          ? handleUnstickPlay
+          : () => setDiscardPropertyConfirmOpen(true),
+        cancelLabel: currentPlayer.isAi ? undefined : 'Cancel',
+        onCancel: currentPlayer.isAi ? undefined : handleCancelDiscardPropertySelect,
       }
     }
     if (taxBuildMode.phase === 'pick-property') {
@@ -7703,7 +7747,7 @@ function AppInner() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setDiscardPropertyConfirmOpen(false)}>Cancel</AlertDialogCancel>
-            <Button type="button" onClick={handleConfirmDiscardProperty}>
+            <Button type="button" onClick={() => handleConfirmDiscardProperty()}>
               Discard
             </Button>
           </AlertDialogFooter>

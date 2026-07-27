@@ -39,6 +39,11 @@ export interface SimpleAiTurnHandlers {
   handleCancelInvestmentSelect: () => void
   handleCancelRemoveInvestorsSelect: () => void
   handleCancelDiscardPropertySelect: () => void
+  /**
+   * Complete Discard Property Cards for the acting seat (bots must not wait on the host hand rail).
+   * Pass property instance ids to discard (may be empty — still spends the action).
+   */
+  handleConfirmDiscardProperty: (selectedPropertyInstanceIds?: string[]) => void
   /** Close Tax Dollars prompt panel (reject half-cost shortcut). */
   dismissTaxBuildPrompt: () => void
   cancelPlacement: () => void
@@ -100,6 +105,25 @@ function propertyEndValue(builtPropertyId: string | undefined): number {
   if (!builtPropertyId) return 0
   const card = propertyCards.find((c) => c.id === builtPropertyId) as PropertyCard | undefined
   return card?.endGameValue ?? card?.buildCost ?? 0
+}
+
+/** Prefer discarding cheap non-anchor excess when the hand is bloated; keep anchors. */
+export function pickAiDiscardPropertyIds(cp: Player): string[] {
+  const ranked = cp.propertyCards
+    .map((inst) => {
+      const c = propertyCards.find((pc) => pc.id === inst.cardId) as PropertyCard | undefined
+      if (!c || c.type === 'anchor') return null
+      return {
+        instanceId: inst.instanceId,
+        cost: c.buildCost ?? 99,
+        end: c.endGameValue ?? 0,
+      }
+    })
+    .filter(Boolean) as { instanceId: string; cost: number; end: number }[]
+  ranked.sort((a, b) => a.cost - b.cost || a.end - b.end)
+  const excess = Math.max(0, cp.propertyCards.length - 4)
+  const discardCount = Math.min(ranked.length, Math.max(excess > 0 ? 1 : 0, Math.min(excess, 3)))
+  return ranked.slice(0, discardCount).map((r) => r.instanceId)
 }
 
 /** $1M attempt + 120% of lot end value (Hostile Takeover buyout ceiling). */
@@ -414,7 +438,8 @@ function tryCompleteSelectMode(
   }
 
   if (ui.discardPropertySelectActive) {
-    h.handleCancelDiscardPropertySelect()
+    // Never cancel+replay — that loops forever and highlights the host's hand rail.
+    h.handleConfirmDiscardProperty(pickAiDiscardPropertyIds(cp))
     return true
   }
 
@@ -478,7 +503,8 @@ export function trySimpleAiMainPhase(
   }
 
   if (ui.discardPropertyConfirmOpen) {
-    h.handleCancelDiscardPropertySelect()
+    // Confirm whatever is selected (usually empty for bots) instead of cancel-looping.
+    h.handleConfirmDiscardProperty()
     return true
   }
 
