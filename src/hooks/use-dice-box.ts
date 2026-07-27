@@ -118,8 +118,8 @@ export function useDiceBox({ containerId, open }: UseDiceBoxOptions) {
     if (isRolling) return 0
 
     // No 3D renderer — resolve with a short pause so the result still reads as a roll.
+    // Never return 0: callers treat non-1–6 as "no roll", which freezes AI confrontation cards.
     if (!diceBoxRef.current || fallbackModeRef.current) {
-      if (!fallbackModeRef.current && !diceBoxRef.current) return 0
       setIsRolling(true)
       setDiceValue(null)
       await new Promise((r) => setTimeout(r, 650))

@@ -5,10 +5,18 @@ import { isCivicFlexHandCard } from '@/lib/civicFlexProperty'
 import { getAvailableCivicVariantIds } from '@/lib/lotCategory'
 import { resolvePropertyPlacementTemplate } from '@/lib/placementTemplate'
 import { getValidPlotsForProperty, getVacantCityLotsForRezoning } from '@/lib/placementRules'
-import { getHousingBuildCost, isHousingPropertyCard } from '@/lib/housingEconomics'
+import {
+  getHousingBuildCost,
+  getPlotPropertyEndValue,
+  isHousingPropertyCard,
+} from '@/lib/housingEconomics'
 import { turnLimitReached, MAX_TURN_ACTIONS, canAttemptRezoning } from '@/lib/turnActions'
 import { getInvestablePlots, getTakeoverTargetPlots } from '@/lib/investmentTargets'
-import { getPlotsEligibleForScandal, checkForNineSequentialProperties } from '@/lib/utils'
+import {
+  getPlotsEligibleForScandal,
+  checkForNineSequentialProperties,
+  totalRemoveInvestorsBuyoutMillion,
+} from '@/lib/utils'
 import { buildPlotIndex, getPlotAt } from '@/lib/boardIndex'
 
 /** Matches PlayerHand → GameApp.handlePlayCards options subset. */
@@ -18,6 +26,7 @@ export type AiPlayOptions = {
   housingHighDensity?: boolean
   wildCardEmulatePropertyId?: string
   taxBuildActionInstanceId?: string
+  councilFreezeTargetId?: number
 }
 
 export interface SimpleAiTurnHandlers {
@@ -46,6 +55,9 @@ export interface SimpleAiTurnHandlers {
    * placement). Bots must use this so confrontational moves resolve without the host clicking.
    */
   handleBoardPlotSelect: (row: number, col: string) => void
+  /** Rezoning hand / density steps (bots must complete these or they cancel-loop). */
+  handleRezoningPropertySelect: (propertyInstanceId: string) => void
+  handleRezoningHousingDensity: (highDensity: boolean) => void
 }
 
 export interface SimpleAiTurnUi {
@@ -88,6 +100,15 @@ function propertyEndValue(builtPropertyId: string | undefined): number {
   if (!builtPropertyId) return 0
   const card = propertyCards.find((c) => c.id === builtPropertyId) as PropertyCard | undefined
   return card?.endGameValue ?? card?.buildCost ?? 0
+}
+
+/** $1M attempt + 120% of lot end value (Hostile Takeover buyout ceiling). */
+function hostileTakeoverCashNeeded(plot: Plot): number {
+  const card = plot.builtProperty
+    ? (propertyCards.find((c) => c.id === plot.builtProperty) as PropertyCard | undefined)
+    : undefined
+  if (!card) return Number.POSITIVE_INFINITY
+  return 1 + Math.ceil(getPlotPropertyEndValue(plot, card) * 1.2)
 }
 
 function pickRichestHumanTarget(gs: GameState, selfId: number): Player | null {
@@ -155,7 +176,7 @@ function tryPlayConfrontation(
 
   const has = (id: string) => cp.actionCards.find((a) => a.cardId === id)
 
-  // City Council Freeze — freeze whoever is closest to ending the game.
+  // City Council Freeze — freeze whoever is closest to ending the game (must pass a target).
   const freeze = has('city-council-freeze')
   if (freeze && slotsLeft >= 1) {
     const rivals = gs.players.filter((p) => p.id !== cp.id)
@@ -163,15 +184,19 @@ function tryPlayConfrontation(
       (a, b) => endGameProximityScore(gs.plots, b.id) - endGameProximityScore(gs.plots, a.id)
     )[0]
     if (threat && endGameProximityScore(gs.plots, threat.id) >= 5) {
-      h.handlePlayCards(null, [freeze.instanceId], [], undefined)
+      h.handlePlayCards(null, [freeze.instanceId], [], {
+        councilFreezeTargetId: threat.id,
+      })
       return true
     }
   }
 
-  // Hostile Takeover — cash-advantaged vs valuable adjacent opponent lot.
+  // Hostile Takeover — only when at least one adjacent target is affordable.
   const takeover = has('hostile-takeover')
-  if (takeover && slotsLeft >= 1 && cp.money >= 8) {
-    const targets = getTakeoverTargetPlots(gs.plots, cp.id)
+  if (takeover && slotsLeft >= 1) {
+    const targets = getTakeoverTargetPlots(gs.plots, cp.id).filter(
+      (plot) => cp.money >= hostileTakeoverCashNeeded(plot)
+    )
     const scored = targets
       .map((plot) => {
         const value = propertyEndValue(plot.builtProperty)
@@ -254,13 +279,16 @@ function tryPlayConfrontation(
     }
   }
 
-  // Remove Investors — clear stripes on our own lots when we can afford payouts.
+  // Remove Investors — only when at least one own lot's buyouts are affordable.
   const removeInv = has('remove-investors')
   if (removeInv && slotsLeft >= 1) {
     const invested = gs.plots.filter(
       (p) => p.claimedBy === cp.id && (p.investmentStripes?.length ?? 0) > 0
     )
-    if (invested.length > 0 && cp.money >= 6) {
+    const affordable = invested.filter(
+      (p) => cp.money >= totalRemoveInvestorsBuyoutMillion(p.investmentStripes)
+    )
+    if (affordable.length > 0) {
       h.handlePlayCards(null, [removeInv.instanceId], [], undefined)
       return true
     }
@@ -285,11 +313,12 @@ function tryCompleteSelectMode(
   const valid = ui.selectValidPlots ?? []
 
   if (ui.takeoverSelectActive) {
-    if (valid.length === 0) {
+    const affordable = valid.filter((p) => cp.money >= hostileTakeoverCashNeeded(p))
+    if (affordable.length === 0) {
       h.handleCancelTakeoverSelect()
       return true
     }
-    const best = [...valid].sort(
+    const best = [...affordable].sort(
       (a, b) => propertyEndValue(b.builtProperty) - propertyEndValue(a.builtProperty)
     )[0]
     h.handleBoardPlotSelect(best.row, best.col)
@@ -326,11 +355,45 @@ function tryCompleteSelectMode(
   }
 
   if (ui.removeInvestorsSelectActive) {
-    if (valid.length === 0) {
+    const affordable = valid.filter(
+      (p) => cp.money >= totalRemoveInvestorsBuyoutMillion(p.investmentStripes)
+    )
+    if (affordable.length === 0) {
       h.handleCancelRemoveInvestorsSelect()
       return true
     }
-    h.handleBoardPlotSelect(valid[0].row, valid[0].col)
+    // Prefer cheapest buyout so cash-strapped bots clear something.
+    affordable.sort(
+      (a, b) =>
+        totalRemoveInvestorsBuyoutMillion(a.investmentStripes) -
+        totalRemoveInvestorsBuyoutMillion(b.investmentStripes)
+    )
+    h.handleBoardPlotSelect(affordable[0].row, affordable[0].col)
+    return true
+  }
+
+  if (ui.rezoningPhase === 'pick-property') {
+    const ranked = cp.propertyCards
+      .map((inst) => {
+        const c = propertyCards.find((pc) => pc.id === inst.cardId) as PropertyCard | undefined
+        if (!c || c.type === 'anchor') return null
+        const cost = getHousingBuildCost(c, false)
+        if (cp.money < cost) return null
+        return { inst, cost }
+      })
+      .filter(Boolean) as { inst: CardInstance; cost: number }[]
+    ranked.sort((a, b) => a.cost - b.cost)
+    if (ranked.length === 0) {
+      h.handleCancelRezoning()
+      return true
+    }
+    h.handleRezoningPropertySelect(ranked[0].inst.instanceId)
+    return true
+  }
+
+  if (ui.rezoningPhase === 'pick-housing-density') {
+    // Standard density is cheaper — prefer it so cash stays sufficient.
+    h.handleRezoningHousingDensity(false)
     return true
   }
 
@@ -346,7 +409,6 @@ function tryCompleteSelectMode(
   }
 
   if (ui.rezoningPhase !== 'inactive') {
-    // Density / property pick is UI-driven; cancel if stuck so the turn can progress.
     h.handleCancelRezoning()
     return true
   }

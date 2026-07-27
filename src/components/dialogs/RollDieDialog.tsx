@@ -160,8 +160,9 @@ function RollDieDialogInner({
 
   useEffect(() => {
     if (!open || !aiAutoplay || !councilFreezeFlow || !showCouncilFreezeIntro) return
-    const t = window.setTimeout(() => setShowCouncilFreezeIntro(false), 400)
-    return () => window.clearTimeout(t)
+    // Skip the human "Roll Die" intro immediately for bots — delayed dismiss raced with
+    // remounts and left City Council Freeze stuck on the intro / badge.
+    setShowCouncilFreezeIntro(false)
   }, [open, aiAutoplay, councilFreezeFlow, showCouncilFreezeIntro])
 
   /** Founderbots / AI: initiate the roll themselves — host never has to tap Roll. */
@@ -183,6 +184,32 @@ function RollDieDialogInner({
     diceValue,
     isReady,
     roll,
+  ])
+
+  /**
+   * Hard watchdog: if a bot roll never settles (WebGL hang, isReady stuck, onComplete not fired),
+   * synthesize a 1–6 and advance so the table cannot freeze on confrontation cards.
+   */
+  useEffect(() => {
+    if (!open || !aiAutoplay || councilFreezeFailAuto) return
+    if (diceValue !== null) return
+    const t = window.setTimeout(() => {
+      const forced = Math.floor(Math.random() * 6) + 1
+      if (mode === 'council-freeze-attacker') {
+        onAttackerDieSettled?.(forced)
+      }
+      onComplete(forced)
+    }, 5000)
+    return () => window.clearTimeout(t)
+  }, [
+    open,
+    aiAutoplay,
+    councilFreezeFailAuto,
+    diceValue,
+    mode,
+    onAttackerDieSettled,
+    onComplete,
+    diceRetryNonce,
   ])
 
   const councilFreezeIntroTitle =

@@ -6,8 +6,6 @@ import {
   useLayoutEffect,
   useRef,
   useCallback,
-  lazy,
-  Suspense,
   type CSSProperties,
   type ReactNode,
 } from 'react'
@@ -139,12 +137,10 @@ import { redactGameStateForGuestView } from '@/lib/partyBoardView'
 import { useOnlineBoardSync } from '@/lib/useOnlineBoardSync'
 import type { BoardFx, GameEvent } from '@/lib/onlineGameActions'
 
-// Statically imported in v2 (no SSR concerns in the Vite/Capacitor build).
+// Statically imported — dice/income dialogs are on the AI critical path; lazy+null Suspense
+// left the required-action badge up with no dialog (looked like a frozen "choose target" turn).
 import { IncomeDialog } from '@/components/dialogs/IncomeDialog'
-
-const RollDieDialog = lazy(() =>
-  import('@/components/dialogs/RollDieDialog').then((m) => ({ default: m.RollDieDialog }))
-)
+import { RollDieDialog } from '@/components/dialogs/RollDieDialog'
 
 type ActionCriteriaDialogState = {
   open: boolean
@@ -675,6 +671,8 @@ function AppInner() {
     handlePlayCards: () => {},
     handlePlotSelect: () => {},
     handleBoardPlotSelect: () => {},
+    handleRezoningPropertySelect: () => {},
+    handleRezoningHousingDensity: () => {},
   })
   const aiUiRef = useRef<SimpleAiTurnUi | null>(null)
 
@@ -1332,32 +1330,41 @@ function AppInner() {
       )
     }
 
+    // Offline solo / host-driven bots: host always owns AI defense rolls.
     const controlsDefender =
       defender?.isAi === true
-        ? partyBoardConfig?.role === 'host'
+        ? !partyBoardConfig || partyBoardConfig.role === 'host'
         : partyBoardSeatPlayer?.id === pending.targetPlayerId
     if (!controlsDefender) return
 
-    setRollDieDialogState((prev) =>
-      prev.open
-        ? prev
-        : {
-            open: true,
-            mode: 'council-freeze-defender',
-            actionInstanceId: REMOTE_COUNCIL_FREEZE_DEFENSE_ID,
-            targetPlayerId: pending.targetPlayerId,
-            influenceBonus: 0,
-            influenceLabels: [],
-            councilFreezeAttackerRollsCompleted: undefined,
-            councilFreezeAttackerLastNatural: undefined,
-            councilFreezeFailAuto: false,
-            diceRetryNonce: 0,
-            takeoverContext: undefined,
-            rezoningContext: undefined,
-            scandalContext: undefined,
-            removeInvestorsContext: undefined,
-          }
-    )
+    // Force the defender dialog even if an attacker dialog is still open — `prev.open ? prev`
+    // previously left City Council Freeze stuck on the badge with no usable roll UI.
+    setRollDieDialogState((prev) => {
+      if (
+        prev.open &&
+        prev.mode === 'council-freeze-defender' &&
+        prev.targetPlayerId === pending.targetPlayerId &&
+        prev.actionInstanceId === REMOTE_COUNCIL_FREEZE_DEFENSE_ID
+      ) {
+        return prev
+      }
+      return {
+        open: true,
+        mode: 'council-freeze-defender',
+        actionInstanceId: REMOTE_COUNCIL_FREEZE_DEFENSE_ID,
+        targetPlayerId: pending.targetPlayerId,
+        influenceBonus: 0,
+        influenceLabels: [],
+        councilFreezeAttackerRollsCompleted: undefined,
+        councilFreezeAttackerLastNatural: undefined,
+        councilFreezeFailAuto: false,
+        diceRetryNonce: 0,
+        takeoverContext: undefined,
+        rezoningContext: undefined,
+        scandalContext: undefined,
+        removeInvestorsContext: undefined,
+      }
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     pendingFreezeKey,
@@ -1417,7 +1424,7 @@ function AppInner() {
 
     const controlsDefender =
       defender?.isAi === true
-        ? partyBoardConfig?.role === 'host'
+        ? !partyBoardConfig || partyBoardConfig.role === 'host'
         : partyBoardSeatPlayer?.id === pending.targetPlayerId
     if (!controlsDefender) return
 
@@ -1428,26 +1435,32 @@ function AppInner() {
           ? 'hostile-takeover-defender'
           : 'police-raid-defender'
 
-    setRollDieDialogState((prev) =>
-      prev.open
-        ? prev
-        : {
-            open: true,
-            mode: defenderMode,
-            actionInstanceId: REMOTE_REBUTTAL_ROLL_ID,
-            targetPlayerId: pending.targetPlayerId,
-            influenceBonus: pending.policeRaidInfluenceBonus ?? 0,
-            influenceLabels: pending.policeRaidInfluenceLabels ?? [],
-            scandalContext: pending.scandalContext,
-            takeoverContext: pending.takeoverContext,
-            councilFreezeAttackerRollsCompleted: undefined,
-            councilFreezeAttackerLastNatural: undefined,
-            councilFreezeFailAuto: false,
-            diceRetryNonce: 0,
-            rezoningContext: undefined,
-            removeInvestorsContext: undefined,
-          }
-    )
+    setRollDieDialogState((prev) => {
+      if (
+        prev.open &&
+        prev.mode === defenderMode &&
+        prev.targetPlayerId === pending.targetPlayerId &&
+        prev.actionInstanceId === REMOTE_REBUTTAL_ROLL_ID
+      ) {
+        return prev
+      }
+      return {
+        open: true,
+        mode: defenderMode,
+        actionInstanceId: REMOTE_REBUTTAL_ROLL_ID,
+        targetPlayerId: pending.targetPlayerId,
+        influenceBonus: pending.policeRaidInfluenceBonus ?? 0,
+        influenceLabels: pending.policeRaidInfluenceLabels ?? [],
+        scandalContext: pending.scandalContext,
+        takeoverContext: pending.takeoverContext,
+        councilFreezeAttackerRollsCompleted: undefined,
+        councilFreezeAttackerLastNatural: undefined,
+        councilFreezeFailAuto: false,
+        diceRetryNonce: 0,
+        rezoningContext: undefined,
+        removeInvestorsContext: undefined,
+      }
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     pendingRebuttalKey,
@@ -1939,13 +1952,37 @@ function AppInner() {
       return
     }
 
+    let resolvedCouncilFreezeTargetId = options?.councilFreezeTargetId
     if (hasCouncilFreeze) {
-      const tid = options?.councilFreezeTargetId
-      if (tid == null) {
-        toast.error('Choose a target player for City Council Freeze.')
+      const actingForFreeze = safeGameState.players[cpIdx]
+      // Founderbots never wait on a human target picker — auto-pick the strongest threat.
+      if (resolvedCouncilFreezeTargetId == null && actingForFreeze.isAi === true) {
+        const rivals = safeGameState.players.filter((p) => p.id !== actingForFreeze.id)
+        const threat = [...rivals].sort((a, b) => {
+          const score = (id: number) =>
+            safeGameState.plots.filter((pl) => pl.claimedBy === id && pl.builtProperty).length
+          return score(b.id) - score(a.id)
+        })[0]
+        resolvedCouncilFreezeTargetId = threat?.id
+      }
+      if (resolvedCouncilFreezeTargetId == null) {
+        const freezeInst = actionInstanceIds[0]
+        const freezeCard = actionCards.find((c) => c.id === 'city-council-freeze')
+        if (freezeInst && freezeCard) {
+          setActionCriteriaDialog({
+            open: true,
+            actionInstanceId: freezeInst,
+            bankValue: freezeCard.bankValue,
+            cardName: freezeCard.name,
+            reasonDescription:
+              'Choose a target player for City Council Freeze, or bank this card and continue your turn.',
+          })
+        } else {
+          toast.error('Choose a target player for City Council Freeze.')
+        }
         return
       }
-      if (tid === safeGameState.players[cpIdx].id) {
+      if (resolvedCouncilFreezeTargetId === actingForFreeze.id) {
         toast.error('You cannot target yourself with City Council Freeze.')
         return
       }
@@ -1985,7 +2022,7 @@ function AppInner() {
       convertToCashInstanceIds.length === 0 &&
       !propertyInstanceId &&
       hasCouncilFreeze &&
-      options?.councilFreezeTargetId != null
+      resolvedCouncilFreezeTargetId != null
     ) {
       const instanceId = actionInstanceIds[0]
       const inst = safeGameState.players[cpIdx].actionCards.find((a) => a.instanceId === instanceId)
@@ -1994,7 +2031,7 @@ function AppInner() {
           toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
           return
         }
-        const freezeTarget = options.councilFreezeTargetId as number
+        const freezeTarget = resolvedCouncilFreezeTargetId
         const acting = safeGameState.players[cpIdx]
         const { bonus, ownedCivicLabels } = getCityCouncilFreezeAttackerInfluence(acting.id, safeGameState.plots)
         if (bonus > 0) {
@@ -2039,7 +2076,14 @@ function AppInner() {
         const contributionMillion =
           typeof ac.buildCost === 'number' ? ac.buildCost : ac.id === 'double-investment' ? 8 : 4
         if (safeGameState.players[cpIdx].money < contributionMillion) {
-          toast.error(`You need $${contributionMillion}M cash to play ${ac.name}.`)
+          // Bank / skip — do not hard-stop (AI and humans must be able to continue the turn).
+          setActionCriteriaDialog({
+            open: true,
+            actionInstanceId: actionInstanceIds[0],
+            bankValue: ac.bankValue,
+            cardName: ac.name,
+            reasonDescription: `You need $${contributionMillion}M cash to play ${ac.name}. Bank this card or continue your turn with another action.`,
+          })
           return
         }
         const validPlots = getInvestablePlots(safeGameState.plots, safeGameState.players[cpIdx].id)
@@ -2076,8 +2120,18 @@ function AppInner() {
           housingHighDensity: undefined,
           wildCardEmulatePropertyId: undefined,
         })
-        const validTakeoverPlots = getTakeoverTargetPlots(safeGameState.plots, safeGameState.players[cpIdx].id)
-        if (validTakeoverPlots.length === 0) {
+        const attacker = safeGameState.players[cpIdx]
+        const allTakeoverPlots = getTakeoverTargetPlots(safeGameState.plots, attacker.id)
+        // Only lots this founder can fund ($1M attempt + 120% buyout if they win).
+        const validTakeoverPlots = allTakeoverPlots.filter((tp) => {
+          const defCard = tp.builtProperty
+            ? (propertyCards.find((c) => c.id === tp.builtProperty) as PropertyCard | undefined)
+            : undefined
+          if (!defCard) return false
+          const cashNeeded = 1 + Math.ceil(getPlotPropertyEndValue(tp, defCard) * 1.2)
+          return attacker.money >= cashNeeded
+        })
+        if (allTakeoverPlots.length === 0) {
           setActionCriteriaDialog({
             open: true,
             actionInstanceId: actionInstanceIds[0],
@@ -2088,18 +2142,27 @@ function AppInner() {
           })
           return
         }
-        const attacker = safeGameState.players[cpIdx]
-        let maxCashNeeded = 1
-        for (const tp of validTakeoverPlots) {
-          const defCard = tp.builtProperty ? propertyCards.find((c) => c.id === tp.builtProperty) : undefined
-          if (!defCard) continue
-          const endVal = getPlotPropertyEndValue(tp, defCard)
-          maxCashNeeded = Math.max(maxCashNeeded, 1 + Math.ceil(endVal * 1.2))
-        }
-        if (attacker.money < maxCashNeeded) {
-          toast.error(
-            `You need at least $${maxCashNeeded}M cash ($1M attempt plus up to 120% of a target lot's end value) to play Hostile Takeover.`
-          )
+        if (validTakeoverPlots.length === 0) {
+          // Do not hard-stop the turn — bank / skip so AI and humans can continue.
+          let minCashNeeded = Number.POSITIVE_INFINITY
+          for (const tp of allTakeoverPlots) {
+            const defCard = tp.builtProperty
+              ? (propertyCards.find((c) => c.id === tp.builtProperty) as PropertyCard | undefined)
+              : undefined
+            if (!defCard) continue
+            minCashNeeded = Math.min(
+              minCashNeeded,
+              1 + Math.ceil(getPlotPropertyEndValue(tp, defCard) * 1.2)
+            )
+          }
+          const needLabel = Number.isFinite(minCashNeeded) ? minCashNeeded : 16
+          setActionCriteriaDialog({
+            open: true,
+            actionInstanceId: actionInstanceIds[0],
+            bankValue: ac.bankValue,
+            cardName: ac.name,
+            reasonDescription: `You need at least $${needLabel}M cash ($1M attempt plus up to 120% of a target lot's end value) to play Hostile Takeover. Bank this card or continue your turn with another action.`,
+          })
           return
         }
         if (turnLimitReached(safeGameState.turnActionsConsumed)) {
@@ -2215,12 +2278,16 @@ function AppInner() {
           housingHighDensity: undefined,
           wildCardEmulatePropertyId: undefined,
         })
+        const ownerCash = safeGameState.players[cpIdx].money
         const myInvestedPlots = safeGameState.plots.filter(
           (p) =>
             p.claimedBy === safeGameState.players[cpIdx].id &&
             p.builtProperty &&
             Array.isArray(p.investmentStripes) &&
             p.investmentStripes.length > 0
+        )
+        const affordableInvestedPlots = myInvestedPlots.filter(
+          (p) => ownerCash >= totalRemoveInvestorsBuyoutMillion(p.investmentStripes)
         )
         if (myInvestedPlots.length === 0) {
           setActionCriteriaDialog({
@@ -2233,13 +2300,26 @@ function AppInner() {
           })
           return
         }
+        if (affordableInvestedPlots.length === 0) {
+          const minBuyout = Math.min(
+            ...myInvestedPlots.map((p) => totalRemoveInvestorsBuyoutMillion(p.investmentStripes))
+          )
+          setActionCriteriaDialog({
+            open: true,
+            actionInstanceId: actionInstanceIds[0],
+            bankValue: ac.bankValue,
+            cardName: ac.name,
+            reasonDescription: `You need at least $${minBuyout}M cash to cover mandatory 50% investor buyouts. Bank this card or continue your turn with another action.`,
+          })
+          return
+        }
         if (turnLimitReached(safeGameState.turnActionsConsumed)) {
           toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
           return
         }
         setRemoveInvestorsSelectMode({
           active: true,
-          validPlots: myInvestedPlots,
+          validPlots: affordableInvestedPlots,
           actionInstanceId: actionInstanceIds[0],
         })
         toast.info(
@@ -2255,28 +2335,57 @@ function AppInner() {
           wildCardEmulatePropertyId: undefined,
         })
         if (safeGameState.propertiesBuiltThisTurn >= 1) {
-          toast.error(
-            'You already built a property this turn. Successful Rezoning includes a build — play it before you build from your hand.'
-          )
+          setActionCriteriaDialog({
+            open: true,
+            actionInstanceId: actionInstanceIds[0],
+            bankValue: ac.bankValue,
+            cardName: ac.name,
+            reasonDescription:
+              'You already built a property this turn. Successful Rezoning includes a build — bank this card or play it before you build from your hand on a later turn.',
+          })
           return
         }
         const acting = safeGameState.players[cpIdx]
-        const hasTemplate = acting.propertyCards.some((pi) => {
+        const affordableTemplate = acting.propertyCards.find((pi) => {
           const c = propertyCards.find((x) => x.id === pi.cardId) as PropertyCard | undefined
-          return c != null && c.type !== 'anchor'
+          if (!c || c.type === 'anchor') return false
+          return acting.money >= getHousingBuildCost(c, false)
         })
-        if (!hasTemplate) {
-          toast.error('You need at least one non-anchor property card in your hand to use Rezoning.')
+        if (!affordableTemplate) {
+          const hasAnyTemplate = acting.propertyCards.some((pi) => {
+            const c = propertyCards.find((x) => x.id === pi.cardId) as PropertyCard | undefined
+            return c != null && c.type !== 'anchor'
+          })
+          setActionCriteriaDialog({
+            open: true,
+            actionInstanceId: actionInstanceIds[0],
+            bankValue: ac.bankValue,
+            cardName: ac.name,
+            reasonDescription: hasAnyTemplate
+              ? 'You do not have enough cash to complete a rezoning build with any non-anchor property in your hand. Bank this card or continue your turn with another action.'
+              : 'You need at least one non-anchor property card in your hand to use Rezoning. Bank this card or continue your turn.',
+          })
           return
         }
         if (getVacantCityLotsForRezoning(safeGameState.plots).length === 0) {
-          toast.error('No vacant city lots are available — Rezoning cannot be used right now.')
+          setActionCriteriaDialog({
+            open: true,
+            actionInstanceId: actionInstanceIds[0],
+            bankValue: ac.bankValue,
+            cardName: ac.name,
+            reasonDescription:
+              'No vacant city lots are available — Rezoning cannot be used right now. Bank this card or continue your turn.',
+          })
           return
         }
         if (!canAttemptRezoning(safeGameState.turnActionsConsumed)) {
-          toast.error(
-            `Successful Rezoning uses ${REZONING_SUCCESS_ACTION_COST} actions (the roll + the build). You need at least ${REZONING_SUCCESS_ACTION_COST} actions left this turn.`
-          )
+          setActionCriteriaDialog({
+            open: true,
+            actionInstanceId: actionInstanceIds[0],
+            bankValue: ac.bankValue,
+            cardName: ac.name,
+            reasonDescription: `Successful Rezoning uses ${REZONING_SUCCESS_ACTION_COST} actions (the roll + the build). You need at least ${REZONING_SUCCESS_ACTION_COST} actions left this turn. Bank this card or End Turn.`,
+          })
           return
         }
         setRezoningMode({ phase: 'pick-property', actionInstanceId: actionInstanceIds[0] })
@@ -2295,7 +2404,14 @@ function AppInner() {
         })
         const hasProperty = safeGameState.players[cpIdx].propertyCards.length > 0
         if (!hasProperty) {
-          toast.error('You need at least one property card in your hand to use Build with Tax Dollars.')
+          setActionCriteriaDialog({
+            open: true,
+            actionInstanceId: actionInstanceIds[0],
+            bankValue: ac.bankValue,
+            cardName: ac.name,
+            reasonDescription:
+              'You need at least one property card in your hand to use Build with Tax Dollars. Bank this card or continue your turn.',
+          })
           return
         }
         setTaxBuildMode({ phase: 'pick-property', actionInstanceId: actionInstanceIds[0] })
@@ -2730,6 +2846,22 @@ function AppInner() {
       })
       if (!result.ok) {
         toast.error(result.error)
+        // Clear placement on hard fails so AI/human turns cannot freeze in build-select.
+        if (
+          result.code === 'insufficient_funds' ||
+          result.code === 'council_freeze' ||
+          result.code === 'build_limit' ||
+          result.code === 'turn_limit' ||
+          result.code === 'missing_card'
+        ) {
+          setPlacementMode({
+            active: false,
+            propertyCardId: null,
+            housingHighDensity: undefined,
+            taxBuildActionInstanceId: undefined,
+            wildCardEmulatePropertyId: undefined,
+          })
+        }
         return current
       }
       for (const ev of result.events) {
@@ -3246,6 +3378,23 @@ function AppInner() {
       toast.error('Pick one of your own highlighted properties that has investors.')
       return
     }
+    const plotPreview = safeGameState.plots.find((p) => p.row === row && p.col === col)
+    const ownerPreview = safeGameState.players[safeGameState.currentPlayerIndex]
+    if (
+      !plotPreview ||
+      plotPreview.claimedBy !== ownerPreview.id ||
+      !plotPreview.investmentStripes?.length
+    ) {
+      return
+    }
+    const buyoutPreview = totalRemoveInvestorsBuyoutMillion(plotPreview.investmentStripes)
+    if (ownerPreview.money < buyoutPreview) {
+      setRemoveInvestorsSelectMode({ active: false, validPlots: [], actionInstanceId: null })
+      toast.error(
+        `Need $${buyoutPreview}M for mandatory 50% buyouts on ${col}${row} — Remove Investors cancelled. Continue your turn or End Turn.`
+      )
+      return
+    }
     patchGameState((current) => {
       const cpIdx = current.currentPlayerIndex
       const ownerId = current.players[cpIdx].id
@@ -3255,6 +3404,7 @@ function AppInner() {
       const buyoutNeeded = totalRemoveInvestorsBuyoutMillion(plot.investmentStripes)
       const owner = current.players[cpIdx]
       if (owner.money < buyoutNeeded) {
+        setRemoveInvestorsSelectMode({ active: false, validPlots: [], actionInstanceId: null })
         toast.error(
           `You need at least $${buyoutNeeded}M to cover mandatory 50% payouts to every investor on ${col}${row}.`
         )
@@ -3426,7 +3576,10 @@ function AppInner() {
     const highDensity = m.housingHighDensity === true && isHousingPropertyCard(card)
     const buildCost = getHousingBuildCost(card, highDensity)
     if (player.money < buildCost) {
-      toast.error(`You need $${buildCost}M to complete this build if the roll succeeds.`)
+      setRezoningMode({ phase: 'inactive' })
+      toast.error(
+        `Need $${buildCost}M to complete this build if the roll succeeds — Rezoning cancelled. Continue your turn or End Turn.`
+      )
       return
     }
     const { bonus, labels } = getAnchorInfluenceForAction(
@@ -3488,8 +3641,9 @@ function AppInner() {
     const payment120 = Math.ceil(getPlotPropertyEndValue(plotPrev, propertyCard) * 1.2)
     const minCash = 1 + payment120
     if (attackerPreview.money < minCash) {
+      setTakeoverSelectMode({ active: false, validPlots: [], actionInstanceId: null })
       toast.error(
-        `You need at least $${minCash}M ($1M to the owner now, plus $${payment120}M if you win the rolls) to target this property.`
+        `Need $${minCash}M ($1M now + $${payment120}M if you win) for that lot — Hostile Takeover cancelled. Continue your turn or End Turn.`
       )
       return
     }
@@ -5511,6 +5665,152 @@ function AppInner() {
     toast.info('Dice roll cancelled.')
   }
 
+  /**
+   * In-table recovery without Leave/Resume. Clears stuck select modes, force-resolves
+   * computer dice (City Council Freeze / Scandal / Takeover / etc.), and nudges Founderbots.
+   */
+  const handleUnstickPlay = () => {
+    const canDriveBots = !partyBoardConfig || partyBoardConfig.role === 'host'
+    if (!canDriveBots) {
+      toast.info('Ask the host to tap Unstick, or use Resync if the connection looks stale.')
+      return
+    }
+
+    let clearedSelect = false
+    if (takeoverSelectMode.active) {
+      handleCancelTakeoverSelect()
+      clearedSelect = true
+    }
+    if (scandalSelectMode.active) {
+      handleCancelScandalSelect()
+      clearedSelect = true
+    }
+    if (investmentSelectMode.active) {
+      handleCancelInvestmentSelect()
+      clearedSelect = true
+    }
+    if (removeInvestorsSelectMode.active) {
+      handleCancelRemoveInvestorsSelect()
+      clearedSelect = true
+    }
+    if (rezoningMode.phase !== 'inactive') {
+      handleCancelRezoning()
+      clearedSelect = true
+    }
+    if (placementMode.active) {
+      setPlacementMode({
+        active: false,
+        propertyCardId: null,
+        housingHighDensity: undefined,
+        taxBuildActionInstanceId: undefined,
+        wildCardEmulatePropertyId: undefined,
+      })
+      clearedSelect = true
+    }
+    if (actionCriteriaDialog.open) {
+      handleActionCriteriaBank()
+      toast.success('Banked the stuck action card — play continues.')
+      return
+    }
+
+    const rd = rollDieDialogStateRef.current
+    const acting = safeGameState.players[safeGameState.currentPlayerIndex]
+    if (rd.open && rollSeatIsAi(safeGameState, rd, acting)) {
+      const forced = Math.floor(Math.random() * 6) + 1
+      handleRollDieComplete(forced)
+      toast.success('Forced computer dice resolution — play continues.')
+      return
+    }
+
+    const pendingFreeze = safeGameState.pendingCouncilFreezeDefense
+    if (pendingFreeze) {
+      const defender = safeGameState.players.find((p) => p.id === pendingFreeze.targetPlayerId)
+      if (defender?.isAi === true) {
+        setRollDieDialogState({
+          open: true,
+          mode: 'council-freeze-defender',
+          actionInstanceId: REMOTE_COUNCIL_FREEZE_DEFENSE_ID,
+          targetPlayerId: pendingFreeze.targetPlayerId,
+          influenceBonus: 0,
+          influenceLabels: [],
+          councilFreezeAttackerRollsCompleted: undefined,
+          councilFreezeAttackerLastNatural: undefined,
+          councilFreezeFailAuto: false,
+          diceRetryNonce: 0,
+          takeoverContext: undefined,
+          rezoningContext: undefined,
+          scandalContext: undefined,
+          removeInvestorsContext: undefined,
+        })
+        window.setTimeout(() => {
+          handleRollDieComplete(Math.floor(Math.random() * 6) + 1)
+        }, 120)
+        toast.success('Resumed computer City Council Freeze defense.')
+        return
+      }
+    }
+
+    const pendingReb = safeGameState.pendingRebuttalRoll
+    if (pendingReb) {
+      const defender = safeGameState.players.find((p) => p.id === pendingReb.targetPlayerId)
+      if (defender?.isAi === true) {
+        const defenderMode =
+          pendingReb.kind === 'scandal'
+            ? 'scandal-defender'
+            : pendingReb.kind === 'hostile-takeover'
+              ? 'hostile-takeover-defender'
+              : 'police-raid-defender'
+        setRollDieDialogState({
+          open: true,
+          mode: defenderMode,
+          actionInstanceId: REMOTE_REBUTTAL_ROLL_ID,
+          targetPlayerId: pendingReb.targetPlayerId,
+          influenceBonus: pendingReb.policeRaidInfluenceBonus ?? 0,
+          influenceLabels: pendingReb.policeRaidInfluenceLabels ?? [],
+          scandalContext: pendingReb.scandalContext,
+          takeoverContext: pendingReb.takeoverContext,
+          councilFreezeAttackerRollsCompleted: undefined,
+          councilFreezeAttackerLastNatural: undefined,
+          councilFreezeFailAuto: false,
+          diceRetryNonce: 0,
+          rezoningContext: undefined,
+          removeInvestorsContext: undefined,
+        })
+        window.setTimeout(() => {
+          handleRollDieComplete(Math.floor(Math.random() * 6) + 1)
+        }, 120)
+        toast.success('Resumed computer defense roll.')
+        return
+      }
+    }
+
+    if (acting?.isAi === true) {
+      window.setTimeout(() => {
+        const gsSnap = aiGsRef.current
+        const cpSnap = aiCpRef.current
+        const ui = aiUiRef.current
+        const hx = aiHooksRef.current
+        if (ui && gsSnap && cpSnap?.isAi) {
+          trySimpleAiMainPhase(gsSnap, cpSnap, ui, hx)
+        }
+      }, 50)
+      toast.success(clearedSelect ? 'Cleared stuck selection and nudged Founderbot.' : 'Nudged Founderbot to continue.')
+      return
+    }
+
+    if (clearedSelect) {
+      toast.success('Cleared stuck board selection — continue your turn.')
+      return
+    }
+
+    if (rd.open) {
+      toast.info('A human die roll is waiting — use the dice dialog (or Roll Die on the intro).')
+      return
+    }
+
+    toast.info('Nothing obvious was stuck. If the table still feels frozen, try Unstick again in a moment.')
+  }
+
   const setupReady =
     safeGameState.isSetupComplete &&
     Array.isArray(safeGameState.players) &&
@@ -5556,6 +5856,8 @@ function AppInner() {
     handlePlotSelect,
     /** Same routing as a human board click — required so bots finish investment/takeover/etc. */
     handleBoardPlotSelect: handlePlotClaim,
+    handleRezoningPropertySelect: handleRezoningPropertyFromHand,
+    handleRezoningHousingDensity,
   }
   aiUiRef.current = {
     undoActionDialogOpen,
@@ -5820,108 +6122,173 @@ function AppInner() {
         rollDieDialogState.targetPlayerId != null
           ? safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.name
           : undefined
+      const aiDiceCta = rollDieAiAutoplay
+        ? {
+            ctaLabel: 'Unstick',
+            onCta: handleUnstickPlay,
+            detailSuffix: ' Computer is resolving — tap Unstick if this hangs.',
+          }
+        : { ctaLabel: 'Roll in dialog', onCta: undefined as (() => void) | undefined, detailSuffix: '' }
       switch (rollDieDialogState.mode) {
         case 'council-freeze-attacker':
           return {
             id: 'cf-att',
-            title: 'City Council Freeze — your roll',
+            title: rollDieAiAutoplay
+              ? 'City Council Freeze — computer rolling'
+              : 'City Council Freeze — your roll',
             detail:
-              'Roll the die in the dialog. First roll free; each retry costs $5M. After 3 misses the freeze fails.',
+              (rollDieAiAutoplay
+                ? 'Founderbot is rolling City Council Freeze.'
+                : 'Roll the die in the dialog. First roll free; each retry costs $5M. After 3 misses the freeze fails.') +
+              aiDiceCta.detailSuffix,
             tone: 'danger',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
         case 'council-freeze-defender':
           return {
             id: 'cf-def',
             title: `City Council Freeze — ${defenderName ?? 'defender'} rolls`,
-            detail: 'Defender rolls once in the dialog. Only a 6 negates the freeze.',
+            detail:
+              (rollDieAiAutoplay
+                ? `${defenderName ?? 'Computer'} is rolling to negate the freeze.`
+                : 'Defender rolls once in the dialog. Only a 6 negates the freeze.') +
+              aiDiceCta.detailSuffix,
             tone: 'danger',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
         case 'hostile-takeover-attacker':
           return {
             id: 'ht-att',
-            title: 'Hostile Takeover — your roll',
+            title: rollDieAiAutoplay
+              ? 'Hostile Takeover — computer rolling'
+              : 'Hostile Takeover — your roll',
             detail:
-              '$1M attempt fee paid. Roll the die in the dialog — 5–6 succeeds. There is no exit until you roll.',
+              (rollDieAiAutoplay
+                ? 'Founderbot is resolving Hostile Takeover.'
+                : '$1M attempt fee paid. Roll the die in the dialog — 5–6 succeeds. There is no exit until you roll.') +
+              aiDiceCta.detailSuffix,
             tone: 'danger',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
         case 'hostile-takeover-defender':
           return {
             id: 'ht-def',
             title: `Hostile Takeover — ${defenderName ?? 'owner'} rolls`,
-            detail: 'Owner rolls once. Only a 6 blocks the takeover.',
+            detail:
+              (rollDieAiAutoplay
+                ? `${defenderName ?? 'Computer'} is rolling the defense.`
+                : 'Owner rolls once. Only a 6 blocks the takeover.') + aiDiceCta.detailSuffix,
             tone: 'danger',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
         case 'scandal-attacker':
           return {
             id: 'sc-att',
-            title: 'Scandal — your roll',
-            detail: 'Roll in the dialog. Total 6+ after Influencer / News Outlet bonuses succeeds.',
+            title: rollDieAiAutoplay ? 'Scandal — computer rolling' : 'Scandal — your roll',
+            detail:
+              (rollDieAiAutoplay
+                ? 'Founderbot is resolving Scandal.'
+                : 'Roll in the dialog. Total 6+ after Influencer / News Outlet bonuses succeeds.') +
+              aiDiceCta.detailSuffix,
             tone: 'warning',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
         case 'scandal-defender':
           return {
             id: 'sc-def',
             title: `Scandal — ${defenderName ?? 'anchor owner'} rolls`,
-            detail: 'Anchor owner rolls once. Only a 6 negates the scandal.',
+            detail:
+              (rollDieAiAutoplay
+                ? `${defenderName ?? 'Computer'} is rolling the defense.`
+                : 'Anchor owner rolls once. Only a 6 negates the scandal.') + aiDiceCta.detailSuffix,
             tone: 'warning',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
         case 'rezoning':
           return {
             id: 'rz-roll',
-            title: 'Rezoning — roll required',
-            detail: 'Roll in the dialog. 5–6 approves (4–6 with +1 civic influence).',
+            title: rollDieAiAutoplay ? 'Rezoning — computer rolling' : 'Rezoning — roll required',
+            detail:
+              (rollDieAiAutoplay
+                ? 'Founderbot is rolling for Rezoning approval.'
+                : 'Roll in the dialog. 5–6 approves (4–6 with +1 civic influence).') +
+              aiDiceCta.detailSuffix,
             tone: 'warning',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
         case 'police-raid-attacker':
           return {
             id: 'pr-att',
-            title: 'Police Raid on Mafia — your roll',
-            detail: 'Roll in the dialog. 5–6 succeeds (4–6 if you own a built Police lot).',
+            title: rollDieAiAutoplay
+              ? 'Police Raid — computer rolling'
+              : 'Police Raid on Mafia — your roll',
+            detail:
+              (rollDieAiAutoplay
+                ? 'Founderbot is resolving Police Raid on Mafia.'
+                : 'Roll in the dialog. 5–6 succeeds (4–6 if you own a built Police lot).') +
+              aiDiceCta.detailSuffix,
             tone: 'danger',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
         case 'police-raid-defender':
           return {
             id: 'pr-def',
             title: 'Police Raid on Mafia — Mafia counter roll',
-            detail: 'Mafia rolls once. A 6 counters (5–6 if you own Police).',
+            detail:
+              (rollDieAiAutoplay
+                ? 'Computer is rolling the Mafia counter.'
+                : 'Mafia rolls once. A 6 counters (5–6 if you own Police).') + aiDiceCta.detailSuffix,
             tone: 'danger',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
         case 'remove-investors':
           return {
             id: 'ri',
-            title: 'Remove Investors — roll required',
+            title: rollDieAiAutoplay
+              ? 'Remove Investors — computer rolling'
+              : 'Remove Investors — roll required',
             detail:
-              'Roll in the dialog. Total 5+ includes block anchor and civic influence. No investor counter-roll. On success pay each investor 50% of their stake; all stripes on that lot clear.',
+              (rollDieAiAutoplay
+                ? 'Founderbot is rolling to clear investors.'
+                : 'Roll in the dialog. Total 5+ includes block anchor and civic influence. No investor counter-roll. On success pay each investor 50% of their stake; all stripes on that lot clear.') +
+              aiDiceCta.detailSuffix,
             tone: 'warning',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
         case 'roll-die':
           return {
             id: 'roll-die',
             title: 'Roll required',
-            detail: 'Roll the die in the dialog to continue.',
+            detail: 'Roll the die in the dialog to continue.' + aiDiceCta.detailSuffix,
             tone: 'info',
-            ctaLabel: 'Roll in dialog',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
           }
       }
     }
     if (safeGameState.pendingCouncilFreezeDefense) {
       const pending = safeGameState.pendingCouncilFreezeDefense
+      const pendingDefAi =
+        safeGameState.players.find((p) => p.id === pending.targetPlayerId)?.isAi === true
       return {
         id: 'cf-def-wait',
         title: `City Council Freeze — ${pending.targetName} is rolling`,
-        detail: `${pending.attackerName}'s freeze succeeded. ${pending.targetName} rolls on their own screen — only a 6 negates it.`,
+        detail: pendingDefAi
+          ? `${pending.attackerName}'s freeze succeeded. ${pending.targetName} (computer) should auto-roll — tap Unstick if this hangs.`
+          : `${pending.attackerName}'s freeze succeeded. ${pending.targetName} rolls on their own screen — only a 6 negates it.`,
         tone: 'danger',
-        ctaLabel: 'Waiting for their roll',
+        ctaLabel: pendingDefAi ? 'Unstick' : 'Waiting for their roll',
+        onCta: pendingDefAi ? handleUnstickPlay : undefined,
       }
     }
     if (safeGameState.pendingRebuttalRoll) {
@@ -5932,12 +6299,17 @@ function AppInner() {
           : pending.kind === 'hostile-takeover'
             ? 'Hostile Takeover'
             : 'Police Raid on Mafia'
+      const pendingDefAi =
+        safeGameState.players.find((p) => p.id === pending.targetPlayerId)?.isAi === true
       return {
         id: 'rebuttal-wait',
         title: `${kindTitle} — ${pending.targetName} is rolling`,
-        detail: `${pending.attackerName}'s play succeeded. ${pending.targetName} rolls on their own screen.`,
+        detail: pendingDefAi
+          ? `${pending.attackerName}'s play succeeded. ${pending.targetName} (computer) should auto-roll — tap Unstick if this hangs.`
+          : `${pending.attackerName}'s play succeeded. ${pending.targetName} rolls on their own screen.`,
         tone: 'danger',
-        ctaLabel: 'Waiting for their roll',
+        ctaLabel: pendingDefAi ? 'Unstick' : 'Waiting for their roll',
+        onCta: pendingDefAi ? handleUnstickPlay : undefined,
       }
     }
     if (incomeDialogState.open) {
@@ -5983,43 +6355,65 @@ function AppInner() {
     if (takeoverSelectMode.active) {
       return {
         id: 'ht-pick',
-        title: 'Hostile Takeover — pick a target',
-        detail:
-          'Click a highlighted opponent property on the board (same city block or orthogonal to your built lots, including across a street).',
+        title: currentPlayer.isAi
+          ? 'Hostile Takeover — computer choosing target'
+          : 'Hostile Takeover — pick a target',
+        detail: currentPlayer.isAi
+          ? 'Founderbot should select a highlighted lot — tap Unstick if this hangs.'
+          : 'Click a highlighted opponent property on the board (same city block or orthogonal to your built lots, including across a street).',
         tone: 'danger',
-        cancelLabel: 'Cancel Takeover',
-        onCancel: handleCancelTakeoverSelect,
+        ctaLabel: currentPlayer.isAi ? 'Unstick' : undefined,
+        onCta: currentPlayer.isAi ? handleUnstickPlay : undefined,
+        cancelLabel: currentPlayer.isAi ? undefined : 'Cancel Takeover',
+        onCancel: currentPlayer.isAi ? undefined : handleCancelTakeoverSelect,
       }
     }
     if (scandalSelectMode.active) {
       return {
         id: 'sc-pick',
-        title: 'Scandal — pick an anchor target',
-        detail: 'Click a highlighted built anchor tenant on the board to scandalize.',
+        title: currentPlayer.isAi
+          ? 'Scandal — computer choosing target'
+          : 'Scandal — pick an anchor target',
+        detail: currentPlayer.isAi
+          ? 'Founderbot should select a highlighted anchor — tap Unstick if this hangs.'
+          : 'Click a highlighted built anchor tenant on the board to scandalize.',
         tone: 'warning',
-        cancelLabel: 'Cancel Scandal',
-        onCancel: handleCancelScandalSelect,
+        ctaLabel: currentPlayer.isAi ? 'Unstick' : undefined,
+        onCta: currentPlayer.isAi ? handleUnstickPlay : undefined,
+        cancelLabel: currentPlayer.isAi ? undefined : 'Cancel Scandal',
+        onCancel: currentPlayer.isAi ? undefined : handleCancelScandalSelect,
       }
     }
     if (removeInvestorsSelectMode.active) {
       return {
         id: 'ri-pick',
-        title: 'Remove Investors — pick your property',
-        detail:
-          'Click a highlighted lot you own that still has investor stripes. Multiple investors on one lot are cleared together if you succeed. You must be able to afford the combined 50% buyouts before the roll.',
+        title: currentPlayer.isAi
+          ? 'Remove Investors — computer choosing lot'
+          : 'Remove Investors — pick your property',
+        detail: currentPlayer.isAi
+          ? 'Founderbot should pick an invested lot — tap Unstick if this hangs.'
+          : 'Click a highlighted lot you own that still has investor stripes. Multiple investors on one lot are cleared together if you succeed. You must be able to afford the combined 50% buyouts before the roll.',
         tone: 'warning',
-        cancelLabel: 'Cancel',
-        onCancel: handleCancelRemoveInvestorsSelect,
+        ctaLabel: currentPlayer.isAi ? 'Unstick' : undefined,
+        onCta: currentPlayer.isAi ? handleUnstickPlay : undefined,
+        cancelLabel: currentPlayer.isAi ? undefined : 'Cancel',
+        onCancel: currentPlayer.isAi ? undefined : handleCancelRemoveInvestorsSelect,
       }
     }
     if (investmentSelectMode.active) {
       return {
         id: 'inv-pick',
-        title: 'Investment — pick a target',
-        detail: 'Click a highlighted opponent property on the board to invest in it.',
+        title: currentPlayer.isAi
+          ? 'Investment — computer choosing target'
+          : 'Investment — pick a target',
+        detail: currentPlayer.isAi
+          ? 'Founderbot should select a highlighted lot — tap Unstick if this hangs.'
+          : 'Click a highlighted opponent property on the board to invest in it.',
         tone: 'info',
-        cancelLabel: 'Cancel Investment',
-        onCancel: handleCancelInvestmentSelect,
+        ctaLabel: currentPlayer.isAi ? 'Unstick' : undefined,
+        onCta: currentPlayer.isAi ? handleUnstickPlay : undefined,
+        cancelLabel: currentPlayer.isAi ? undefined : 'Cancel Investment',
+        onCancel: currentPlayer.isAi ? undefined : handleCancelInvestmentSelect,
       }
     }
     if (discardPropertySelectMode.active) {
@@ -6380,6 +6774,28 @@ function AppInner() {
             }}
           >
             End Turn
+          </button>
+          <button
+            type="button"
+            onClick={handleUnstickPlay}
+            data-board-sync-skip-lock
+            disabled={isSpectator || showOpeningProTip}
+            className="btn-ps"
+            title="Clear a stuck Founderbot or confrontation roll without leaving the table"
+            style={{
+              height: isCompactLayout ? 30 : 34,
+              padding: isCompactLayout ? '0 12px' : '0 16px',
+              borderRadius: 9999,
+              border: '1px solid rgba(251, 191, 36, 0.45)',
+              backgroundColor: 'rgba(251, 191, 36, 0.12)',
+              color: '#fde68a',
+              fontSize: isCompactLayout ? 11 : 12,
+              fontWeight: 600,
+              cursor: isSpectator || showOpeningProTip ? 'not-allowed' : 'pointer',
+              opacity: isSpectator || showOpeningProTip ? 0.45 : 1,
+            }}
+          >
+            Unstick
           </button>
           <button
             onClick={handleNewGame}
@@ -7104,7 +7520,6 @@ function AppInner() {
         />
       )}
       {rollDieDialogState.open && (
-        <Suspense fallback={null}>
           <RollDieDialog
             key={`${rollDieDialogState.mode}-${rollDieDialogState.actionInstanceId ?? ''}`}
             open={rollDieDialogState.open}
@@ -7143,7 +7558,6 @@ function AppInner() {
             scandalSummary={scandalSummaryForDialog}
             aiAutoplay={rollDieAiAutoplay}
           />
-        </Suspense>
       )}
       <AlertDialog
         open={taxBuildPrompt.open}
