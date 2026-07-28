@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useRef,
   useCallback,
+  useMemo,
   type CSSProperties,
   type ReactNode,
 } from 'react'
@@ -654,6 +655,7 @@ function AppInner() {
   const rollDieDialogStateRef = useRef(rollDieDialogState)
   rollDieDialogStateRef.current = rollDieDialogState
 
+  const renderTickRef = useRef(0)
   const aiGsRef = useRef<GameState | null>(null)
   const aiCpRef = useRef<Player | null>(null)
   const aiHooksRef = useRef<SimpleAiTurnHandlers>({
@@ -764,7 +766,7 @@ function AppInner() {
 
   const [boardNotice, setBoardNotice] = useState<{ title: ReactNode; detail?: string } | null>(null)
   const boardNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const showBoardNotice = useCallback((title: ReactNode, detail?: string) => {
+  const showBoardNotice = useCallback((title: ReactNode, detail?: string, opts?: { quick?: boolean }) => {
     if (boardNoticeTimerRef.current) {
       clearTimeout(boardNoticeTimerRef.current)
       boardNoticeTimerRef.current = null
@@ -773,7 +775,7 @@ function AppInner() {
     boardNoticeTimerRef.current = setTimeout(() => {
       setBoardNotice(null)
       boardNoticeTimerRef.current = null
-    }, 4000)
+    }, opts?.quick ? 900 : 4000)
   }, [])
 
   onBoardFxRef.current = (fx: BoardFx) => {
@@ -802,6 +804,9 @@ function AppInner() {
   )
 
   onGameEventsRef.current = (events: GameEvent[]) => {
+    const isAiName = (name?: string) =>
+      !!name && safeGameState.players.some((p) => p.name === name && p.isAi)
+    const actingIsAi = safeGameState.players[safeGameState.currentPlayerIndex]?.isAi === true
     for (const e of events) {
       if (e.type === 'toast') {
         if (e.level === 'error') toast.error(e.message)
@@ -839,7 +844,7 @@ function AppInner() {
               {e.suffix}
             </>
           )
-        showBoardNotice(title, e.detail)
+        showBoardNotice(title, e.detail, actingIsAi ? { quick: true } : undefined)
         if (e.suffix === ' anchored!') playAnchorDropSound()
         else playConstructionSound()
       } else if (e.type === 'council_freeze_result') {
@@ -848,7 +853,8 @@ function AppInner() {
             <>
               🎲 <strong>{e.targetName}</strong> rolled a 6!
             </>,
-            'City Council Freeze negated — they can build as usual.'
+            'City Council Freeze negated — they can build as usual.',
+            isAiName(e.targetName) ? { quick: true } : undefined
           )
           playCrowdCheerSound()
         } else {
@@ -856,7 +862,8 @@ function AppInner() {
             <>
               🎲 <strong>{e.targetName}</strong> rolled {e.result} — the freeze holds.
             </>,
-            'They cannot build properties until they finish their next turn.'
+            'They cannot build properties until they finish their next turn.',
+            isAiName(e.targetName) ? { quick: true } : undefined
           )
           playCrowdBooSound()
         }
@@ -872,7 +879,8 @@ function AppInner() {
             <>
               🎲 {kindLabel}: <strong>{e.targetName}</strong> rolled {e.result} — blocked!
             </>,
-            `${e.attackerName}'s play is repelled.`
+            `${e.attackerName}'s play is repelled.`,
+            isAiName(e.targetName) && isAiName(e.attackerName) ? { quick: true } : undefined
           )
           playCrowdCheerSound()
         } else {
@@ -883,7 +891,8 @@ function AppInner() {
             </>,
             e.kind === 'hostile-takeover'
               ? 'The lot changes hands.'
-              : 'Anchor influence is discontinued.'
+              : 'Anchor influence is discontinued.',
+            isAiName(e.targetName) && isAiName(e.attackerName) ? { quick: true } : undefined
           )
           playInfluenceDwindleSound()
         }
@@ -917,6 +926,16 @@ function AppInner() {
     incomeResolvedThisTurn: gameState.incomeResolvedThisTurn ?? false,
     pendingIncomeTaxPlayerIds: gameState.pendingIncomeTaxPlayerIds ?? [],
   }
+
+  const plotsByCoordKey = useMemo(() => {
+    const m = new Map<string, Plot>()
+    for (const p of safeGameState.plots) m.set(`${p.row}|${p.col}`, p)
+    return m
+  }, [safeGameState.plots])
+  const getPlotAt = useCallback(
+    (row: number, col: string) => plotsByCoordKey.get(`${row}|${col}`),
+    [plotsByCoordKey]
+  )
 
   /** Shown briefly when `playRoundNumber` becomes each even round ≥ 2 (not for the whole round). */
   const MOTIVATIONAL_EVEN_ROUND_FLASH_MS = 4000
@@ -3330,7 +3349,7 @@ function AppInner() {
       )
       return
     }
-    const plotPreview = safeGameState.plots.find((p) => p.row === row && p.col === col)
+    const plotPreview = getPlotAt(row, col)
     const ownerPreview =
       plotPreview?.claimedBy != null
         ? safeGameState.players.find((p) => p.id === plotPreview.claimedBy)
@@ -3405,7 +3424,7 @@ function AppInner() {
       toast.error('Pick one of your own highlighted properties that has investors.')
       return
     }
-    const plotPreview = safeGameState.plots.find((p) => p.row === row && p.col === col)
+    const plotPreview = getPlotAt(row, col)
     const ownerPreview = safeGameState.players[safeGameState.currentPlayerIndex]
     if (
       !plotPreview ||
@@ -5849,6 +5868,9 @@ function AppInner() {
     toast.info('Nothing obvious was stuck. If the table still feels frozen, try Unstick again in a moment.')
   }
 
+  const handleUnstickPlayRef = useRef(handleUnstickPlay)
+  handleUnstickPlayRef.current = handleUnstickPlay
+
   const setupReady =
     safeGameState.isSetupComplete &&
     Array.isArray(safeGameState.players) &&
@@ -5941,34 +5963,11 @@ function AppInner() {
     safeGameState.openingNarrationComplete !== false &&
     (!partyBoardConfig || partyBoardConfig.role === 'host')
 
-  const aiWakeKey = [
-    aiPlayerReady ? 1 : 0,
-    safeGameState.currentPlayerIndex,
-    discardDialogState.open ? 1 : 0,
-    discardDialogState.numToDiscard ?? 0,
-    rollDieDialogState.open ? 1 : 0,
-    incomeDialogState.open ? 1 : 0,
-    safeGameState.showNewCardsAnimation ? 1 : 0,
-    undoActionDialogOpen ? 1 : 0,
-    boardNotice != null ? 1 : 0,
-    taxBuildPrompt.open ? 1 : 0,
-    discardPropertyConfirmOpen ? 1 : 0,
-    takeoverSelectMode.active ? 1 : 0,
-    scandalSelectMode.active ? 1 : 0,
-    rezoningMode.phase,
-    investmentSelectMode.active ? 1 : 0,
-    removeInvestorsSelectMode.active ? 1 : 0,
-    discardPropertySelectMode.active ? 1 : 0,
-    taxBuildMode.phase,
-    placementMode.active ? 1 : 0,
-    placementMode.propertyCardId ?? '',
-    safeGameState.turnActionsConsumed ?? 0,
-    safeGameState.propertiesBuiltThisTurn ?? 0,
-    safeGameState.incomeResolvedThisTurn ? 1 : 0,
-    currentPlayerMaybe?.money ?? 0,
-    currentPlayerMaybe?.actionCards.length ?? 0,
-    currentPlayerMaybe?.propertyCards.length ?? 0,
-  ].join('|')
+  // Bumped every render (from the render body, not an effect, so it can
+  // never trigger a render loop itself). Replaces the old hand-curated
+  // aiWakeKey field list, which silently stopped waking the bot whenever
+  // new UI state was added but not added to the list.
+  renderTickRef.current += 1
 
   useEffect(() => {
     if (!aiPlayerReady) return
@@ -5981,7 +5980,30 @@ function AppInner() {
       trySimpleAiMainPhase(gsSnap, cpSnap, ui, hx)
     }, 700)
     return () => window.clearTimeout(id)
-  }, [aiPlayerReady, aiWakeKey])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiPlayerReady, renderTickRef.current])
+
+  const lastTurnAdvanceRef = useRef<{ index: number; at: number }>({
+    index: safeGameState.currentPlayerIndex,
+    at: Date.now(),
+  })
+  useEffect(() => {
+    lastTurnAdvanceRef.current = { index: safeGameState.currentPlayerIndex, at: Date.now() }
+  }, [safeGameState.currentPlayerIndex])
+
+  useEffect(() => {
+    const isHost = !partyBoardConfig || partyBoardConfig.role === 'host'
+    if (!isHost) return
+    const AI_STALL_WATCHDOG_MS = 8000
+    const id = window.setInterval(() => {
+      if (!aiPlayerReady) return
+      if (Date.now() - lastTurnAdvanceRef.current.at > AI_STALL_WATCHDOG_MS) {
+        lastTurnAdvanceRef.current = { ...lastTurnAdvanceRef.current, at: Date.now() }
+        handleUnstickPlayRef.current()
+      }
+    }, 2000)
+    return () => window.clearInterval(id)
+  }, [aiPlayerReady, partyBoardConfig?.role])
 
   if (!setupReady || currentPlayerMaybe == null) {
     return (
