@@ -36,11 +36,16 @@ export function DiscardDialog({
   useEffect(() => {
     if (!open || !aiConfirmSelection || numToDiscard <= 0) return
     const hand = player.actionCards || []
-    if (hand.length < numToDiscard) return
-    const ids = hand.slice(0, numToDiscard).map((c) => c.instanceId)
+    if (hand.length === 0) {
+      const t = window.setTimeout(() => onComplete([]), 320)
+      return () => window.clearTimeout(t)
+    }
+    // Never stall if the hand is shorter than requested — discard what we can.
+    const n = Math.min(numToDiscard, hand.length)
+    const ids = hand.slice(0, n).map((c) => c.instanceId)
     const t = window.setTimeout(() => onComplete(ids), 320)
     return () => window.clearTimeout(t)
-  }, [open, aiConfirmSelection, numToDiscard, handKey, onComplete])
+  }, [open, aiConfirmSelection, numToDiscard, handKey, onComplete, player.actionCards])
 
   const allCards = [
     ...(player.actionCards || []).map(instance => {

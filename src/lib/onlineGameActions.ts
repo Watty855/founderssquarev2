@@ -55,7 +55,13 @@ export type GameEvent =
   | { type: 'build_celebration'; lotName: string; suffix: string; detail: string }
   | { type: 'toast'; level: 'info' | 'success' | 'error'; message: string }
   /** Council-freeze negate roll resolved — announced with sound on every device. */
-  | { type: 'council_freeze_result'; targetName: string; result: number; negated: boolean }
+  | {
+      type: 'council_freeze_result'
+      attackerName: string
+      targetName: string
+      result: number
+      negated: boolean
+    }
   /** Scandal / takeover / police-raid rebuttal resolved on every device. */
   | {
       type: 'rebuttal_result'

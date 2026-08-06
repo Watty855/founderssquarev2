@@ -78,6 +78,15 @@ import {
 } from '@/lib/soundEffects'
 import { trySimpleAiMainPhase, pickAiDiscardPropertyIds } from '@/lib/bot/simpleAiTurn'
 import type { SimpleAiTurnHandlers, SimpleAiTurnUi } from '@/lib/bot/simpleAiTurn'
+import { AI_MAIN_PHASE_DELAY_NORMAL_MS } from '@/lib/bot/aiTiming'
+import {
+  confrontationNoticeDetail,
+  confrontationNoticeTitle,
+  type ConfrontationKind,
+  type ConfrontationOutcome,
+} from '@/lib/confrontationNotice'
+import { enablePlayKeepAwake, disablePlayKeepAwake } from '@/lib/keepAwake'
+import { incomePercentageForDie } from '@/lib/incomeDice'
 import {
   findCompleteSquares,
   findCompleteStreets,
@@ -655,7 +664,6 @@ function AppInner() {
   const rollDieDialogStateRef = useRef(rollDieDialogState)
   rollDieDialogStateRef.current = rollDieDialogState
 
-  const renderTickRef = useRef(0)
   const aiGsRef = useRef<GameState | null>(null)
   const aiCpRef = useRef<Player | null>(null)
   const aiHooksRef = useRef<SimpleAiTurnHandlers>({
@@ -803,6 +811,28 @@ function AppInner() {
     [isOnlineActor]
   )
 
+  /** Prominent attacker-vs-defender outcome banner for confrontation cards. */
+  const announceConfrontation = useCallback(
+    (
+      kind: ConfrontationKind,
+      attackerName: string,
+      targetName: string,
+      outcome: ConfrontationOutcome,
+      detail: string,
+      sound?: BoardFx['sound']
+    ) => {
+      broadcastBoardFx({
+        notice: {
+          title: confrontationNoticeTitle(kind, attackerName, targetName),
+          detail: confrontationNoticeDetail(outcome, detail),
+        },
+        sound,
+      })
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isOnlineActor]
+  )
+
   onGameEventsRef.current = (events: GameEvent[]) => {
     const isAiName = (name?: string) =>
       !!name && safeGameState.players.some((p) => p.name === name && p.isAi)
@@ -848,50 +878,61 @@ function AppInner() {
         if (e.suffix === ' anchored!') playAnchorDropSound()
         else playConstructionSound()
       } else if (e.type === 'council_freeze_result') {
+        const freezeTitle = confrontationNoticeTitle(
+          'City Council Freeze',
+          e.attackerName,
+          e.targetName
+        )
         if (e.negated) {
           showBoardNotice(
-            <>
-              🎲 <strong>{e.targetName}</strong> rolled a 6!
-            </>,
-            'City Council Freeze negated — they can build as usual.',
+            freezeTitle,
+            confrontationNoticeDetail(
+              'blocked',
+              `${e.targetName} rolled 6 — freeze negated. They can build as usual.`
+            ),
             isAiName(e.targetName) ? { quick: true } : undefined
           )
           playCrowdCheerSound()
         } else {
           showBoardNotice(
-            <>
-              🎲 <strong>{e.targetName}</strong> rolled {e.result} — the freeze holds.
-            </>,
-            'They cannot build properties until they finish their next turn.',
+            freezeTitle,
+            confrontationNoticeDetail(
+              'success',
+              `${e.targetName} rolled ${e.result} — freeze holds. They cannot build until they finish their next turn.`
+            ),
             isAiName(e.targetName) ? { quick: true } : undefined
           )
           playCrowdBooSound()
         }
       } else if (e.type === 'rebuttal_result') {
-        const kindLabel =
+        const kindLabel: ConfrontationKind =
           e.kind === 'scandal'
             ? 'Scandal'
             : e.kind === 'hostile-takeover'
               ? 'Hostile Takeover'
               : 'Police Raid on Mafia'
+        const vsTitle = confrontationNoticeTitle(kindLabel, e.attackerName, e.targetName)
         if (e.negated) {
           showBoardNotice(
-            <>
-              🎲 {kindLabel}: <strong>{e.targetName}</strong> rolled {e.result} — blocked!
-            </>,
-            `${e.attackerName}'s play is repelled.`,
+            vsTitle,
+            confrontationNoticeDetail(
+              'blocked',
+              `${e.targetName} rolled ${e.result} — ${e.attackerName}'s play is repelled.`
+            ),
             isAiName(e.targetName) && isAiName(e.attackerName) ? { quick: true } : undefined
           )
           playCrowdCheerSound()
         } else {
           showBoardNotice(
-            <>
-              🎲 {kindLabel}: <strong>{e.targetName}</strong> rolled {e.result} — {e.attackerName} succeeds
-              {e.plotLabel ? ` at ${e.plotLabel}` : ''}.
-            </>,
-            e.kind === 'hostile-takeover'
-              ? 'The lot changes hands.'
-              : 'Anchor influence is discontinued.',
+            vsTitle,
+            confrontationNoticeDetail(
+              'success',
+              e.kind === 'hostile-takeover'
+                ? `${e.attackerName} takes ${e.plotLabel ?? 'the lot'} — ownership changes.`
+                : e.kind === 'scandal'
+                  ? `Anchor influence discontinued${e.plotLabel ? ` at ${e.plotLabel}` : ''}.`
+                  : `Police Raid succeeds${e.plotLabel ? ` at ${e.plotLabel}` : ''} — Mafia influence discontinued.`
+            ),
             isAiName(e.targetName) && isAiName(e.attackerName) ? { quick: true } : undefined
           )
           playInfluenceDwindleSound()
@@ -926,6 +967,18 @@ function AppInner() {
     incomeResolvedThisTurn: gameState.incomeResolvedThisTurn ?? false,
     pendingIncomeTaxPlayerIds: gameState.pendingIncomeTaxPlayerIds ?? [],
   }
+
+  // Keep the host/device screen awake while a table is in progress (prevents AI timer starvation).
+  useEffect(() => {
+    if (!safeGameState.isSetupComplete || safeGameState.gameEnded) {
+      void disablePlayKeepAwake()
+      return
+    }
+    void enablePlayKeepAwake()
+    return () => {
+      void disablePlayKeepAwake()
+    }
+  }, [safeGameState.isSetupComplete, safeGameState.gameEnded])
 
   const plotsByCoordKey = useMemo(() => {
     const m = new Map<string, Plot>()
@@ -3405,10 +3458,15 @@ function AppInner() {
       return withReplenishedActionHand(newState, cpIdx)
     })
     setInvestmentSelectMode({ active: false, validPlots: [], actionInstanceId: null, contributionMillion: 4 })
-    toast.success('Investment — cash to owner', {
-      description: `${investorPreview.name} is investing $${contribution}M in ${ownerPreview?.name ?? 'the owner'}'s ${propertyTitle} at ${col}${row}. $${contribution}M is paid from the investor to the property owner.`,
-      duration: 8000,
-    })
+    const investKind: ConfrontationKind = contribution >= 8 ? 'Double Investment' : 'Investment'
+    announceConfrontation(
+      investKind,
+      investorPreview.name,
+      ownerPreview?.name ?? 'the owner',
+      'success',
+      `$${contribution}M invested in ${propertyTitle} at ${col}${row}. Cash paid to the property owner.`,
+      'income'
+    )
   }
 
   const handleCancelRemoveInvestorsSelect = () => {
@@ -4418,11 +4476,24 @@ function AppInner() {
       rezoningContext: undefined,
       scandalContext: undefined,
     })
-    if (source === 'accept') {
+    {
       toast.info('City Council Freeze ends — you did not reach 5–6 after influence.')
-      broadcastDiceRollNotice('City Council Freeze failed', 'The freeze card is spent with no effect.', 'boo')
+      const gs = aiGsRef.current
+      const attackerName = gs?.players[gs.currentPlayerIndex]?.name ?? 'Attacker'
+      const targetId = rollDieDialogStateRef.current.targetPlayerId
+      const targetName = gs?.players.find((p) => p.id === targetId)?.name ?? 'Target'
+      announceConfrontation(
+        'City Council Freeze',
+        attackerName,
+        targetName,
+        'failure',
+        source === 'auto'
+          ? 'Three rolls failed — freeze card spent with no effect.'
+          : 'Did not reach 5–6 after influence — freeze card spent with no effect.',
+        'boo'
+      )
     }
-  }, [])
+  }, [announceConfrontation])
 
   const handleAttackerDieSettled = useCallback((natural: number) => {
     setRollDieDialogState((prev) => {
@@ -4586,11 +4657,20 @@ function AppInner() {
       if (success) {
         const detail = bonus > 0 ? ` ${natural} + ${bonus} (${labels.join(' & ')}) = ${total}` : ` ${natural}`
         toast.success(`Rolled${detail}. Success — target may roll a 6 to negate the freeze.`)
-        broadcastDiceRollNotice(
-          `City Council Freeze succeeds (rolled ${total})`,
-          'Target founder must roll a 6 to negate.',
-          'boo'
-        )
+        {
+          const attackerName =
+            safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+          const targetName =
+            safeGameState.players.find((p) => p.id === dialog.targetPlayerId)?.name ?? 'Target'
+          announceConfrontation(
+            'City Council Freeze',
+            attackerName,
+            targetName,
+            'pending',
+            `Rolled ${total} — ${targetName} must roll a 6 to negate the freeze.`,
+            'boo'
+          )
+        }
 
         if (isOnlineActor) {
           // Online: hand the negate roll to the target's own device. Spend the card
@@ -4737,12 +4817,28 @@ function AppInner() {
         return withReplenishedActionHand(newState, current.currentPlayerIndex)
       })
 
-      if (negated) {
-        toast.success(`${targetName} rolled 6 — City Council Freeze negated.`)
-      } else {
-        toast.success(
-          `${targetName} rolled ${result} — freeze applies. They cannot build properties until they finish their next turn.`
-        )
+      {
+        const attackerName =
+          safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+        if (negated) {
+          announceConfrontation(
+            'City Council Freeze',
+            attackerName,
+            targetName,
+            'blocked',
+            `${targetName} rolled 6 — freeze negated. They can build as usual.`,
+            'cheer'
+          )
+        } else {
+          announceConfrontation(
+            'City Council Freeze',
+            attackerName,
+            targetName,
+            'success',
+            `${targetName} rolled ${result} — freeze holds. They cannot build until they finish their next turn.`,
+            'boo'
+          )
+        }
       }
 
       setRollDieDialogState({
@@ -4788,11 +4884,20 @@ function AppInner() {
       }
       if (takeoverTotal < 5) {
         toast.info('Unsuccessful Take Over. The card is spent and the $1M fee is lost.')
-        broadcastDiceRollNotice(
-          `Hostile Takeover failed (rolled ${takeoverTotal})`,
-          'Need 5+ after influence to seize a rival lot.',
-          'cheer'
-        )
+        {
+          const attackerName =
+            safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+          const ownerName =
+            safeGameState.players.find((p) => p.id === ctx.ownerPlayerId)?.name ?? 'Owner'
+          announceConfrontation(
+            'Hostile Takeover',
+            attackerName,
+            ownerName,
+            'failure',
+            `Rolled ${takeoverTotal} — need 5+ after influence. Card spent; $1M fee lost.`,
+            'cheer'
+          )
+        }
         setRollDieDialogState({
           open: false,
           mode: 'roll-die',
@@ -4816,6 +4921,21 @@ function AppInner() {
         )
       } else {
         toast.success('Successful Take Over. The owner may roll once — only a 6 blocks the takeover.')
+      }
+
+      if (!isOnlineActor) {
+        const attackerName =
+          safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+        const ownerName =
+          safeGameState.players.find((p) => p.id === ctx.ownerPlayerId)?.name ?? 'Owner'
+        announceConfrontation(
+          'Hostile Takeover',
+          attackerName,
+          ownerName,
+          'pending',
+          `Rolled ${takeoverTotal} — ${ownerName} must roll a 6 at ${ctx.col}${ctx.row} to block.`,
+          'boo'
+        )
       }
 
       if (isOnlineActor) {
@@ -4853,13 +4973,20 @@ function AppInner() {
           scandalContext: undefined,
           removeInvestorsContext: undefined,
         })
-        broadcastBoardFx({
-          notice: {
-            title: `🎲 Hostile Takeover succeeds (rolled ${takeoverTotal})!`,
-            detail: `${ctx.col}${ctx.row} owner must roll a 6 to block.`,
-          },
-          sound: 'boo',
-        })
+        {
+          const attackerName =
+            safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+          const ownerName =
+            safeGameState.players.find((p) => p.id === ctx.ownerPlayerId)?.name ?? 'Owner'
+          announceConfrontation(
+            'Hostile Takeover',
+            attackerName,
+            ownerName,
+            'pending',
+            `Rolled ${takeoverTotal} — ${ownerName} must roll a 6 at ${ctx.col}${ctx.row} to block.`,
+            'boo'
+          )
+        }
         return
       }
 
@@ -4929,10 +5056,14 @@ function AppInner() {
       if (blocked) {
         const ownerName =
           safeGameState.players.find((p) => p.id === ownerPlayerId)?.name ?? 'Property owner'
-        toast.success('Rolled 6 — takeover blocked. The property stays with its owner.')
-        broadcastDiceRollNotice(
-          `Hostile Takeover blocked — ${ownerName} rolled 6`,
-          `${col}${row} stays with its owner.`,
+        const attackerName =
+          safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+        announceConfrontation(
+          'Hostile Takeover',
+          attackerName,
+          ownerName,
+          'blocked',
+          `${ownerName} rolled 6 — ${col}${row} stays with its owner.`,
           'cheer'
         )
       } else {
@@ -4981,11 +5112,20 @@ function AppInner() {
           }
           return stateAfterTakeover
         })
-        broadcastDiceRollNotice(
-          `Hostile Takeover complete at ${col}${row}`,
-          `Paid $${payment120Million}M to the former owner.`,
-          'dwindle'
-        )
+        {
+          const attackerName =
+            safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+          const ownerName =
+            safeGameState.players.find((p) => p.id === ownerPlayerId)?.name ?? 'former owner'
+          announceConfrontation(
+            'Hostile Takeover',
+            attackerName,
+            ownerName,
+            'success',
+            `${attackerName} takes ${col}${row} — paid $${payment120Million}M (120% of end value).`,
+            'dwindle'
+          )
+        }
       }
 
       setRollDieDialogState({
@@ -5019,11 +5159,21 @@ function AppInner() {
       }
       if (total < 6) {
         toast.info('Scandal fails — need 6+ after Influencer bonus. Scandal card is discarded.')
-        broadcastDiceRollNotice(
-          `Scandal failed (rolled ${total})`,
-          'Need 6+ after influence to target an anchor tenant.',
-          'cheer'
-        )
+        {
+          const attackerName =
+            safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+          const ownerName =
+            safeGameState.players.find((p) => p.id === ctx.anchorOwnerPlayerId)?.name ??
+            'Anchor owner'
+          announceConfrontation(
+            'Scandal',
+            attackerName,
+            ownerName,
+            'failure',
+            `Rolled ${total} — need 6+ after influence. Scandal card discarded.`,
+            'cheer'
+          )
+        }
         finalizeScandalCardSpent(instanceId)
         return
       }
@@ -5081,16 +5231,38 @@ function AppInner() {
           scandalContext: undefined,
           removeInvestorsContext: undefined,
         })
-        broadcastBoardFx({
-          notice: {
-            title: `🎲 Scandal succeeds (rolled ${total})!`,
-            detail: `${ctx.col}${ctx.row} anchor owner must roll a 6 to negate.`,
-          },
-          sound: 'boo',
-        })
+        {
+          const attackerName =
+            safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+          const ownerName =
+            safeGameState.players.find((p) => p.id === ctx.anchorOwnerPlayerId)?.name ?? 'Anchor owner'
+          announceConfrontation(
+            'Scandal',
+            attackerName,
+            ownerName,
+            'pending',
+            `Rolled ${total} — ${ownerName} must roll a 6 at ${ctx.col}${ctx.row} to negate.`,
+            'boo'
+          )
+        }
         return
       }
 
+      {
+        const attackerName =
+          safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+        const ownerName =
+          safeGameState.players.find((p) => p.id === ctx.anchorOwnerPlayerId)?.name ??
+          'Anchor owner'
+        announceConfrontation(
+          'Scandal',
+          attackerName,
+          ownerName,
+          'pending',
+          `Rolled ${total} — ${ownerName} must roll a 6 at ${ctx.col}${ctx.row} to negate.`,
+          'boo'
+        )
+      }
       setRollDieDialogState({
         open: true,
         mode: 'scandal-defender',
@@ -5137,30 +5309,46 @@ function AppInner() {
         })
         return
       }
-      if (negated) {
-        toast.success('Rolled 6 — scandal negated. The anchor keeps its influence.')
-      } else {
-        patchGameState((current) => {
-          const plotIndex = current.plots.findIndex((p) => p.row === ctx.row && p.col === ctx.col)
-          if (plotIndex === -1) return current
-          const plot = current.plots[plotIndex]
-          if (plot.builtProperty !== ctx.anchorCardId) return current
-          const newPlots = [...current.plots]
-          newPlots[plotIndex] = { ...plot, anchorInfluenceSuppressed: true }
-          const anchorName =
-            propertyCards.find((c) => c.id === ctx.anchorCardId)?.name ?? 'Anchor'
-          setTimeout(() => {
-            toast.success(`Influence discontinued for ${anchorName} at ${ctx.col}${ctx.row}.`)
-          }, 0)
-          return { ...current, plots: newPlots }
-        })
-        broadcastBoardFx({
-          notice: {
-            title: 'Anchor influence discontinued',
-            detail: `${ctx.col}${ctx.row} — scandal succeeds.`,
-          },
-          sound: 'dwindle',
-        })
+      {
+        const attackerName =
+          safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+        const ownerName =
+          safeGameState.players.find((p) => p.id === ctx.anchorOwnerPlayerId)?.name ??
+          'Anchor owner'
+        if (negated) {
+          toast.success('Rolled 6 — scandal negated. The anchor keeps its influence.')
+          announceConfrontation(
+            'Scandal',
+            attackerName,
+            ownerName,
+            'blocked',
+            `${ownerName} rolled 6 — anchor keeps its influence at ${ctx.col}${ctx.row}.`,
+            'cheer'
+          )
+        } else {
+          patchGameState((current) => {
+            const plotIndex = current.plots.findIndex((p) => p.row === ctx.row && p.col === ctx.col)
+            if (plotIndex === -1) return current
+            const plot = current.plots[plotIndex]
+            if (plot.builtProperty !== ctx.anchorCardId) return current
+            const newPlots = [...current.plots]
+            newPlots[plotIndex] = { ...plot, anchorInfluenceSuppressed: true }
+            const anchorName =
+              propertyCards.find((c) => c.id === ctx.anchorCardId)?.name ?? 'Anchor'
+            setTimeout(() => {
+              toast.success(`Influence discontinued for ${anchorName} at ${ctx.col}${ctx.row}.`)
+            }, 0)
+            return { ...current, plots: newPlots }
+          })
+          announceConfrontation(
+            'Scandal',
+            attackerName,
+            ownerName,
+            'success',
+            `Anchor influence discontinued at ${ctx.col}${ctx.row}.`,
+            'dwindle'
+          )
+        }
       }
       finalizeScandalCardSpent(instanceId)
       return
@@ -5445,17 +5633,45 @@ function AppInner() {
           scandalContext: undefined,
           removeInvestorsContext: undefined,
         })
-        broadcastBoardFx({
-          notice: {
-            title: 'Police Raid succeeds!',
-            detail: 'Mafia owner must roll to counter the raid.',
-          },
-          sound: 'boo',
-        })
-        toast.success(`Police Raid succeeds (${result}${bonus > 0 ? ` + ${bonus}` : ''}). Mafia rolls to counter.`)
+        {
+          const attackerName =
+            safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+          const mafiaOwner =
+            safeGameState.players.find((p) =>
+              safeGameState.plots.some(
+                (pl) => pl.builtProperty === 'mafia' && pl.claimedBy === p.id
+              )
+            )?.name ?? 'Mafia owner'
+          announceConfrontation(
+            'Police Raid on Mafia',
+            attackerName,
+            mafiaOwner,
+            'pending',
+            `Raid succeeds (${result}${bonus > 0 ? ` + ${bonus}` : ''}) — ${mafiaOwner} must roll to counter.`,
+            'boo'
+          )
+        }
         return
       }
 
+      {
+        const attackerName =
+          safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+        const mafiaOwner =
+          safeGameState.players.find((p) =>
+            safeGameState.plots.some(
+              (pl) => pl.builtProperty === 'mafia' && pl.claimedBy === p.id
+            )
+          )?.name ?? 'Mafia owner'
+        announceConfrontation(
+          'Police Raid on Mafia',
+          attackerName,
+          mafiaOwner,
+          'pending',
+          `Raid succeeds (${result}${bonus > 0 ? ` + ${bonus}` : ''}) — ${mafiaOwner} must roll to counter.`,
+          'boo'
+        )
+      }
       setRollDieDialogState({
         open: true,
         mode: 'police-raid-defender',
@@ -5503,26 +5719,42 @@ function AppInner() {
         return
       }
 
-      if (!counters) {
+      {
+        const attackerName =
+          safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
         const mafiaOwnerId = safeGameState.plots.find(
           (p) => p.builtProperty === 'mafia' && p.claimedBy != null
         )?.claimedBy
-        if (mafiaOwnerId != null) {
-          patchGameState((current) => ({
-            ...current,
-            plots: current.plots.map((p) =>
-              p.builtProperty === 'mafia' && p.claimedBy === mafiaOwnerId
-                ? { ...p, anchorInfluenceSuppressed: true }
-                : p
-            ),
-          }))
-          broadcastBoardFx({
-            notice: {
-              title: 'Mafia influence discontinued',
-              detail: 'Police Raid succeeds — Mafia anchor color fades from the board.',
-            },
-            sound: 'dwindle',
-          })
+        const mafiaOwner =
+          safeGameState.players.find((p) => p.id === mafiaOwnerId)?.name ?? 'Mafia owner'
+        if (!counters) {
+          if (mafiaOwnerId != null) {
+            patchGameState((current) => ({
+              ...current,
+              plots: current.plots.map((p) =>
+                p.builtProperty === 'mafia' && p.claimedBy === mafiaOwnerId
+                  ? { ...p, anchorInfluenceSuppressed: true }
+                  : p
+              ),
+            }))
+          }
+          announceConfrontation(
+            'Police Raid on Mafia',
+            attackerName,
+            mafiaOwner,
+            'success',
+            `Mafia rolls ${result} — cannot counter (needed ${counterThreshold}+). Influence discontinued.`,
+            'dwindle'
+          )
+        } else {
+          announceConfrontation(
+            'Police Raid on Mafia',
+            attackerName,
+            mafiaOwner,
+            'blocked',
+            `Mafia counters with ${result} (needed ${counterThreshold}+). Police Raid is repelled.`,
+            'cheer'
+          )
         }
       }
 
@@ -5550,7 +5782,27 @@ function AppInner() {
         return
       }
 
+      const riOwnerName =
+        safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Owner'
+      const riPlot = getPlotAt(ctx.row, ctx.col)
+      const riInvestorIds = [
+        ...new Set((riPlot?.investmentStripes ?? []).map((s) => s.investorId)),
+      ]
+      const riInvestorLabel =
+        riInvestorIds
+          .map((id) => safeGameState.players.find((p) => p.id === id)?.name)
+          .filter(Boolean)
+          .join(', ') || 'investors'
+
       if (total < 5) {
+        announceConfrontation(
+          'Remove Investors',
+          riOwnerName,
+          riInvestorLabel,
+          'failure',
+          `Rolled ${result}${bonus > 0 ? ` + ${bonus}` : ''} (need 5+) — investors stay at ${ctx.col}${ctx.row}.`,
+          'cheer'
+        )
         finalizeSimpleActionResolution(instanceId, {
           type: 'info',
           text: `Remove Investors fails (rolled ${result}${bonus > 0 ? ` + ${bonus}` : ''}, need 5+). Investors stay.`,
@@ -5639,6 +5891,15 @@ function AppInner() {
         return withReplenishedActionHand(newState, cpIdx)
       })
 
+      announceConfrontation(
+        'Remove Investors',
+        riOwnerName,
+        riInvestorLabel,
+        'success',
+        `Investors cleared from ${ctx.col}${ctx.row} (roll ${result}${bonus > 0 ? ` + ${bonus}` : ''} = ${total}).`,
+        'dwindle'
+      )
+
       setRollDieDialogState({
         open: false,
         mode: 'roll-die',
@@ -5722,6 +5983,41 @@ function AppInner() {
       return
     }
 
+    const acting = safeGameState.players[safeGameState.currentPlayerIndex]
+
+    // Force-resolve stuck Income (bots) — previously Unstick could not clear this dialog.
+    if (incomeDialogState.open && (acting?.isAi === true || incomeDialogState.player?.isAi === true)) {
+      if (incomeDialogState.hasBuiltPropertiesForIncomeRoll) {
+        const face = 4
+        const pct = incomePercentageForDie(face)
+        const amount = Math.floor((incomeDialogState.totalIncome * pct) / 100)
+        handleIncomeComplete(Math.max(0, amount), undefined, 'property-roll', face)
+      } else {
+        const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? 2
+        handleIncomeComplete(bv, undefined, 'bank-income-card')
+      }
+      toast.success('Forced Income resolution for Founderbot — play continues.')
+      return
+    }
+
+    // Force-resolve excess-hand discard dialog for the acting seat.
+    if (discardDialogState.open && acting) {
+      const n = discardDialogState.numToDiscard
+      const hand = acting.actionCards || []
+      const ids = hand.slice(0, Math.min(Math.max(0, n), hand.length)).map((c) => c.instanceId)
+      handleDiscardComplete(ids)
+      toast.success('Forced hand discard resolution — play continues.')
+      return
+    }
+
+    if (safeGameState.showNewCardsAnimation === true) {
+      patchGameState((current) =>
+        current.showNewCardsAnimation ? { ...current, showNewCardsAnimation: false } : current
+      )
+      toast.success('Cleared stuck new-cards animation.')
+      return
+    }
+
     let clearedSelect = false
     if (takeoverSelectMode.active) {
       handleCancelTakeoverSelect()
@@ -5741,9 +6037,8 @@ function AppInner() {
     }
     if (discardPropertySelectMode.active || discardPropertyConfirmOpen) {
       // Bots must spend the action (not cancel) or they re-play Discard Property Cards forever.
-      if (safeGameState.players[safeGameState.currentPlayerIndex]?.isAi === true) {
-        const bot = safeGameState.players[safeGameState.currentPlayerIndex]
-        handleConfirmDiscardProperty(pickAiDiscardPropertyIds(bot))
+      if (acting?.isAi === true) {
+        handleConfirmDiscardProperty(pickAiDiscardPropertyIds(acting))
         toast.success('Completed stuck Discard Property Cards for Founderbot.')
         return
       }
@@ -5771,7 +6066,6 @@ function AppInner() {
     }
 
     const rd = rollDieDialogStateRef.current
-    const acting = safeGameState.players[safeGameState.currentPlayerIndex]
     if (rd.open && rollSeatIsAi(safeGameState, rd, acting)) {
       const forced = Math.floor(Math.random() * 6) + 1
       handleRollDieComplete(forced)
@@ -5963,42 +6257,43 @@ function AppInner() {
     safeGameState.openingNarrationComplete !== false &&
     (!partyBoardConfig || partyBoardConfig.role === 'host')
 
-  // Bumped every render (from the render body, not an effect, so it can
-  // never trigger a render loop itself). Replaces the old hand-curated
-  // aiWakeKey field list, which silently stopped waking the bot whenever
-  // new UI state was added but not added to the list.
-  renderTickRef.current += 1
+  /**
+   * Steady AI wake — interval is NOT reset by React re-renders (the prior renderTick
+   * debounce was starved by online sync / card flights / notices on TestFlight).
+   */
+  const lastAiProgressAtRef = useRef(Date.now())
+  useEffect(() => {
+    lastAiProgressAtRef.current = Date.now()
+  }, [safeGameState.currentPlayerIndex])
 
   useEffect(() => {
     if (!aiPlayerReady) return
-    const id = window.setTimeout(() => {
+    const tick = () => {
       const gsSnap = aiGsRef.current
       const cpSnap = aiCpRef.current
       const ui = aiUiRef.current
       const hx = aiHooksRef.current
       if (!ui || !gsSnap || !cpSnap || !cpSnap.isAi) return
-      trySimpleAiMainPhase(gsSnap, cpSnap, ui, hx)
-    }, 700)
-    return () => window.clearTimeout(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiPlayerReady, renderTickRef.current])
+      const acted = trySimpleAiMainPhase(gsSnap, cpSnap, ui, hx)
+      if (acted) lastAiProgressAtRef.current = Date.now()
+    }
+    const immediate = window.setTimeout(tick, 120)
+    const interval = window.setInterval(tick, AI_MAIN_PHASE_DELAY_NORMAL_MS)
+    return () => {
+      window.clearTimeout(immediate)
+      window.clearInterval(interval)
+    }
+  }, [aiPlayerReady, safeGameState.currentPlayerIndex])
 
-  const lastTurnAdvanceRef = useRef<{ index: number; at: number }>({
-    index: safeGameState.currentPlayerIndex,
-    at: Date.now(),
-  })
-  useEffect(() => {
-    lastTurnAdvanceRef.current = { index: safeGameState.currentPlayerIndex, at: Date.now() }
-  }, [safeGameState.currentPlayerIndex])
-
+  /** Host watchdog: if no AI progress for 8s, run Unstick (now covers Income / discard). */
   useEffect(() => {
     const isHost = !partyBoardConfig || partyBoardConfig.role === 'host'
     if (!isHost) return
     const AI_STALL_WATCHDOG_MS = 8000
     const id = window.setInterval(() => {
       if (!aiPlayerReady) return
-      if (Date.now() - lastTurnAdvanceRef.current.at > AI_STALL_WATCHDOG_MS) {
-        lastTurnAdvanceRef.current = { ...lastTurnAdvanceRef.current, at: Date.now() }
+      if (Date.now() - lastAiProgressAtRef.current > AI_STALL_WATCHDOG_MS) {
+        lastAiProgressAtRef.current = Date.now()
         handleUnstickPlayRef.current()
       }
     }, 2000)

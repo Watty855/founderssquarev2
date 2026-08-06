@@ -265,6 +265,48 @@ export function IncomeDialog({
     return () => window.clearTimeout(t)
   }, [open, aiAutoplay, aiFastPlayback, incomeResult, selectedDoubleIncomeId, doubleIncomeAllowed, onComplete, diceValue])
 
+  /**
+   * Hard watchdog: if a bot Income never settles (dice hang / isReady stuck), force-resolve
+   * so Founderbot turns cannot freeze the table.
+   */
+  useEffect(() => {
+    if (!open || !aiAutoplay) return
+    if (aiIncomeHandledRef.current) return
+    const t = window.setTimeout(() => {
+      if (aiIncomeHandledRef.current || incomeAiCollectSentRef.current != null) return
+      aiIncomeHandledRef.current = true
+      playIncomeSound()
+      if (!hasIncomeGeneratingProperties) {
+        const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? bankValue
+        onComplete(bv, undefined, 'bank-income-card')
+        return
+      }
+      const face = diceValue && diceValue >= 1 && diceValue <= 6 ? diceValue : 4
+      const pct = incomePercentageForDie(face)
+      let amount = Math.floor((totalIncome * pct) / 100)
+      if (doubleIncomeActive) amount *= 2
+      incomeAiCollectSentRef.current = `watchdog|${amount}`
+      onComplete(
+        amount,
+        doubleIncomeAllowed ? selectedDoubleIncomeId || undefined : undefined,
+        'property-roll',
+        face
+      )
+    }, 5000)
+    return () => window.clearTimeout(t)
+  }, [
+    open,
+    aiAutoplay,
+    hasIncomeGeneratingProperties,
+    bankValue,
+    totalIncome,
+    diceValue,
+    doubleIncomeActive,
+    doubleIncomeAllowed,
+    selectedDoubleIncomeId,
+    onComplete,
+  ])
+
   const handleCollect = () => {
     if (incomeResult) {
       playIncomeSound()

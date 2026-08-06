@@ -159,6 +159,7 @@ export function applyGameAction(
         events: [
           {
             type: 'council_freeze_result',
+            attackerName: pending.attackerName,
             targetName: pending.targetName,
             result,
             negated,
