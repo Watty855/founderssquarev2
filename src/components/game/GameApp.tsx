@@ -7529,33 +7529,29 @@ function AppInner() {
         </aside>
         )}
 
-        {/* Center board + bottom hand — pinch-zoom together on phones */}
+        {/* Center board (pinch/pan on phones) + fixed bottom hand */}
         <div
           className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0"
           style={{ backgroundColor: '#000000' }}
         >
+          {/* Board area — pinch/pan viewport on compact phones only */}
           <BoardPinchZoom
             enabled={isCompactLayout}
-            className="relative flex-1 flex flex-col overflow-hidden min-h-0 min-w-0"
+            className={
+              isCompactLayout
+                ? isLandscapeLayout
+                  ? 'relative flex-[1.4] min-h-0 min-w-0'
+                  : 'relative flex-1 min-h-0 min-w-0'
+                : 'relative flex-1 min-h-0 min-w-0'
+            }
           >
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                width: '100%',
-                height: '100%',
-                minHeight: 0,
-                minWidth: 0,
-              }}
-            >
-            {/* Board area */}
           <div
             className={
               isCompactLayout
                 ? isLandscapeLayout
-                  ? 'relative flex-[1.4] min-h-0 flex items-center justify-center overflow-hidden px-1 pt-0.5'
-                  : 'relative flex-1 min-h-0 flex items-center justify-center overflow-hidden px-1 pt-1'
-                : 'relative flex-1 flex items-center justify-center overflow-hidden px-3 pt-2 min-h-0'
+                  ? 'relative h-full w-full flex items-center justify-center overflow-hidden px-1 pt-0.5'
+                  : 'relative h-full w-full flex items-center justify-center overflow-hidden px-1 pt-1'
+                : 'relative flex-1 h-full w-full flex items-center justify-center overflow-hidden px-3 pt-2 min-h-0'
             }
           >
             {showOpeningProTip ? (
@@ -7695,8 +7691,9 @@ function AppInner() {
               </div>
             )}
             </div>
+          </BoardPinchZoom>
 
-          {/* Bottom hand rail — zooms/pans with the board on phones */}
+          {/* Bottom hand rail — fixed outside board pinch/pan so cards stay usable */}
           <div
             className={
               isCompactLayout
@@ -7769,8 +7766,6 @@ function AppInner() {
               crossingTheLineActive={safeGameState.crossingTheLineActive}
             />
           </div>
-            </div>
-          </BoardPinchZoom>
         </div>
       </div>
 
