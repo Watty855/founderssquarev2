@@ -40,6 +40,7 @@ import { RequiredActionBanner, type RequiredAction } from '@/components/game/Req
 import { FinalTurnBanner } from '@/components/game/FinalTurnBanner'
 import { RulesQuickSheet } from '@/components/game/RulesQuickSheet'
 import { AnchorTenetsQuickSheet } from '@/components/game/AnchorTenetsQuickSheet'
+import { ActionCardsQuickSheet } from '@/components/game/ActionCardsQuickSheet'
 import { PROPERTY_DECK_ANCHOR_KEY, ACTION_DECK_ANCHOR_KEY } from '@/components/game/DeckPile'
 import { CardFlightLayer, type CardFlight } from '@/components/game/CardFlightLayer'
 import { FlightAnchorProvider, useFlightRectGetter, type FlightRect } from '@/hooks/use-flight-anchors'
@@ -58,7 +59,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Anchor, ArrowCounterClockwise, BookOpen, CurrencyDollar } from '@phosphor-icons/react'
+import { Anchor, ArrowCounterClockwise, BookOpen, CurrencyDollar, Gavel } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import { Toaster as BoardDockToaster } from 'sonner'
 import { FS_BOARD_TOASTER_ID, gameDockToast as toast } from '@/lib/fsGameToast'
@@ -80,6 +81,7 @@ import { trySimpleAiMainPhase, pickAiDiscardPropertyIds } from '@/lib/bot/simple
 import type { SimpleAiTurnHandlers, SimpleAiTurnUi } from '@/lib/bot/simpleAiTurn'
 import { AI_MAIN_PHASE_DELAY_NORMAL_MS } from '@/lib/bot/aiTiming'
 import {
+  confrontationAttemptTitle,
   confrontationNoticeDetail,
   confrontationNoticeTitle,
   type ConfrontationKind,
@@ -774,17 +776,21 @@ function AppInner() {
 
   const [boardNotice, setBoardNotice] = useState<{ title: ReactNode; detail?: string } | null>(null)
   const boardNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const showBoardNotice = useCallback((title: ReactNode, detail?: string, opts?: { quick?: boolean }) => {
-    if (boardNoticeTimerRef.current) {
-      clearTimeout(boardNoticeTimerRef.current)
-      boardNoticeTimerRef.current = null
-    }
-    setBoardNotice({ title, detail })
-    boardNoticeTimerRef.current = setTimeout(() => {
-      setBoardNotice(null)
-      boardNoticeTimerRef.current = null
-    }, opts?.quick ? 900 : 4000)
-  }, [])
+  const showBoardNotice = useCallback(
+    (title: ReactNode, detail?: string, opts?: { quick?: boolean; durationMs?: number }) => {
+      if (boardNoticeTimerRef.current) {
+        clearTimeout(boardNoticeTimerRef.current)
+        boardNoticeTimerRef.current = null
+      }
+      setBoardNotice({ title, detail })
+      const ms = opts?.durationMs ?? (opts?.quick ? 900 : 4000)
+      boardNoticeTimerRef.current = setTimeout(() => {
+        setBoardNotice(null)
+        boardNoticeTimerRef.current = null
+      }, ms)
+    },
+    []
+  )
 
   onBoardFxRef.current = (fx: BoardFx) => {
     if (fx.sound === 'construction') playConstructionSound()
@@ -793,7 +799,11 @@ function AppInner() {
     else if (fx.sound === 'boo') playCrowdBooSound()
     else if (fx.sound === 'cheer') playCrowdCheerSound()
     else if (fx.sound === 'dwindle') playInfluenceDwindleSound()
-    if (fx.notice) showBoardNotice(fx.notice.title, fx.notice.detail)
+    if (fx.notice) {
+      showBoardNotice(fx.notice.title, fx.notice.detail, {
+        durationMs: fx.notice.durationMs,
+      })
+    }
   }
 
   /** Play a table effect on this device and mirror it to every other device in the room. */
@@ -825,6 +835,31 @@ function AppInner() {
         notice: {
           title: confrontationNoticeTitle(kind, attackerName, targetName),
           detail: confrontationNoticeDetail(outcome, detail),
+        },
+        sound,
+      })
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isOnlineActor]
+  )
+
+  /**
+   * Table-wide drama when a vs-player action is laid / targeted.
+   * Example: "Alice is attempting a Hostile Takeover against Bob"
+   */
+  const announceConfrontationAttempt = useCallback(
+    (
+      kind: ConfrontationKind,
+      attackerName: string,
+      targetName: string,
+      detail: string,
+      sound: BoardFx['sound'] = 'boo'
+    ) => {
+      broadcastBoardFx({
+        notice: {
+          title: confrontationAttemptTitle(kind, attackerName, targetName),
+          detail: confrontationNoticeDetail('attempting', detail),
+          durationMs: 5500,
         },
         sound,
       })
@@ -1010,6 +1045,7 @@ function AppInner() {
   const [showFinalTurnBanner, setShowFinalTurnBanner] = useState(false)
   const [rulesQuickOpen, setRulesQuickOpen] = useState(false)
   const [anchorTenetsOpen, setAnchorTenetsOpen] = useState(false)
+  const [actionCardsOpen, setActionCardsOpen] = useState(false)
   const { compact: isCompactLayout, landscape: isLandscapeLayout } = useCompactGameLayout()
 
   useEffect(() => {
@@ -1550,16 +1586,12 @@ function AppInner() {
       return
     }
     const mode = rollDieDialogState.mode
+    // Attacker "attempting" banners fire at target-commit; keep drama for defenses + rezoning only.
     const dramaModes = new Set([
-      'hostile-takeover-attacker',
       'hostile-takeover-defender',
-      'scandal-attacker',
       'scandal-defender',
-      'council-freeze-attacker',
       'council-freeze-defender',
-      'police-raid-attacker',
       'police-raid-defender',
-      'remove-investors',
       'rezoning',
     ])
     if (!dramaModes.has(mode)) return
@@ -1567,15 +1599,10 @@ function AppInner() {
     if (announcedLocalDramaKeyRef.current === key) return
     announcedLocalDramaKeyRef.current = key
     const titles: Record<string, { title: string; detail: string }> = {
-      'hostile-takeover-attacker': { title: '🎲 Hostile Takeover roll', detail: 'Attacker is rolling to seize a rival lot.' },
       'hostile-takeover-defender': { title: '🎲 Hostile Takeover defense', detail: 'Owner rolls — only a 6 blocks the takeover.' },
-      'scandal-attacker': { title: '🎲 Scandal roll', detail: 'Attacker is rolling to discontinue anchor influence.' },
       'scandal-defender': { title: '🎲 Scandal defense', detail: 'Anchor owner rolls — only a 6 negates the scandal.' },
-      'council-freeze-attacker': { title: '🎲 City Council Freeze', detail: 'Attacker is rolling to freeze a rival founder.' },
       'council-freeze-defender': { title: '🎲 Freeze defense roll', detail: 'Frozen founder rolls — only a 6 negates.' },
-      'police-raid-attacker': { title: '🎲 Police Raid on Mafia', detail: 'Attacker is rolling against the Mafia.' },
       'police-raid-defender': { title: '🎲 Mafia counter roll', detail: 'Mafia owner rolls to repel the raid.' },
-      'remove-investors': { title: '🎲 Remove Investors roll', detail: 'Attacker is rolling to clear investors from a lot.' },
       'rezoning': { title: '🎲 Rezoning roll', detail: 'Founder is rolling to rezone a vacant lot.' },
     }
     const copy = titles[mode]
@@ -2128,6 +2155,16 @@ function AppInner() {
           scandalContext: undefined,
           removeInvestorsContext: undefined,
         })
+        {
+          const targetName =
+            safeGameState.players.find((p) => p.id === freezeTarget)?.name ?? 'a rival founder'
+          announceConfrontationAttempt(
+            'City Council Freeze',
+            acting.name,
+            targetName,
+            `${acting.name} is rolling to freeze ${targetName}'s builds.`
+          )
+        }
         return
       }
     }
@@ -2339,6 +2376,21 @@ function AppInner() {
           scandalContext: undefined,
           removeInvestorsContext: undefined,
         })
+        {
+          const attackerName = safeGameState.players[cpIdx]?.name ?? 'Attacker'
+          const mafiaOwner =
+            safeGameState.players.find((p) =>
+              safeGameState.plots.some(
+                (pl) => pl.builtProperty === 'mafia' && pl.claimedBy === p.id
+              )
+            )?.name ?? 'the Mafia owner'
+          announceConfrontationAttempt(
+            'Police Raid on Mafia',
+            attackerName,
+            mafiaOwner,
+            `${attackerName} is raiding ${mafiaOwner}'s Mafia influence.`
+          )
+        }
         if (influenceBonus > 0) {
           toast.success(`+${influenceBonus} raid influence (${influenceLabels.join(' / ')}) on your Police Raid roll.`)
         }
@@ -3459,14 +3511,19 @@ function AppInner() {
     })
     setInvestmentSelectMode({ active: false, validPlots: [], actionInstanceId: null, contributionMillion: 4 })
     const investKind: ConfrontationKind = contribution >= 8 ? 'Double Investment' : 'Investment'
-    announceConfrontation(
-      investKind,
-      investorPreview.name,
-      ownerPreview?.name ?? 'the owner',
-      'success',
-      `$${contribution}M invested in ${propertyTitle} at ${col}${row}. Cash paid to the property owner.`,
-      'income'
-    )
+    const ownerName = ownerPreview?.name ?? 'the owner'
+    // Instant resolve — use attempt-style title so every seat sees the vs-player play.
+    broadcastBoardFx({
+      notice: {
+        title: confrontationAttemptTitle(investKind, investorPreview.name, ownerName),
+        detail: confrontationNoticeDetail(
+          'success',
+          `$${contribution}M invested in ${propertyTitle} at ${col}${row}. Cash paid to ${ownerName}.`
+        ),
+        durationMs: 5500,
+      },
+      sound: 'income',
+    })
   }
 
   const handleCancelRemoveInvestorsSelect = () => {
@@ -3548,6 +3605,22 @@ function AppInner() {
 
       return current
     })
+    {
+      const investorIds = [
+        ...new Set((plotPreview.investmentStripes ?? []).map((s) => s.investorId)),
+      ]
+      const investorLabel =
+        investorIds
+          .map((id) => safeGameState.players.find((p) => p.id === id)?.name)
+          .filter(Boolean)
+          .join(', ') || 'investors'
+      announceConfrontationAttempt(
+        'Remove Investors',
+        ownerPreview.name,
+        investorLabel,
+        `${ownerPreview.name} is rolling to clear investors from ${col}${row}.`
+      )
+    }
   }
 
   const handleActionCriteriaBank = () => {
@@ -3818,6 +3891,12 @@ function AppInner() {
       rezoningContext: undefined,
       scandalContext: undefined,
     })
+    announceConfrontationAttempt(
+      'Hostile Takeover',
+      attackerPreview.name,
+      ownerName,
+      `${attackerPreview.name} paid $1M and is rolling to seize ${col}${row}.`
+    )
     if (takeoverBonus !== 0) {
       const prefix = takeoverBonus > 0 ? `+${takeoverBonus}` : `${takeoverBonus}`
       toast.info(`${prefix} takeover influence — ${takeoverLabels.join(', ')}.`)
@@ -3876,6 +3955,16 @@ function AppInner() {
       takeoverContext: undefined,
       rezoningContext: undefined,
     })
+    {
+      const ownerName =
+        safeGameState.players.find((p) => p.id === ownerPlayerId)?.name ?? 'the anchor owner'
+      announceConfrontationAttempt(
+        'Scandal',
+        attackerPreview.name,
+        ownerName,
+        `${attackerPreview.name} is targeting ${ownerName}'s anchor at ${col}${row}.`
+      )
+    }
     if (scandalRollBonus > 0) {
       toast.success(`+${scandalRollBonus} on your scandal roll from ${scandalRollLabels.join(' & ')}.`)
     }
@@ -7320,6 +7409,15 @@ function AppInner() {
               >
                 <Anchor size={16} weight="duotone" />
               </button>
+              <button
+                type="button"
+                aria-label="Open Action Cards reference"
+                title="Action Cards"
+                onClick={() => setActionCardsOpen(true)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#c4b5fd]"
+              >
+                <Gavel size={16} weight="duotone" />
+              </button>
             </div>
             {safeGameState.players.map((player, index) => {
               const isActive = index === safeGameState.currentPlayerIndex
@@ -7437,6 +7535,15 @@ function AppInner() {
                 className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#d8b75a]/25 bg-[#d8b75a]/[0.06] text-[#d8b75a] transition-colors hover:border-[#d8b75a]/55 hover:bg-[#d8b75a]/[0.12] hover:text-[#f1df9d]"
               >
                 <Anchor size={20} weight="duotone" />
+              </button>
+              <button
+                type="button"
+                aria-label="Open Action Cards reference"
+                title="Action Cards"
+                onClick={() => setActionCardsOpen(true)}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#c4b5fd]/25 bg-[#c4b5fd]/[0.06] text-[#c4b5fd] transition-colors hover:border-[#c4b5fd]/55 hover:bg-[#c4b5fd]/[0.12] hover:text-[#ddd6fe]"
+              >
+                <Gavel size={20} weight="duotone" />
               </button>
             </div>
           </div>
@@ -7774,6 +7881,7 @@ function AppInner() {
       <Toaster />
       <RulesQuickSheet open={rulesQuickOpen} onOpenChange={setRulesQuickOpen} />
       <AnchorTenetsQuickSheet open={anchorTenetsOpen} onOpenChange={setAnchorTenetsOpen} />
+      <ActionCardsQuickSheet open={actionCardsOpen} onOpenChange={setActionCardsOpen} />
       <InvestmentOrphanDialog
         open={actionCriteriaDialog.open}
         cardName={actionCriteriaDialog.cardName}

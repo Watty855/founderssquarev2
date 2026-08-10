@@ -9,14 +9,28 @@ export type ConfrontationKind =
   | 'Investment'
   | 'Double Investment'
 
-export type ConfrontationOutcome = 'success' | 'failure' | 'blocked' | 'pending'
+export type ConfrontationOutcome = 'success' | 'failure' | 'blocked' | 'pending' | 'attempting'
 
+/** Outcome titles: "Hostile Takeover: Alice vs Bob" */
 export function confrontationNoticeTitle(
   kind: ConfrontationKind,
   attackerName: string,
   targetName: string
 ): string {
   return `${kind}: ${attackerName} vs ${targetName}`
+}
+
+/**
+ * Dramatic attempt banner when a vs-player action is laid / targeted.
+ * Example: "Alice is attempting a Hostile Takeover against Bob"
+ */
+export function confrontationAttemptTitle(
+  kind: ConfrontationKind,
+  attackerName: string,
+  targetName: string
+): string {
+  const article = /^[AEIOUaeiou]/.test(kind) ? 'an' : 'a'
+  return `${attackerName} is attempting ${article} ${kind} against ${targetName}`
 }
 
 export function confrontationOutcomeLabel(outcome: ConfrontationOutcome): string {
@@ -29,6 +43,8 @@ export function confrontationOutcomeLabel(outcome: ConfrontationOutcome): string
       return 'BLOCKED'
     case 'pending':
       return 'RESOLVING'
+    case 'attempting':
+      return 'ATTEMPTING'
   }
 }
 

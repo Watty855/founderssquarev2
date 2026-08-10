@@ -245,11 +245,26 @@ export function IncomeDialog({
     return () => window.clearTimeout(t)
   }, [open, aiAutoplay, aiFastPlayback, hasIncomeGeneratingProperties, showInitialChoice])
 
+  /** Bots always play Double Income when available — income maximization is the table goal. */
   useEffect(() => {
     if (!open || !aiAutoplay || showInitialChoice || !showDoubleIncomePrompt) return
-    const t = window.setTimeout(() => setShowDoubleIncomePrompt(false), aiPlaybackDelay(380, aiFastPlayback))
+    const t = window.setTimeout(() => {
+      if (doubleIncomeAllowed && doubleIncomeCards.length > 0) {
+        setDoubleIncomeActive(true)
+        setSelectedDoubleIncomeId(doubleIncomeCards[0].instanceId)
+      }
+      setShowDoubleIncomePrompt(false)
+    }, aiPlaybackDelay(380, aiFastPlayback))
     return () => window.clearTimeout(t)
-  }, [open, aiAutoplay, aiFastPlayback, showInitialChoice, showDoubleIncomePrompt])
+  }, [
+    open,
+    aiAutoplay,
+    aiFastPlayback,
+    showInitialChoice,
+    showDoubleIncomePrompt,
+    doubleIncomeAllowed,
+    doubleIncomeCards,
+  ])
 
   useEffect(() => {
     if (!open || !aiAutoplay || !incomeResult) return

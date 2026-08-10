@@ -8,6 +8,8 @@ import { getValidPlotsForProperty, getVacantCityLotsForRezoning } from '@/lib/pl
 import {
   getHousingBuildCost,
   getPlotPropertyEndValue,
+  getPlotPropertyIncome,
+  HIGH_DENSITY_HOUSING_STATS,
   isHousingPropertyCard,
 } from '@/lib/housingEconomics'
 import { turnLimitReached, MAX_TURN_ACTIONS, canAttemptRezoning } from '@/lib/turnActions'
@@ -446,6 +448,27 @@ function tryCompleteSelectMode(
   return false
 }
 
+/**
+ * Primary win condition for Founderbots: maximize income / cash.
+ * Play Income (with Double Income when slots allow) before builds or confrontations.
+ */
+function tryPlayIncomeFirst(gs: GameState, cp: Player, h: SimpleAiTurnHandlers): boolean {
+  if (gs.incomeResolvedThisTurn === true) return false
+  const income = cp.actionCards.find((a) => a.cardId === 'income')
+  if (!income) return false
+  const consumed = gs.turnActionsConsumed ?? 0
+  const slotsLeft = MAX_TURN_ACTIONS - consumed
+  if (slotsLeft <= 0 || turnLimitReached(consumed)) return false
+
+  const doubleInc = cp.actionCards.find((a) => a.cardId === 'double-income')
+  const playDouble = doubleInc != null && consumed + 2 <= MAX_TURN_ACTIONS
+  const actions = playDouble
+    ? [income.instanceId, doubleInc.instanceId]
+    : [income.instanceId]
+  h.handlePlayCards(null, actions, [], undefined)
+  return true
+}
+
 function tryPlaySafeActionsOrEnd(gs: GameState, cp: Player, h: SimpleAiTurnHandlers): void {
   const consumed = gs.turnActionsConsumed ?? 0
   const slotsLeft = MAX_TURN_ACTIONS - consumed
@@ -454,13 +477,14 @@ function tryPlaySafeActionsOrEnd(gs: GameState, cp: Player, h: SimpleAiTurnHandl
     return
   }
 
+  if (tryPlayIncomeFirst(gs, cp, h)) return
   if (tryPlayConfrontation(gs, cp, h)) return
 
-  const prefer = ['draw-2-action-cards', 'taxation', 'crossing-the-line', 'roll-die', 'income'] as const
+  // Income already attempted above; remaining safe actions grow the hand / economy.
+  const prefer = ['draw-2-action-cards', 'taxation', 'crossing-the-line', 'roll-die'] as const
   for (const key of prefer) {
     const inst = cp.actionCards.find((a) => a.cardId === key)
     if (!inst) continue
-    if (key === 'income' && gs.incomeResolvedThisTurn === true) continue
     if ((gs.turnActionsConsumed ?? 0) + 1 > MAX_TURN_ACTIONS) continue
     h.handlePlayCards(null, [inst.instanceId], [], undefined)
     return
@@ -581,7 +605,10 @@ export function trySimpleAiMainPhase(
     return true
   }
 
-  // Build cheapest affordable property first when possible.
+  // Goal: greatest income — resolve Income before builds / confrontations when held.
+  if (tryPlayIncomeFirst(gs, cp, h)) return true
+
+  // Build the highest-income affordable property (high density when it pays more).
   if (
     gs.councilFreezeBlockBuildForPlayerId !== cp.id &&
     (gs.propertiesBuiltThisTurn ?? 0) < 1 &&
@@ -600,32 +627,66 @@ export function trySimpleAiMainPhase(
         const template = resolvePropertyPlacementTemplate(c, wildEmu)
         if (!template) return null
         const plots = getValidPlotsForProperty(template, gs.plots, gs.crossingTheLineActive)
-        const cheapest = c.id === 'anchor-wild-card' ? 6 : getHousingBuildCost(c, false)
-        const canAfford = cp.money >= cheapest && plots.length > 0
-        return canAfford ? { inst, cheapest, nplots: plots.length, wildEmu } : null
+        if (plots.length === 0) return null
+
+        const costStd = c.id === 'anchor-wild-card' ? 6 : getHousingBuildCost(c, false)
+        const canStd = cp.money >= costStd
+        const housing = isHousingPropertyCard(c)
+        const costHd = housing ? getHousingBuildCost(c, true) : costStd
+        const canHd = housing && cp.money >= costHd
+        const incomeStd = getPlotPropertyIncome(
+          { housingHighDensity: false } as Plot,
+          c
+        )
+        const incomeHd = housing ? HIGH_DENSITY_HOUSING_STATS.buildIncome : incomeStd
+        // Prefer high density when affordable and it raises income (or same income but we can afford it).
+        const useHd = canHd && incomeHd >= incomeStd && (!canStd || incomeHd > incomeStd || costHd <= costStd)
+        if (!canStd && !canHd) return null
+        const highDensity = useHd
+        const cost = highDensity ? costHd : costStd
+        const income = highDensity ? incomeHd : incomeStd
+        const endValue = highDensity
+          ? HIGH_DENSITY_HOUSING_STATS.endGameValue
+          : c.endGameValue
+        return {
+          inst,
+          cost,
+          income,
+          endValue,
+          nplots: plots.length,
+          wildEmu,
+          highDensity,
+        }
       })
       .filter(Boolean) as {
       inst: CardInstance
-      cheapest: number
+      cost: number
+      income: number
+      endValue: number
       nplots: number
       wildEmu?: string
+      highDensity: boolean
     }[]
 
-    ranked.sort((a, b) => a.cheapest - b.cheapest || b.nplots - a.nplots)
+    // Highest income first, then end-game value, then cheaper cost, then more legal lots.
+    ranked.sort(
+      (a, b) =>
+        b.income - a.income || b.endValue - a.endValue || a.cost - b.cost || b.nplots - a.nplots
+    )
 
     if (ranked.length > 0) {
-      const { inst, wildEmu } = ranked[0]
+      const { inst, wildEmu, highDensity } = ranked[0]
       h.handlePlayCards(inst.instanceId, [], [], {
         skipTaxBuildPrompt: true,
         useTaxBuild: false,
-        housingHighDensity: false,
+        housingHighDensity: highDensity,
         wildCardEmulatePropertyId: wildEmu,
       })
       return true
     }
   }
 
-  // Prefer confrontation / economy actions over ending early.
+  // Confrontations after income + building — still useful for table control.
   if (tryPlayConfrontation(gs, cp, h)) return true
 
   tryPlaySafeActionsOrEnd(gs, cp, h)

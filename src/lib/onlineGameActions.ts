@@ -76,7 +76,7 @@ export type GameEvent =
 /** Fire-and-forget effects (sounds / board notices) mirrored to every device on the board channel. */
 export type BoardFx = {
   sound?: 'construction' | 'anchor' | 'income' | 'boo' | 'cheer' | 'dwindle'
-  notice?: { title: string; detail?: string }
+  notice?: { title: string; detail?: string; /** Override default board-notice duration (ms). */ durationMs?: number }
 }
 
 export type ApplyGameActionResult =
