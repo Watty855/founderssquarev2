@@ -58,6 +58,12 @@ export interface GameState {
   turnActionsConsumed: number
   /** Set when the current founder finishes the Income dialog (roll or bank); blocks another Income play until end of turn. */
   incomeResolvedThisTurn?: boolean
+  /**
+   * End-of-turn only: acting founder holds more than 8 action cards and must discard
+   * down to 8 before the turn can advance. Mid-turn draws (including the start-of-turn
+   * draw 2) may exceed 8 without setting this flag.
+   */
+  awaitingEndTurnActionDiscard?: boolean
   crossingTheLineActive: boolean
   playedPropertyCardThisTurn?: string
   newCardsDrawn?: CardInstance[]

@@ -11,6 +11,38 @@ import { attachUndoSnapshotIfTurnAction } from '@/lib/undoLastAction'
 import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
 import { resolveRebuttalRoll } from '@/lib/gameEngine/applyRebuttalResolution'
+import {
+  MAX_ACTION_HAND_SIZE,
+  MAX_TURN_ACTIONS,
+  actionHandDiscardCount,
+  shouldAutoAdvanceTurn,
+} from '@/lib/turnActions'
+
+/** After a fully-resolved action, advance the turn when all 3 action slots are spent. */
+function withAutoAdvanceIfBudgetSpent(result: ApplyGameActionResult): ApplyGameActionResult {
+  if (!result.ok) return result
+  if (!shouldAutoAdvanceTurn(result.state)) return result
+  const end = applyEndTurn(result.state)
+  if (!end.ok) return result
+  const discardPending = end.events.some((e) => e.type === 'discard_required')
+  const turnAdvanced = end.events.some((e) => e.type === 'turn_changed')
+  const toastMessage = discardPending
+    ? `All ${MAX_TURN_ACTIONS} actions used — discard down to ${MAX_ACTION_HAND_SIZE} action cards to end your turn.`
+    : turnAdvanced
+      ? `All ${MAX_TURN_ACTIONS} actions used — next founder's turn.`
+      : null
+  return {
+    ok: true,
+    state: end.state,
+    events: [
+      ...result.events,
+      ...end.events,
+      ...(toastMessage
+        ? [{ type: 'toast' as const, level: 'info' as const, message: toastMessage }]
+        : []),
+    ],
+  }
+}
 
 function verifyDefenderSeat(
   state: GameState,
@@ -79,10 +111,10 @@ export function applyGameAction(
       if (turnErr) return turnErr
       const result = applyBuildAt(state, action)
       if (!result.ok) return result
-      return {
+      return withAutoAdvanceIfBudgetSpent({
         ...result,
         state: attachUndoSnapshotIfTurnAction(state, result.state),
-      }
+      })
     }
 
     case 'income_complete': {
@@ -90,10 +122,10 @@ export function applyGameAction(
       if (turnErr) return turnErr
       const result = applyIncomeComplete(state, action)
       if (!result.ok) return result
-      return {
+      return withAutoAdvanceIfBudgetSpent({
         ...result,
         state: attachUndoSnapshotIfTurnAction(state, result.state),
-      }
+      })
     }
 
     case 'animation_flags_clear':
@@ -103,7 +135,21 @@ export function applyGameAction(
       const turnErr = assertActorTurn(state, ctx)
       if (turnErr) return turnErr
       const cur = state.players[state.currentPlayerIndex]
+      const need = actionHandDiscardCount(cur.actionCards.length)
+      if (need <= 0) {
+        return { ok: false, error: 'No end-of-turn action discard is required.', code: 'no_discard' }
+      }
+      if (action.instanceIds.length !== need) {
+        return {
+          ok: false,
+          error: `Discard exactly ${need} action card${need === 1 ? '' : 's'} to end your turn.`,
+          code: 'bad_discard_count',
+        }
+      }
       const ids = new Set(action.instanceIds)
+      if (ids.size !== action.instanceIds.length) {
+        return { ok: false, error: 'Duplicate discard selection.', code: 'bad_discard' }
+      }
       const removed = cur.actionCards.filter((c) => ids.has(c.instanceId))
       if (removed.length !== action.instanceIds.length) {
         return { ok: false, error: 'Discarded cards are not in the acting hand.', code: 'bad_discard' }
@@ -115,8 +161,10 @@ export function applyGameAction(
           idx === state.currentPlayerIndex ? { ...p, actionCards: kept } : p
         ),
         actionDiscard: [...state.actionDiscard, ...removed],
+        awaitingEndTurnActionDiscard: undefined,
       }
-      // Re-run end turn: hand is now within limits, so the turn advances.
+      // Re-run end turn: hand is now within the soft cap, so the turn advances.
+      // The next founder may draw 2 and exceed the cap until *their* end of turn.
       return applyEndTurn(discarded)
     }
 
@@ -153,7 +201,7 @@ export function applyGameAction(
           ? state.councilFreezeBlockBuildForPlayerId
           : pending.targetPlayerId,
       }
-      return {
+      return withAutoAdvanceIfBudgetSpent({
         ok: true,
         state: next,
         events: [
@@ -165,7 +213,7 @@ export function applyGameAction(
             negated,
           },
         ],
-      }
+      })
     }
 
     case 'rebuttal_roll': {
@@ -185,7 +233,7 @@ export function applyGameAction(
         return { ok: false, error: 'No rebuttal roll is pending.', code: 'no_pending_rebuttal' }
       }
 
-      return {
+      return withAutoAdvanceIfBudgetSpent({
         ok: true,
         state: resolved.state,
         events: [
@@ -199,7 +247,7 @@ export function applyGameAction(
             plotLabel: resolved.plotLabel,
           },
         ],
-      }
+      })
     }
 
     case 'play_cards':

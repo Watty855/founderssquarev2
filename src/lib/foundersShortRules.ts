@@ -35,6 +35,7 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
     lines: [
       'Each turn you get 3 actions: either 1 build + 2 other actions, or 0 builds + 3 actions. The turn ends as soon as all 3 are used.',
       'Successful Rezoning includes a build and costs 2 actions; a failed Rezoning costs 1. Only one Income action can be played per turn.',
+      'You may hold more than 8 action cards during your turn (start-of-turn draw 2, or Draw 2 Action Cards). Discard down to 8 only when your turn ends.',
     ],
   },
   {

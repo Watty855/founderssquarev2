@@ -1314,13 +1314,13 @@ export const actionCards: ActionCard[] = [
     type: 'action',
     category: 'social',
     name: 'Draw 2 Action Cards',
-    description: 'Draw 2 more action cards',
+    description: 'Draw 2 more action cards (hand may exceed 8 until end of turn)',
     buildCost: 0,
     buildIncome: 0,
     bankValue: 2,
     copies: 12,
     diceRequired: false,
-    actions: 'Draw 2 more action cards.'
+    actions: 'Draw 2 more action cards. You may exceed 8 in hand until end of turn.'
   },
   {
     id: 'discard-property-cards',

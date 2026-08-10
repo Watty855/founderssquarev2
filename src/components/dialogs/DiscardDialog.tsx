@@ -84,9 +84,10 @@ export function DiscardDialog({
         }}
       >
         <DialogHeader style={{ marginBottom: 4 }}>
-          <DialogTitle style={{ fontSize: 18, fontWeight: 400 }}>Discard Action Cards</DialogTitle>
+          <DialogTitle style={{ fontSize: 18, fontWeight: 400 }}>End of Turn — Discard to 8</DialogTitle>
           <DialogDescription style={{ fontSize: 13, color: '#8888a0', lineHeight: 1.4 }}>
-            You have too many action cards. Select {numToDiscard} card{numToDiscard > 1 ? 's' : ''} to discard.
+            Action hands may go over 8 during your turn. To end this turn, select {numToDiscard} card
+            {numToDiscard > 1 ? 's' : ''} to discard down to 8.
             ({selectedCards.length}/{numToDiscard} selected)
           </DialogDescription>
         </DialogHeader>

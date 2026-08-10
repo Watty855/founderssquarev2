@@ -11,25 +11,91 @@ interface UseDiceBoxOptions {
 /** 3D roll animations normally settle in ~2-3s; past this we assume the canvas hung. */
 const ROLL_TIMEOUT_MS = 8000
 
+/**
+ * WebGL + asset init normally finishes well under a second. WKWebView can stall
+ * `initialize()` forever (service-worker 206 audio, killed GPU process, context cap)
+ * without rejecting — past this we switch to the instant-roll fallback so the roll
+ * button can never stay stuck on "Loading...".
+ */
+const INIT_TIMEOUT_MS = 5000
+
 function randomDie(): number {
   return Math.floor(Math.random() * 6) + 1
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    promise.then(
+      (v) => {
+        clearTimeout(t)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(t)
+        reject(e)
+      }
+    )
+  })
+}
+
+/** clearDice() throws if the renderer's context is already dead — never let that escape into React. */
+function safeClearDice(db: DiceBox | null) {
+  if (!db) return
+  try {
+    db.clearDice()
+  } catch {
+    /* renderer already dead */
+  }
+}
+
+/**
+ * iOS Safari caps live WebGL contexts and silently kills the oldest; each dialog open
+ * creates a fresh context, so long games hit the cap and dice init starts hanging.
+ * Explicitly losing the context on teardown returns it to the pool immediately
+ * instead of waiting on GC.
+ */
+function forceLoseCanvasContext(canvas: HTMLCanvasElement) {
+  try {
+    const gl = (canvas.getContext('webgl2') ||
+      canvas.getContext('webgl')) as WebGLRenderingContext | null
+    gl?.getExtension('WEBGL_lose_context')?.loseContext()
+  } catch {
+    /* context already lost */
+  }
+}
+
+function releaseContainerCanvases(containerId: string) {
+  const container = document.getElementById(containerId)
+  if (!container) return
+  for (const canvas of Array.from(container.querySelectorAll('canvas'))) {
+    forceLoseCanvasContext(canvas)
+  }
+}
+
 export function useDiceBox({ containerId, open }: UseDiceBoxOptions) {
   const diceBoxRef = useRef<DiceBox | null>(null)
+  /** Canvas created by the current DiceBox — kept so teardown can lose its context even after unmount. */
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [isRolling, setIsRolling] = useState(false)
   const [diceValue, setDiceValue] = useState<number | null>(null)
   const [isReady, setIsReady] = useState(false)
   const initializingRef = useRef(false)
-  /** WebGL/asset init failed (e.g. WKWebView refused a context) — roll without the 3D animation so the game never stalls. */
+  /** WebGL/asset init failed or hung (e.g. WKWebView refused a context) — roll without the 3D animation so the game never stalls. */
   const fallbackModeRef = useRef(false)
+
+  const teardownRenderer = useCallback(() => {
+    safeClearDice(diceBoxRef.current)
+    diceBoxRef.current = null
+    if (canvasRef.current) {
+      forceLoseCanvasContext(canvasRef.current)
+      canvasRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     if (!open) {
-      if (diceBoxRef.current) {
-        diceBoxRef.current.clearDice()
-        diceBoxRef.current = null
-      }
+      teardownRenderer()
       setDiceValue(null)
       setIsRolling(false)
       setIsReady(false)
@@ -68,28 +134,33 @@ export function useDiceBox({ containerId, open }: UseDiceBoxOptions) {
 
         try {
           db = new DiceBox(`#${containerId}`, { ...baseConfig, sounds: true })
-          await db.initialize()
+          await withTimeout(db.initialize(), INIT_TIMEOUT_MS, 'DiceBox init (sounds)')
         } catch {
-          // Sound loading can fail (e.g. service worker caching 206 responses).
-          // Clear the failed renderer, retry without sounds.
+          // Sound loading can fail or hang (e.g. service worker caching 206 responses).
+          // Release the failed renderer's context, clear the container, retry without sounds.
           console.warn('DiceBox init with sounds failed, retrying without sounds')
+          releaseContainerCanvases(containerId)
           const el = document.getElementById(containerId)
           if (el) el.innerHTML = ''
           db = new DiceBox(`#${containerId}`, { ...baseConfig, sounds: false })
-          await db.initialize()
+          await withTimeout(db.initialize(), INIT_TIMEOUT_MS, 'DiceBox init (no sounds)')
         }
 
         if (cancelled) {
-          db.clearDice()
+          safeClearDice(db)
+          releaseContainerCanvases(containerId)
           return
         }
 
         diceBoxRef.current = db
+        canvasRef.current = container.querySelector('canvas')
         setIsReady(true)
       } catch (err) {
-        // 3D renderer unavailable (WebGL context refused, assets missing, low memory).
-        // Enter fallback mode so rolls still resolve and the game keeps moving.
+        // 3D renderer unavailable or hung (WebGL context refused, assets missing,
+        // low memory, init timeout). Release anything half-built, then enter
+        // fallback mode so rolls still resolve and the game keeps moving.
         console.error('Failed to initialize DiceBox — using instant-roll fallback:', err)
+        releaseContainerCanvases(containerId)
         if (!cancelled) {
           fallbackModeRef.current = true
           setIsReady(true)
@@ -104,15 +175,12 @@ export function useDiceBox({ containerId, open }: UseDiceBoxOptions) {
     return () => {
       cancelled = true
       clearTimeout(timer)
-      if (diceBoxRef.current) {
-        diceBoxRef.current.clearDice()
-        diceBoxRef.current = null
-      }
+      teardownRenderer()
       setIsReady(false)
       initializingRef.current = false
       fallbackModeRef.current = false
     }
-  }, [open, containerId])
+  }, [open, containerId, teardownRenderer])
 
   const roll = useCallback(async (): Promise<number> => {
     if (isRolling) return 0
@@ -141,11 +209,7 @@ export function useDiceBox({ containerId, open }: UseDiceBoxOptions) {
       if (result === null) {
         console.warn('Dice roll animation timed out — resolving with fallback value')
         fallbackModeRef.current = true
-        try {
-          diceBoxRef.current?.clearDice()
-        } catch {
-          /* renderer already dead */
-        }
+        safeClearDice(diceBoxRef.current)
         const value = randomDie()
         setDiceValue(value)
         setIsRolling(false)
@@ -165,9 +229,7 @@ export function useDiceBox({ containerId, open }: UseDiceBoxOptions) {
   }, [isRolling])
 
   const reset = useCallback(() => {
-    if (diceBoxRef.current) {
-      diceBoxRef.current.clearDice()
-    }
+    safeClearDice(diceBoxRef.current)
     setDiceValue(null)
     setIsRolling(false)
   }, [])

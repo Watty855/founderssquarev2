@@ -127,10 +127,12 @@ import {
 } from '@/lib/housingEconomics'
 import { getBuildCelebrationNotice, getPlotLotDisplayName } from '@/lib/buildCelebrationMessages'
 import {
+  MAX_ACTION_HAND_SIZE,
   MAX_TURN_ACTIONS,
   REZONING_SUCCESS_ACTION_COST,
   canAttemptRezoning,
   replenishCurrentPlayerActionHand,
+  shouldAutoAdvanceTurn,
   turnLimitReached,
 } from '@/lib/turnActions'
 import { nextPlayRoundNumber } from '@/lib/playRound'
@@ -668,6 +670,12 @@ function AppInner() {
 
   const aiGsRef = useRef<GameState | null>(null)
   const aiCpRef = useRef<Player | null>(null)
+  /** Stable call site for auto-ending the turn once 3 actions are spent (wired after scheduleEndOfTurn is defined). */
+  const scheduleEndOfTurnRef = useRef<() => void>(() => {})
+  const nudgeTurnAdvanceForSpentBudget = () => {
+    toast.info(`All ${MAX_TURN_ACTIONS} actions used — moving to the next founder.`)
+    scheduleEndOfTurnRef.current()
+  }
   const aiHooksRef = useRef<SimpleAiTurnHandlers>({
     handleEndTurn: () => {},
     handleUndoLastActionCancel: () => {},
@@ -1686,6 +1694,7 @@ function AppInner() {
         propertyDiscard: [],
         turnActionsConsumed: 0,
         incomeResolvedThisTurn: false,
+        awaitingEndTurnActionDiscard: undefined,
         newCardsDrawn: initialActionCards,
         showNewCardsAnimation: true,
         openingNarrationComplete: false,
@@ -1726,6 +1735,12 @@ function AppInner() {
     convertToCashInstanceIds: string[],
     options?: PlayCardsOptions
   ) => {
+    if (safeGameState.awaitingEndTurnActionDiscard || discardDialogState.open) {
+      toast.info(
+        `Discard down to ${MAX_ACTION_HAND_SIZE} action cards to finish ending your turn.`
+      )
+      return
+    }
     if (propertyInstanceId) {
       if (rezoningMode.phase !== 'inactive') {
         toast.error('Finish or cancel Rezoning before building from your hand.')
@@ -1761,7 +1776,7 @@ function AppInner() {
         return
       }
       if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-        toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+        nudgeTurnAdvanceForSpentBudget()
         return
       }
 
@@ -2024,7 +2039,7 @@ function AppInner() {
         return
       }
       if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-        toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+        nudgeTurnAdvanceForSpentBudget()
         return
       }
       setDoubleIncomeOrphanDialog({ open: true, instanceId: actionInstanceIds[0] ?? null })
@@ -2128,7 +2143,7 @@ function AppInner() {
       const inst = safeGameState.players[cpIdx].actionCards.find((a) => a.instanceId === instanceId)
       if (inst?.cardId === 'city-council-freeze') {
         if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-          toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+          nudgeTurnAdvanceForSpentBudget()
           return
         }
         const freezeTarget = resolvedCouncilFreezeTargetId
@@ -2209,7 +2224,7 @@ function AppInner() {
           return
         }
         if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-          toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+          nudgeTurnAdvanceForSpentBudget()
           return
         }
         setInvestmentSelectMode({
@@ -2276,7 +2291,7 @@ function AppInner() {
           return
         }
         if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-          toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+          nudgeTurnAdvanceForSpentBudget()
           return
         }
         setTakeoverSelectMode({
@@ -2320,7 +2335,7 @@ function AppInner() {
           return
         }
         if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-          toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+          nudgeTurnAdvanceForSpentBudget()
           return
         }
         setScandalSelectMode({
@@ -2352,7 +2367,7 @@ function AppInner() {
           return
         }
         if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-          toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+          nudgeTurnAdvanceForSpentBudget()
           return
         }
         /** +1 raid influence (max +1) when attacker owns built Police, City Hall, and/or Courthouse anywhere. */
@@ -2439,7 +2454,7 @@ function AppInner() {
           return
         }
         if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-          toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+          nudgeTurnAdvanceForSpentBudget()
           return
         }
         setRemoveInvestorsSelectMode({
@@ -2545,7 +2560,7 @@ function AppInner() {
       }
       if (ac?.id === 'discard-property-cards') {
         if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-          toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+          nudgeTurnAdvanceForSpentBudget()
           return
         }
         const acting = safeGameState.players[cpIdx]
@@ -2571,9 +2586,13 @@ function AppInner() {
     const playStepsBatch = countResolvedActionStepsInBatch(actionInstanceIds, handForStepCount)
     const bankStepsBatch = convertToCashInstanceIds.length
     if ((safeGameState.turnActionsConsumed ?? 0) + playStepsBatch + bankStepsBatch > MAX_TURN_ACTIONS) {
-      toast.error(
-        `You only have ${MAX_TURN_ACTIONS} actions per turn. Play or bank fewer cards, or click End Turn.`
-      )
+      if (turnLimitReached(safeGameState.turnActionsConsumed)) {
+        nudgeTurnAdvanceForSpentBudget()
+      } else {
+        toast.error(
+          `You only have ${MAX_TURN_ACTIONS} actions per turn. Play or bank fewer cards this play.`
+        )
+      }
       return
     }
 
@@ -3139,16 +3158,16 @@ function AppInner() {
       handleEndTurn()
     }, 0)
   }
+  scheduleEndOfTurnRef.current = scheduleEndOfTurn
 
   /**
    * Idle-state safety net: if the acting founder has used all 3 actions and nothing is
    * mid-resolution (no dialog, placement, selection, or pending freeze), end their turn.
-   * Guarded by scheduleEndOfTurn so it never races the per-action auto-end. AI seats end
-   * through their own driver, so this only nudges human seats this device controls.
+   * Applies to humans and Founderbots this device controls (solo host or online host AI).
    */
   const actingSeatForAutoEnd = safeGameState.players[safeGameState.currentPlayerIndex]
   const localControlsActingSeat = !partyBoardConfig
-    ? actingSeatForAutoEnd?.isAi !== true
+    ? true // solo / local: this device drives every seat, including Founderbots
     : actingSeatForAutoEnd?.isAi === true
       ? partyBoardConfig.role === 'host'
       : partyBoardSeatPlayer?.id === actingSeatForAutoEnd?.id
@@ -3165,15 +3184,12 @@ function AppInner() {
     !investmentSelectMode.active &&
     !removeInvestorsSelectMode.active &&
     !discardPropertySelectMode.active &&
-    safeGameState.pendingCouncilFreezeDefense == null &&
-    safeGameState.pendingRebuttalRoll == null &&
-    safeGameState.showNewCardsAnimation !== true
+    !actionCriteriaDialog.open &&
+    shouldAutoAdvanceTurn(safeGameState)
   useEffect(() => {
     if (!safeGameState.isSetupComplete || safeGameState.gameEnded) return
     if (safeGameState.openingNarrationComplete === false) return
-    if (actingSeatForAutoEnd?.isAi === true && !partyBoardConfig) return
     if (!localControlsActingSeat) return
-    if (!turnLimitReached(safeGameState.turnActionsConsumed)) return
     if (!boardIdleForAutoEnd) return
     scheduleEndOfTurn()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3198,106 +3214,55 @@ function AppInner() {
       sendAction({ type: 'discard_action_cards', instanceIds: discardedInstanceIds })
       return
     }
-    patchGameState((current) => {
+    setDiscardDialogState({ open: false, numToDiscard: 0 })
+    toast.success(
+      `Discarded ${discardedInstanceIds.length} action card${discardedInstanceIds.length > 1 ? 's' : ''}`
+    )
+    setGameState((current) => {
       const currentPlayer = current.players[current.currentPlayerIndex]
-
-      const updatedActionCards = currentPlayer.actionCards.filter(
-        c => !discardedInstanceIds.includes(c.instanceId)
-      )
-
-      const discardedActionCards = currentPlayer.actionCards.filter(
-        c => discardedInstanceIds.includes(c.instanceId)
-      )
-
-      const updatedPlayers = current.players.map((p, idx) =>
-        idx === current.currentPlayerIndex
-          ? { ...p, actionCards: updatedActionCards }
-          : p
-      )
-
-      toast.success(`Discarded ${discardedInstanceIds.length} action card${discardedInstanceIds.length > 1 ? 's' : ''}`)
-
-      setDiscardDialogState({ open: false, numToDiscard: 0 })
-
-      const finalRoundPatch = applyFinalRoundCountdown(current)
-      if (finalRoundPatch.gameEnded) {
-        setTimeout(() => toast.success('Final Round complete — game over!'), 200)
-        return {
-          ...current,
-          ...clearCouncilFreezeIfEndingPlayer(current, current.currentPlayerIndex),
-          ...finalRoundPatch,
-          players: updatedPlayers,
-          actionDiscard: [...current.actionDiscard, ...discardedActionCards],
-          propertiesBuiltThisTurn: 0,
-          actionsPlayedThisTurn: 0,
-          turnActionsConsumed: 0,
-          incomeResolvedThisTurn: false,
-          crossingTheLineActive: false,
-          playedPropertyCardThisTurn: undefined,
-          lastBuiltProperty: undefined,
+      const ids = new Set(discardedInstanceIds)
+      const removed = currentPlayer.actionCards.filter((c) => ids.has(c.instanceId))
+      const kept = currentPlayer.actionCards.filter((c) => !ids.has(c.instanceId))
+      const afterDiscard: GameState = {
+        ...current,
+        players: current.players.map((p, idx) =>
+          idx === current.currentPlayerIndex ? { ...p, actionCards: kept } : p
+        ),
+        actionDiscard: [...current.actionDiscard, ...removed],
+        awaitingEndTurnActionDiscard: undefined,
+      }
+      // Same path as online: re-enter end turn. Next founder may draw 2 and
+      // exceed 8 until *their* turn ends — do not open discard for them here.
+      const result = applyEndTurn(afterDiscard)
+      if (!result.ok) {
+        toast.error(result.error)
+        return current
+      }
+      for (const ev of result.events) {
+        if (ev.type === 'discard_required') {
+          setDiscardDialogState({ open: true, numToDiscard: ev.numToDiscard })
+        } else if (ev.type === 'game_over') {
+          setTimeout(() => toast.success('Final Round complete — game over!'), 200)
+        } else if (ev.type === 'turn_changed') {
+          toast.info(ev.finalRound ? `${ev.playerName}'s final turn` : `${ev.playerName}'s turn`)
+        } else if (ev.type === 'toast') {
+          if (ev.level === 'success') toast.success(ev.message)
+          else if (ev.level === 'error') toast.error(ev.message)
+          else toast.info(ev.message)
         }
       }
-
-      const nextPlayerIndex = (current.currentPlayerIndex + 1) % current.players.length
-      const nextPlayer = current.players[nextPlayerIndex]
-      const playRoundNumber = nextPlayRoundNumber(current, nextPlayerIndex)
-
-      const mergedActionDiscard = [...current.actionDiscard, ...discardedActionCards]
-      const {
-        drawn: newActionCards,
-        deck: nextActionDeck,
-        discard: nextActionDiscard,
-      } = drawFromDeckWithDiscardReshuffle(current.actionDeck, mergedActionDiscard, 2)
-
-      const nextPlayerUpdated = {
-        ...nextPlayer,
-        actionCards: [...nextPlayer.actionCards, ...newActionCards]
-      }
-
-      const playersWithNewCards = updatedPlayers.map((p, idx) =>
-        idx === nextPlayerIndex ? nextPlayerUpdated : p
-      )
-
-      const inFinalRound = finalRoundPatch.finalRoundTurnsRemaining !== undefined
-      toast.info(
-        inFinalRound
-          ? `${nextPlayer.name}'s final turn`
-          : `${nextPlayer.name}'s turn`
-      )
-
-      return {
-        ...current,
-        ...clearCouncilFreezeIfEndingPlayer(current, current.currentPlayerIndex),
-        ...finalRoundPatch,
-        players: playersWithNewCards,
-        currentPlayerIndex: nextPlayerIndex,
-        playRoundNumber,
-        actionDeck: nextActionDeck,
-        actionDiscard: nextActionDiscard,
-        propertiesBuiltThisTurn: 0,
-        actionsPlayedThisTurn: 0,
-        turnActionsConsumed: 0,
-        incomeResolvedThisTurn: false,
-        crossingTheLineActive: false,
-        playedPropertyCardThisTurn: undefined,
-        newCardsDrawn: newActionCards,
-        showNewCardsAnimation: true,
-        lastBuiltProperty: undefined,
-      }
+      return result.state
     })
 
     setTimeout(() => {
-      if (isOnlineActor) {
-        sendActionRef.current({ type: 'animation_flags_clear' }, { skipOptimistic: true })
-      } else {
-        setGameState((current) => {
-          return {
-            ...current,
-            showNewCardsAnimation: false,
-            newCardsDrawn: undefined,
-          }
-        })
-      }
+      setGameState((current) => {
+        if (!current.showNewCardsAnimation) return current
+        return {
+          ...current,
+          showNewCardsAnimation: false,
+          newCardsDrawn: undefined,
+        }
+      })
     }, 2000)
   }
 
@@ -3627,7 +3592,7 @@ function AppInner() {
     const id = actionCriteriaDialog.actionInstanceId
     if (!id) return
     if (turnLimitReached(safeGameState.turnActionsConsumed)) {
-      toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
+      nudgeTurnAdvanceForSpentBudget()
       return
     }
     const banked = actionCriteriaDialog.bankValue
@@ -4154,9 +4119,7 @@ function AppInner() {
       if (!inst || inst.cardId !== 'double-income') return current
 
       if (turnLimitReached(current.turnActionsConsumed ?? 0)) {
-        queueMicrotask(() =>
-          toast.error(`You have used all ${MAX_TURN_ACTIONS} actions this turn. Click End Turn.`)
-        )
+        queueMicrotask(() => nudgeTurnAdvanceForSpentBudget())
         return current
       }
 
@@ -6068,6 +6031,15 @@ function AppInner() {
   const handleUnstickPlay = () => {
     const canDriveBots = !partyBoardConfig || partyBoardConfig.role === 'host'
     if (!canDriveBots) {
+      // A roll dialog open on THIS device is driven by this device (e.g. a guest's
+      // own defense roll). Force-resolve it locally so a hung dice renderer cannot
+      // hard-lock the guest — everything else needs the host.
+      const guestRoll = rollDieDialogStateRef.current
+      if (guestRoll.open) {
+        handleRollDieComplete(Math.floor(Math.random() * 6) + 1)
+        toast.success('Forced dice resolution — play continues.')
+        return
+      }
       toast.info('Ask the host to tap Unstick, or use Resync if the connection looks stale.')
       return
     }
@@ -6159,6 +6131,14 @@ function AppInner() {
       const forced = Math.floor(Math.random() * 6) + 1
       handleRollDieComplete(forced)
       toast.success('Forced computer dice resolution — play continues.')
+      return
+    }
+
+    // Human roll stuck on this device (hung WebGL init leaves the Roll button on
+    // "Loading..." with no Cancel on confrontation modes) — resolve it the same way.
+    if (rd.open) {
+      handleRollDieComplete(Math.floor(Math.random() * 6) + 1)
+      toast.success('Forced dice resolution — play continues.')
       return
     }
 
@@ -6755,6 +6735,15 @@ function AppInner() {
         tone: 'danger',
         ctaLabel: pendingDefAi ? 'Unstick' : 'Waiting for their roll',
         onCta: pendingDefAi ? handleUnstickPlay : undefined,
+      }
+    }
+    if (discardDialogState.open || safeGameState.awaitingEndTurnActionDiscard) {
+      return {
+        id: 'action-hand-discard',
+        title: `End of turn — discard to ${MAX_ACTION_HAND_SIZE}`,
+        detail: `You may hold more than ${MAX_ACTION_HAND_SIZE} action cards during your turn. Discard down to ${MAX_ACTION_HAND_SIZE} now to finish ending this turn.`,
+        tone: 'warning',
+        ctaLabel: 'Choose cards in dialog',
       }
     }
     if (incomeDialogState.open) {

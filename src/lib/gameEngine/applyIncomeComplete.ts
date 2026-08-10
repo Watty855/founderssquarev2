@@ -1,5 +1,5 @@
 import type { GameState } from '@/lib/types'
-import { MAX_TURN_ACTIONS, replenishCurrentPlayerActionHand, turnLimitReached } from '@/lib/turnActions'
+import { MAX_TURN_ACTIONS, replenishCurrentPlayerActionHand } from '@/lib/turnActions'
 import {
   allocateInvestorPayoutsFromOwner,
   allocateMafiaTributeFromOwner,
@@ -101,10 +101,6 @@ export function applyIncomeComplete(state: GameState, params: IncomeCompletePara
   const { state: replenished } = replenishCurrentPlayerActionHand(newState, state.currentPlayerIndex)
   newState = replenished
 
-  const events = []
-  if (turnLimitReached(newTurnActionsConsumed)) {
-    events.push({ type: 'toast' as const, level: 'info' as const, message: 'Turn limit reached — end turn.' })
-  }
-
-  return { ok: true, state: newState, events }
+  // Auto-advance is handled by applyGameAction when the 3-action budget is spent.
+  return { ok: true, state: newState, events: [] }
 }

@@ -1,7 +1,12 @@
 import type { GameState } from '@/lib/types'
 import { drawCards, drawFromDeckWithDiscardReshuffle } from '@/lib/deckUtils'
 import { nextPlayRoundNumber } from '@/lib/playRound'
-import { replenishCurrentPlayerActionHand } from '@/lib/turnActions'
+import {
+  MAX_ACTION_HAND_SIZE,
+  MAX_TURN_ACTIONS,
+  actionHandDiscardCount,
+  replenishCurrentPlayerActionHand,
+} from '@/lib/turnActions'
 import type { ApplyGameActionResult, GameEvent } from '@/lib/onlineGameActions'
 import {
   applyFinalRoundCountdown,
@@ -44,12 +49,40 @@ export function applyEndTurn(state: GameState): ApplyGameActionResult {
   }
 
   const totalActionCards = updatedActionCards.length
+  const numToDiscard = actionHandDiscardCount(totalActionCards)
 
   const updatedPlayers = state.players.map((p, idx) =>
     idx === state.currentPlayerIndex
       ? { ...p, actionCards: updatedActionCards, propertyCards: updatedPropertyCards }
       : p
   )
+
+  const events: GameEvent[] = []
+
+  // Soft hand cap: excess is allowed during the turn (start-of-turn draw 2 / Draw 2
+  // Action Cards). Only end-of-turn requires discarding down to the cap
+  // (`MAX_ACTION_HAND_SIZE`).
+  // Do not reset the turn budget here — that would look like a fresh turn and allow
+  // more plays while the discard dialog is open.
+  if (totalActionCards > MAX_ACTION_HAND_SIZE) {
+    events.push({ type: 'discard_required', numToDiscard })
+    return {
+      ok: true,
+      state: {
+        ...state,
+        players: updatedPlayers,
+        actionDeck: updatedActionDeck,
+        propertyDeck: updatedPropertyDeck,
+        propertyDiscard: updatedPropertyDiscard,
+        turnActionsConsumed: Math.max(state.turnActionsConsumed ?? 0, MAX_TURN_ACTIONS),
+        awaitingEndTurnActionDiscard: true,
+        undoLastAction: undefined,
+        showNewCardsAnimation: false,
+        newCardsDrawn: undefined,
+      },
+      events,
+    }
+  }
 
   const newState: GameState = {
     ...state,
@@ -61,16 +94,10 @@ export function applyEndTurn(state: GameState): ApplyGameActionResult {
     actionsPlayedThisTurn: 0,
     turnActionsConsumed: 0,
     incomeResolvedThisTurn: false,
+    awaitingEndTurnActionDiscard: undefined,
     crossingTheLineActive: false,
     playedPropertyCardThisTurn: undefined,
     undoLastAction: undefined,
-  }
-
-  const events: GameEvent[] = []
-
-  if (totalActionCards > 8) {
-    events.push({ type: 'discard_required', numToDiscard: totalActionCards - 8 })
-    return { ok: true, state: newState, events }
   }
 
   const finalRoundPatch = applyFinalRoundCountdown(state)
@@ -98,6 +125,8 @@ export function applyEndTurn(state: GameState): ApplyGameActionResult {
     discard: nextActionDiscard,
   } = drawFromDeckWithDiscardReshuffle(updatedActionDeck, state.actionDiscard, 2)
 
+  // Start-of-turn draw 2 may put the next founder over MAX_ACTION_HAND_SIZE — that is
+  // intentional. They keep the excess until *their* turn ends.
   const nextPlayerUpdated = {
     ...nextPlayer,
     actionCards: [...nextPlayer.actionCards, ...newActionCards],
