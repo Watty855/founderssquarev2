@@ -16,6 +16,7 @@ import {
   MAX_TURN_ACTIONS,
   actionHandDiscardCount,
   shouldAutoAdvanceTurn,
+  turnLimitReached,
 } from '@/lib/turnActions'
 
 /** After a fully-resolved action, advance the turn when all 3 action slots are spent. */
@@ -134,6 +135,18 @@ export function applyGameAction(
     case 'discard_action_cards': {
       const turnErr = assertActorTurn(state, ctx)
       if (turnErr) return turnErr
+      // Mid-turn / start-of-turn over-hand is legal — only accept discards after the
+      // 3-action budget is spent (or the engine already opened the end-turn discard).
+      if (
+        !state.awaitingEndTurnActionDiscard &&
+        !turnLimitReached(state.turnActionsConsumed)
+      ) {
+        return {
+          ok: false,
+          error: `Action-hand discard is only required after all ${MAX_TURN_ACTIONS} turn actions.`,
+          code: 'discard_too_early',
+        }
+      }
       const cur = state.players[state.currentPlayerIndex]
       const need = actionHandDiscardCount(cur.actionCards.length)
       if (need <= 0) {

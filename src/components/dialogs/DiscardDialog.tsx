@@ -86,8 +86,8 @@ export function DiscardDialog({
         <DialogHeader style={{ marginBottom: 4 }}>
           <DialogTitle style={{ fontSize: 18, fontWeight: 400 }}>End of Turn — Discard to 8</DialogTitle>
           <DialogDescription style={{ fontSize: 13, color: '#8888a0', lineHeight: 1.4 }}>
-            Action hands may go over 8 during your turn. To end this turn, select {numToDiscard} card
-            {numToDiscard > 1 ? 's' : ''} to discard down to 8.
+            All 3 actions are used. Action hands may go over 8 during a turn — select {numToDiscard}{' '}
+            card{numToDiscard > 1 ? 's' : ''} to discard down to 8 before the next founder starts.
             ({selectedCards.length}/{numToDiscard} selected)
           </DialogDescription>
         </DialogHeader>

@@ -41,7 +41,7 @@ function baseState(over: Partial<GameState> = {}): GameState {
 }
 
 describe('applyEndTurn action-hand soft cap', () => {
-  it('requires discard at end of turn when hand exceeds 8, without resetting the turn budget', () => {
+  it('requires discard after all 3 actions when hand exceeds 8', () => {
     const result = applyEndTurn(baseState())
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -52,7 +52,40 @@ describe('applyEndTurn action-hand soft cap', () => {
     expect(result.state.players[0].actionCards.length).toBe(9)
   })
 
-  it('advances and draws 2 for the next founder without forcing their discard mid-turn', () => {
+  it('does not force discard when a stale end_turn hits a founder who just drew 2 at turn start', () => {
+    // Bob begins the turn over the soft cap (start-of-turn draw 2) with 0 actions used.
+    const bobTurn = baseState({
+      players: [
+        mkPlayer(1, 'Alice', 5, 'alice-conn'),
+        mkPlayer(2, 'Bob', 10, 'bob-conn'),
+      ],
+      currentPlayerIndex: 1,
+      turnActionsConsumed: 0,
+      showNewCardsAnimation: true,
+      newCardsDrawn: [mkAction(901), mkAction(902)],
+    })
+    const result = applyEndTurn(bobTurn)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events).toEqual([])
+    expect(result.state).toBe(bobTurn)
+    expect(result.state.awaitingEndTurnActionDiscard).toBeFalsy()
+    expect(result.state.players[1].actionCards.length).toBe(10)
+    expect(result.state.turnActionsConsumed).toBe(0)
+  })
+
+  it('refuses early End Turn while over the soft cap before 3 actions are spent', () => {
+    const midTurn = baseState({
+      turnActionsConsumed: 1,
+      awaitingEndTurnActionDiscard: undefined,
+    })
+    const result = applyEndTurn(midTurn)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.code).toBe('hand_cap_after_actions')
+  })
+
+  it('advances and draws 2 for the next founder without forcing their discard', () => {
     // Alice at exactly 8 — turn advances; Bob had 7 and draws 2 → 9.
     const state = baseState({
       players: [
@@ -68,6 +101,15 @@ describe('applyEndTurn action-hand soft cap', () => {
     expect(result.state.currentPlayerIndex).toBe(1)
     expect(result.state.players[1].actionCards.length).toBe(9)
     expect(result.state.awaitingEndTurnActionDiscard).toBeFalsy()
+    expect(result.state.turnActionsConsumed).toBe(0)
+
+    // A second end_turn (stale auto-end) must not open discard on Bob.
+    const stale = applyEndTurn(result.state)
+    expect(stale.ok).toBe(true)
+    if (!stale.ok) return
+    expect(stale.events.some((e) => e.type === 'discard_required')).toBe(false)
+    expect(stale.state.currentPlayerIndex).toBe(1)
+    expect(stale.state.players[1].actionCards.length).toBe(9)
   })
 
   it('after discarding to 8, advances even if the next founder then exceeds 8 from draw 2', () => {
@@ -86,5 +128,21 @@ describe('applyEndTurn action-hand soft cap', () => {
     expect(after.state.players[1].actionCards.length).toBe(9)
     expect(after.events.some((e) => e.type === 'discard_required')).toBe(false)
     expect(after.state.awaitingEndTurnActionDiscard).toBeFalsy()
+  })
+
+  it('rejects discard_action_cards before the 3-action budget is spent', () => {
+    const midTurn = baseState({
+      turnActionsConsumed: 2,
+      awaitingEndTurnActionDiscard: undefined,
+    })
+    const drop = [midTurn.players[0].actionCards[0].instanceId]
+    const after = applyGameAction(
+      midTurn,
+      { type: 'discard_action_cards', instanceIds: drop },
+      { senderConnectionId: 'alice-conn' }
+    )
+    expect(after.ok).toBe(false)
+    if (after.ok) return
+    expect(after.code).toBe('discard_too_early')
   })
 })

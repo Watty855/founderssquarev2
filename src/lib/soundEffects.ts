@@ -1,21 +1,47 @@
 /**
- * Founders Square v2 sound design — all effects synthesized with Web Audio
- * (no binary assets, works offline in the Capacitor shell).
+ * Founders Square v2 sound design.
  *
- *  - Construction (hammer + drill + bandsaw) when a structure is built
- *  - Cash register when income is earned
- *  - Crowd boo when a taxation card is played
- *  - Crowd cheer when a winning die is rolled
- *  - Anchor chain drop when an anchor tenet is placed
+ *  - Construction: recorded SFX (public/assets/sfx/construction.m4a) when a structure is built
+ *  - Cash register, crowd boo/cheer, anchor chain: synthesized with Web Audio
+ *    (no binary assets for those, works offline in the Capacitor shell)
  */
 
+/** Bundled build SFX — served from /public so Capacitor sync includes it offline. */
+const CONSTRUCTION_SFX_URL = '/assets/sfx/construction.m4a'
+
 let audioContext: AudioContext | null = null
+/** Reused HTMLAudioElement so rapid builds don't stack overlapping decoders. */
+let constructionAudio: HTMLAudioElement | null = null
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null
   if (!audioContext) audioContext = new AudioContext()
   if (audioContext.state === 'suspended') void audioContext.resume()
   return audioContext
+}
+
+function playConstructionSample(): boolean {
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return false
+  try {
+    if (!constructionAudio) {
+      constructionAudio = new Audio(CONSTRUCTION_SFX_URL)
+      constructionAudio.preload = 'auto'
+      constructionAudio.playbackRate = 1.1
+    }
+    constructionAudio.pause()
+    constructionAudio.currentTime = 0
+    constructionAudio.playbackRate = 1.1
+    const playResult = constructionAudio.play()
+    if (playResult && typeof playResult.catch === 'function') {
+      void playResult.catch((err) => {
+        console.warn('Construction SFX play failed:', err)
+      })
+    }
+    return true
+  } catch (err) {
+    console.warn('Construction SFX unavailable:', err)
+    return false
+  }
 }
 
 /** White-noise buffer, lazily built once per context. */
@@ -104,57 +130,10 @@ function playTone(
   osc.stop(opts.start + opts.duration + 0.02)
 }
 
-/* ───────────────────────── Construction — hammer, drill, bandsaw ───────────────────────── */
+/* ───────────────────────── Construction — recorded SFX ───────────────────────── */
 
 export const playConstructionSound = () => {
-  const ctx = getAudioContext()
-  if (!ctx) return
-  const now = ctx.currentTime
-
-  // Three hammer strikes: sharp filtered-noise hits with a low knock underneath
-  for (let i = 0; i < 3; i++) {
-    const t = now + i * 0.16
-    playNoise(ctx, { start: t, duration: 0.07, gain: 0.28, filterType: 'highpass', frequency: 2200, gainCurve: 'hit' })
-    playTone(ctx, { start: t, duration: 0.09, gain: 0.22, type: 'triangle', from: 180, to: 70 })
-  }
-
-  // Drill burst: buzzy sawtooth with rapid wobble
-  const drillStart = now + 0.55
-  const drill = ctx.createOscillator()
-  const drillGain = ctx.createGain()
-  const wobble = ctx.createOscillator()
-  const wobbleGain = ctx.createGain()
-  drill.type = 'sawtooth'
-  drill.frequency.setValueAtTime(95, drillStart)
-  drill.frequency.linearRampToValueAtTime(130, drillStart + 0.35)
-  wobble.type = 'square'
-  wobble.frequency.value = 30
-  wobbleGain.gain.value = 22
-  wobble.connect(wobbleGain)
-  wobbleGain.connect(drill.frequency)
-  drillGain.gain.setValueAtTime(0.0001, drillStart)
-  drillGain.gain.exponentialRampToValueAtTime(0.16, drillStart + 0.03)
-  drillGain.gain.setValueAtTime(0.16, drillStart + 0.3)
-  drillGain.gain.exponentialRampToValueAtTime(0.0001, drillStart + 0.4)
-  drill.connect(drillGain)
-  drillGain.connect(ctx.destination)
-  wobble.start(drillStart)
-  drill.start(drillStart)
-  wobble.stop(drillStart + 0.42)
-  drill.stop(drillStart + 0.42)
-
-  // Bandsaw pass: bright band-passed noise swelling through the cut
-  playNoise(ctx, {
-    start: now + 1.0,
-    duration: 0.5,
-    gain: 0.14,
-    filterType: 'bandpass',
-    frequency: 3200,
-    q: 2.5,
-    gainCurve: 'swell',
-    playbackRate: 1.6,
-  })
-  playTone(ctx, { start: now + 1.0, duration: 0.5, gain: 0.05, type: 'sawtooth', from: 240, to: 320, curve: 'linear' })
+  playConstructionSample()
 }
 
 /* ───────────────────────── Cash register — income earned ───────────────────────── */

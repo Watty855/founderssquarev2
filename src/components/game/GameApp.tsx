@@ -3148,17 +3148,39 @@ function AppInner() {
    * Auto-end guard. Once a founder consumes all 3 turn actions (1 build + 2 actions, or
    * 0 builds + 3 actions), end the turn on the next tick. Only one auto-end may be pending
    * at a time so resolution paths and the idle-state fallback never double-advance.
+   *
+   * Generation token: if the seat advances before the timeout fires (e.g. online authority
+   * already applied end_turn), the stale callback must not run against the next founder —
+   * that was forcing discard-to-8 on their start-of-turn draw 2.
    */
   const autoEndTurnScheduledRef = useRef(false)
+  const autoEndTurnGenerationRef = useRef(0)
   const scheduleEndOfTurn = () => {
     if (autoEndTurnScheduledRef.current) return
     autoEndTurnScheduledRef.current = true
+    const generation = autoEndTurnGenerationRef.current
+    const seatAtSchedule =
+      aiGsRef.current?.currentPlayerIndex ?? safeGameState.currentPlayerIndex
     window.setTimeout(() => {
       autoEndTurnScheduledRef.current = false
+      if (generation !== autoEndTurnGenerationRef.current) return
+      if (aiGsRef.current?.currentPlayerIndex !== seatAtSchedule) return
+      // Only auto-end after the 3-action budget is spent — never against a fresh seat
+      // that just received its start-of-turn draw 2.
+      if (!turnLimitReached(aiGsRef.current?.turnActionsConsumed)) return
       handleEndTurn()
     }, 0)
   }
   scheduleEndOfTurnRef.current = scheduleEndOfTurn
+
+  // Invalidate any pending auto-end when the acting seat changes.
+  useEffect(() => {
+    autoEndTurnGenerationRef.current += 1
+    autoEndTurnScheduledRef.current = false
+    // A turn change must never leave the previous founder's discard dialog open on
+    // the new founder (who may legally hold 9+ after their start-of-turn draw 2).
+    setDiscardDialogState((prev) => (prev.open ? { open: false, numToDiscard: 0 } : prev))
+  }, [safeGameState.currentPlayerIndex])
 
   /**
    * Idle-state safety net: if the acting founder has used all 3 actions and nothing is

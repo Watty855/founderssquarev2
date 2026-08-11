@@ -6,6 +6,7 @@ import {
   MAX_TURN_ACTIONS,
   actionHandDiscardCount,
   replenishCurrentPlayerActionHand,
+  turnLimitReached,
 } from '@/lib/turnActions'
 import type { ApplyGameActionResult, GameEvent } from '@/lib/onlineGameActions'
 import {
@@ -58,13 +59,29 @@ export function applyEndTurn(state: GameState): ApplyGameActionResult {
   )
 
   const events: GameEvent[] = []
+  const budgetSpent = turnLimitReached(state.turnActionsConsumed)
+  const alreadyAwaitingDiscard = state.awaitingEndTurnActionDiscard === true
+  const consumed = state.turnActionsConsumed ?? 0
 
-  // Soft hand cap: excess is allowed during the turn (start-of-turn draw 2 / Draw 2
-  // Action Cards). Only end-of-turn requires discarding down to the cap
-  // (`MAX_ACTION_HAND_SIZE`).
-  // Do not reset the turn budget here — that would look like a fresh turn and allow
-  // more plays while the discard dialog is open.
+  // Soft hand cap: excess is allowed for the whole turn — including the start-of-turn
+  // draw 2 and mid-turn Draw 2 Action Cards. Discard-to-cap runs only after the
+  // founder has spent all 3 turn actions (or is already in the end-turn discard phase).
+  //
+  // Stale end_turn after the seat already advanced is the classic freeze: the new
+  // founder has just been dealt 2 cards (hand often > 8) with 0 actions used. Never
+  // force discard in that case — no-op so they can play their full turn.
   if (totalActionCards > MAX_ACTION_HAND_SIZE) {
+    if (!budgetSpent && !alreadyAwaitingDiscard) {
+      if (consumed === 0) {
+        return { ok: true, state, events: [] }
+      }
+      return {
+        ok: false,
+        error: `You may hold more than ${MAX_ACTION_HAND_SIZE} action cards until you finish all ${MAX_TURN_ACTIONS} actions this turn. Discard happens at end of turn.`,
+        code: 'hand_cap_after_actions',
+      }
+    }
+
     events.push({ type: 'discard_required', numToDiscard })
     return {
       ok: true,
@@ -74,7 +91,7 @@ export function applyEndTurn(state: GameState): ApplyGameActionResult {
         actionDeck: updatedActionDeck,
         propertyDeck: updatedPropertyDeck,
         propertyDiscard: updatedPropertyDiscard,
-        turnActionsConsumed: Math.max(state.turnActionsConsumed ?? 0, MAX_TURN_ACTIONS),
+        turnActionsConsumed: Math.max(consumed, MAX_TURN_ACTIONS),
         awaitingEndTurnActionDiscard: true,
         undoLastAction: undefined,
         showNewCardsAnimation: false,
