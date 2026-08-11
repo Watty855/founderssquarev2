@@ -7,16 +7,15 @@ import {
   isCivicPropertyCard,
 } from './lotCategory'
 
-/** Union anchor tenet lots only (C11, K3, S11, K19). */
-const UNION_DESIGNATED_ANCHOR_COORDS = new Set(['K3', 'K19', 'C11', 'S11'])
-
 /**
  * Center Anchor (AT) grid for Church Affiliation, Influencer, Mafia, News Outlet,
  * Regulation Bureau — and Anchor Wild Card when emulating one of those.
+ * Includes the former Union-only cells (C11, K3, S11, K19), now standard AT lots.
  */
 const CENTER_ANCHOR_GRID_20 = new Set([
   'C3',
   'G3',
+  'K3',
   'O3',
   'S3',
   'C7',
@@ -24,8 +23,10 @@ const CENTER_ANCHOR_GRID_20 = new Set([
   'K7',
   'O7',
   'S7',
+  'C11',
   'G11',
   'O11',
+  'S11',
   'C15',
   'G15',
   'K15',
@@ -33,6 +34,7 @@ const CENTER_ANCHOR_GRID_20 = new Set([
   'S15',
   'C19',
   'G19',
+  'K19',
   'O19',
   'S19',
 ])
@@ -102,12 +104,14 @@ export function canPlaceProperty(
 
   if (card.type === 'anchor') {
     const key = plotCoordKey(plot)
-    if (buildingName === 'Union') {
-      return card.id === 'union' && UNION_DESIGNATED_ANCHOR_COORDS.has(key)
-    }
-    if (buildingName !== 'Anchor' && buildingName !== 'Anchor Tenet') {
-      return false
-    }
+    const isAnchorTenetLot =
+      buildingName === 'Anchor Tenet' ||
+      buildingName === 'Anchor' ||
+      buildingName === 'Union' ||
+      plot.lotCategory === 'AT'
+    if (!isAnchorTenetLot) return false
+    // Union may build on any vacant Anchor Tenet lot; district of the lot sets its influence.
+    if (card.id === 'union') return true
     const coords = anchorBuildCoordsForCardId(card.id)
     return coords !== null && coords.has(key)
   }

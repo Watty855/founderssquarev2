@@ -1,9 +1,24 @@
-import type { GameState } from '@/lib/types'
+import type { GameState, Plot } from '@/lib/types'
 import { updatePlotAt } from '@/lib/boardIndex'
 import { buildEndGameTriggerPatch } from '@/lib/gameEngine/statePatches'
 import { replenishCurrentPlayerActionHand } from '@/lib/turnActions'
 
 export type PendingRebuttal = NonNullable<GameState['pendingRebuttalRoll']>
+
+/**
+ * Clear an overthrown Anchor Tenet so the lot returns to vacant blueprint "Anchor Tenet"
+ * and can be rebuilt by any eligible anchor card.
+ */
+export function vacateOverthrownAnchorPlot(plot: Plot): Plot {
+  return {
+    ...plot,
+    claimedBy: undefined,
+    builtProperty: undefined,
+    anchorInfluenceSuppressed: undefined,
+    investmentStripes: undefined,
+    housingHighDensity: undefined,
+  }
+}
 
 function spendActionCard(state: GameState, instanceId: string): GameState {
   const cpIdx = state.currentPlayerIndex
@@ -23,7 +38,7 @@ function spendActionCard(state: GameState, instanceId: string): GameState {
   }
 }
 
-/** Apply scandal effect when the defender fails to negate (suppress anchor influence). */
+/** Apply scandal effect when the defender fails to negate — vacate the Anchor Tenet lot. */
 export function applyScandalOnFail(
   state: GameState,
   ctx: NonNullable<PendingRebuttal['scandalContext']>
@@ -32,7 +47,7 @@ export function applyScandalOnFail(
     ...state,
     plots: updatePlotAt(state.plots, ctx.col, ctx.row, (plot) => {
       if (plot.builtProperty !== ctx.anchorCardId) return plot
-      return { ...plot, anchorInfluenceSuppressed: true }
+      return vacateOverthrownAnchorPlot(plot)
     }),
   }
 }
@@ -72,13 +87,13 @@ export function applyHostileTakeoverOnFail(
   return { ...baseUpdate, ...triggerPatch }
 }
 
-/** Suppress all Mafia anchors owned by the raid target when the counter fails. */
+/** Vacate all Mafia Anchor Tenet lots owned by the raid target when the counter fails. */
 export function applyPoliceRaidOnFail(state: GameState, mafiaOwnerId: number): GameState {
   return {
     ...state,
     plots: state.plots.map((p) =>
       p.builtProperty === 'mafia' && p.claimedBy === mafiaOwnerId
-        ? { ...p, anchorInfluenceSuppressed: true }
+        ? vacateOverthrownAnchorPlot(p)
         : p
     ),
   }

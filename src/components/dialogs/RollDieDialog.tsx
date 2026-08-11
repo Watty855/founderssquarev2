@@ -256,15 +256,15 @@ function RollDieDialogInner({
           : mode === 'hostile-takeover-defender'
             ? `${defenderName ?? 'The property owner'} rolls once. A 6 blocks the takeover and keeps the property.`
             : mode === 'scandal-attacker'
-              ? 'Roll the die. Total 6+ succeeds (max +1 from owning built Influencer and/or News Outlet — they do not stack). On success, the anchor owner rolls once — only a 6 negates; otherwise that anchor’s passive influence is discontinued on this lot.'
+              ? 'Roll the die. Total 6+ succeeds (max +1 from owning built Influencer and/or News Outlet — they do not stack). On success, the anchor owner rolls once — only a 6 negates; otherwise that Anchor Tenet is overthrown and the lot returns to vacant Anchor Tenet.'
               : mode === 'scandal-defender'
                 ? `${defenderName ?? 'The anchor owner'} rolls once. A 6 negates the scandal; any other result discontinues this anchor’s influence on this lot.`
                 : mode === 'rezoning'
                   ? 'Roll a total of 5+ to approve Rezoning. Applicable citywide and district Anchor Tenet influence modifies this roll. On a lower total, zoning stays the same, Rezoning is discarded, and this build fails on that lot.'
                   : mode === 'police-raid-attacker'
-                    ? 'Roll the die. Total 5+ succeeds (including max +1 raid influence when you own built Police, City Hall, and/or Courthouse anywhere). On success, the Mafia owner counters — they need 6 if you had no raid influence, or 5–6 if you did.'
+                    ? 'Roll the die. Total 5+ succeeds (including max +1 raid influence when you own built Police, City Hall, and/or Courthouse anywhere). On success, the Mafia owner counters — they need 6 if you had no raid influence, or 5–6 if you did. If they fail to counter, their Mafia lots return to vacant Anchor Tenet.'
                     : mode === 'police-raid-defender'
-                      ? `${defenderName ?? 'The Mafia owner'} rolls once to counter. ${influenceBonus > 0 ? 'They need 5–6 because you had raid influence (+1).' : 'They need a 6.'}`
+                      ? `${defenderName ?? 'The Mafia owner'} rolls once to counter. ${influenceBonus > 0 ? 'They need 5–6 because you had raid influence (+1).' : 'They need a 6.'} Failure vacates their Mafia lots back to Anchor Tenet.`
                       : mode === 'remove-investors'
                         ? 'Roll the die. Total 5+ includes applicable citywide, district, and rival Regulation Bureau block influence. No investor counter-roll. If you succeed, pay each investor 50% of their contribution, then clear all stripes on that lot.'
                         : 'Click to roll and see your result'
@@ -731,7 +731,7 @@ function RollDieDialogInner({
                 <p style={{ textAlign: 'center', fontSize: 13, color: diceValue >= policeRaidCounterThreshold ? '#6ee7b7' : '#fca5a5', margin: 0 }}>
                   {diceValue >= policeRaidCounterThreshold
                     ? `Rolled ${diceValue} — Mafia counters (${policeRaidCounterThreshold}+ needed). Police Raid fails.`
-                    : `Rolled ${diceValue} — below ${policeRaidCounterThreshold}; Mafia could not counter.`}
+                    : `Rolled ${diceValue} — below ${policeRaidCounterThreshold}; Mafia could not counter. Lots return to vacant Anchor Tenet.`}
                 </p>
               )}
               {removeInvestorsSuccess && (

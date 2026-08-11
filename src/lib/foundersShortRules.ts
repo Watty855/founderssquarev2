@@ -17,9 +17,10 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
     lines: [
       'Every property card names its district; each lot shows its district under the building name.',
       'The central lot on each block is called the "anchor tenet." Each anchor philosophy allows different influence modifiers that affect income and strategic actions.',
-      'Anchor influence follows its printed reach: G is citywide, B is one city block, and named districts apply only when the selected lot lies there. Applicable Anchor identities stack; duplicate copies of one identity do not.',
-      'Every active Anchor adds +$1M to each of your other properties in its block during Income. Regulation Bureau and Union also subtract $1M from each rival property in that block; Mafia additionally collects $1M from each rival business there.',
-      'Action scopes: Anchor Tenets modify Hostile Takeover, Rezoning, and Remove Investors as printed. City Hall, Courthouse, or Police gives +1 max on City Council Freeze and Police Raid. Influencer and/or News Outlet gives +1 max on Scandal.',
+      'Anchor influence follows its printed reach: G is citywide, B is one city block, and named districts apply only when the selected lot lies there. Applicable Anchors stack — each built copy adds strength (accumulative influence).',
+      'Every active Anchor adds +$1M to each of your other properties in its block during Income. Regulation Bureau and Union also subtract $1M from each rival property in that block; Mafia additionally collects $1M from each rival business there. Union action-roll influence is district-only.',
+      'Community pressure: +1 influence when you own 5+ properties in the target city block; +1 when targeting a lot directly opposite your six sequential lots along a street.',
+      'Action scopes: Anchor Tenets modify Hostile Takeover, Rezoning, and Remove Investors as printed. City Hall, Courthouse, or Police gives +1 max on City Council Freeze and Police Raid. Influencer and/or News Outlet gives +1 max on Scandal. Successful Scandal (or Police Raid if the Mafia fails to counter) overthrows that Anchor Tenet — the lot returns to vacant Anchor Tenet and can be rebuilt.',
       'Valid build targets highlight when you start placement. Crossing the Line (action) can bypass district lock for one build.',
     ],
   },

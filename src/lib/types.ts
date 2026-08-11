@@ -33,7 +33,10 @@ export interface Plot {
   builtProperty?: string
   /** Housing built as high-density (5+ stories): higher cost/income/end value; −1 takeover influence per such lot on the district. */
   housingHighDensity?: boolean
-  /** Successful Scandal: this built anchor no longer grants anchor influence / block income bonuses. */
+  /**
+   * Legacy flag: older saves may still have suppressed-in-place anchors.
+   * Successful Scandal / Police Raid now vacate the lot (clear claim + build) instead.
+   */
   anchorInfluenceSuppressed?: boolean
   isAnchor?: boolean
   /** Investors who placed Investment / Double Investment on this built lot (stripe color = investor). */

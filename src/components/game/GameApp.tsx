@@ -16,6 +16,7 @@ import { attachUndoSnapshotIfTurnAction, canUndoLastAction, restoreUndoSnapshot 
 import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyEndTurn } from '@/lib/gameEngine/applyEndTurn'
 import { applyBankActionCards } from '@/lib/gameEngine/applyBankAction'
+import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
 import {
   buildEndGameTriggerPatch,
   applyFinalRoundCountdown,
@@ -82,6 +83,7 @@ import type { SimpleAiTurnHandlers, SimpleAiTurnUi } from '@/lib/bot/simpleAiTur
 import { AI_MAIN_PHASE_DELAY_NORMAL_MS } from '@/lib/bot/aiTiming'
 import {
   confrontationAttemptTitle,
+  investmentNoticeTitle,
   confrontationNoticeDetail,
   confrontationNoticeTitle,
   type ConfrontationKind,
@@ -973,8 +975,8 @@ function AppInner() {
               e.kind === 'hostile-takeover'
                 ? `${e.attackerName} takes ${e.plotLabel ?? 'the lot'} — ownership changes.`
                 : e.kind === 'scandal'
-                  ? `Anchor influence discontinued${e.plotLabel ? ` at ${e.plotLabel}` : ''}.`
-                  : `Police Raid succeeds${e.plotLabel ? ` at ${e.plotLabel}` : ''} — Mafia influence discontinued.`
+                  ? `Anchor overthrown${e.plotLabel ? ` at ${e.plotLabel}` : ''} — lot returns to vacant Anchor Tenet.`
+                  : `Police Raid succeeds${e.plotLabel ? ` at ${e.plotLabel}` : ''} — Mafia lots return to vacant Anchor Tenet.`
             ),
             isAiName(e.targetName) && isAiName(e.attackerName) ? { quick: true } : undefined
           )
@@ -2330,7 +2332,7 @@ function AppInner() {
             bankValue: ac.bankValue,
             cardName: ac.name,
             reasonDescription:
-              'Every built anchor on the board already has discontinued influence. Bank Scandal or try again later.',
+              'No active Anchor Tenets on the board to scandal. Bank Scandal or try again later.',
           })
           return
         }
@@ -3446,11 +3448,8 @@ function AppInner() {
       plotPreview?.claimedBy != null
         ? safeGameState.players.find((p) => p.id === plotPreview.claimedBy)
         : undefined
-    const propertyTitle = plotPreview?.builtProperty
-      ? propertyCards.find((c) => c.id === plotPreview.builtProperty)?.name ??
-        plotPreview.building ??
-        'property'
-      : 'property'
+    // Board lot label (e.g. "Ski & See"), not the card category/type.
+    const lotTitle = getPlotLotDisplayName(col, row, plotPreview?.building)
     patchGameState((current) => {
       const cpIdx = current.currentPlayerIndex
       const investor = current.players[cpIdx]
@@ -3499,13 +3498,13 @@ function AppInner() {
     setInvestmentSelectMode({ active: false, validPlots: [], actionInstanceId: null, contributionMillion: 4 })
     const investKind: ConfrontationKind = contribution >= 8 ? 'Double Investment' : 'Investment'
     const ownerName = ownerPreview?.name ?? 'the owner'
-    // Instant resolve — use attempt-style title so every seat sees the vs-player play.
+    // Instant resolve — investment wording (not "is attempting").
     broadcastBoardFx({
       notice: {
-        title: confrontationAttemptTitle(investKind, investorPreview.name, ownerName),
+        title: investmentNoticeTitle(investorPreview.name, ownerName, lotTitle),
         detail: confrontationNoticeDetail(
           'success',
-          `$${contribution}M invested in ${propertyTitle} at ${col}${row}. Cash paid to ${ownerName}.`
+          `${investKind}: $${contribution}M paid to ${ownerName} at ${col}${row}.`
         ),
         durationMs: 5500,
       },
@@ -3912,7 +3911,7 @@ function AppInner() {
       return
     }
     if (plotPrev.anchorInfluenceSuppressed) {
-      toast.error('That anchor’s influence is already discontinued.')
+      toast.error('That Anchor Tenet is no longer active.')
       return
     }
     const ownerPlayerId = plotPrev.claimedBy
@@ -5406,11 +5405,13 @@ function AppInner() {
             const plot = current.plots[plotIndex]
             if (plot.builtProperty !== ctx.anchorCardId) return current
             const newPlots = [...current.plots]
-            newPlots[plotIndex] = { ...plot, anchorInfluenceSuppressed: true }
+            newPlots[plotIndex] = vacateOverthrownAnchorPlot(plot)
             const anchorName =
               propertyCards.find((c) => c.id === ctx.anchorCardId)?.name ?? 'Anchor'
             setTimeout(() => {
-              toast.success(`Influence discontinued for ${anchorName} at ${ctx.col}${ctx.row}.`)
+              toast.success(
+                `${anchorName} overthrown at ${ctx.col}${ctx.row} — lot returns to vacant Anchor Tenet.`
+              )
             }, 0)
             return { ...current, plots: newPlots }
           })
@@ -5419,7 +5420,7 @@ function AppInner() {
             attackerName,
             ownerName,
             'success',
-            `Anchor influence discontinued at ${ctx.col}${ctx.row}.`,
+            `Anchor overthrown at ${ctx.col}${ctx.row} — lot is vacant Anchor Tenet again.`,
             'dwindle'
           )
         }
@@ -5807,7 +5808,7 @@ function AppInner() {
               ...current,
               plots: current.plots.map((p) =>
                 p.builtProperty === 'mafia' && p.claimedBy === mafiaOwnerId
-                  ? { ...p, anchorInfluenceSuppressed: true }
+                  ? vacateOverthrownAnchorPlot(p)
                   : p
               ),
             }))
@@ -5817,7 +5818,7 @@ function AppInner() {
             attackerName,
             mafiaOwner,
             'success',
-            `Mafia rolls ${result} — cannot counter (needed ${counterThreshold}+). Influence discontinued.`,
+            `Mafia rolls ${result} — cannot counter (needed ${counterThreshold}+). Mafia lots return to vacant Anchor Tenet.`,
             'dwindle'
           )
         } else {

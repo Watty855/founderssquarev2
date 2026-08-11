@@ -41,7 +41,7 @@ function baseState(over: Partial<GameState> = {}): GameState {
 }
 
 describe('rebuttal resolution helpers', () => {
-  it('scandal fail suppresses anchor influence on the target lot', () => {
+  it('scandal fail vacates the overthrown Anchor Tenet lot', () => {
     let state = baseState()
     state = {
       ...state,
@@ -49,6 +49,7 @@ describe('rebuttal resolution helpers', () => {
         ...p,
         builtProperty: 'church',
         claimedBy: 2,
+        investmentStripes: [{ investorId: 1, contributionMillion: 4 }],
       })),
     }
     const next = applyScandalOnFail(state, {
@@ -58,7 +59,10 @@ describe('rebuttal resolution helpers', () => {
       anchorOwnerPlayerId: 2,
     })
     const plot = next.plots.find((p) => p.row === 3 && p.col === 'C')
-    expect(plot?.anchorInfluenceSuppressed).toBe(true)
+    expect(plot?.claimedBy).toBeUndefined()
+    expect(plot?.builtProperty).toBeUndefined()
+    expect(plot?.anchorInfluenceSuppressed).toBeFalsy()
+    expect(plot?.investmentStripes).toBeUndefined()
   })
 
   it('hostile takeover fail transfers ownership and pays 120%', () => {
@@ -83,7 +87,7 @@ describe('rebuttal resolution helpers', () => {
     expect(next.players[1].money).toBe(22)
   })
 
-  it('police raid fail suppresses rival mafia anchors', () => {
+  it('police raid fail vacates rival mafia Anchor Tenet lots', () => {
     let state = baseState()
     state = {
       ...state,
@@ -95,7 +99,9 @@ describe('rebuttal resolution helpers', () => {
     }
     const next = applyPoliceRaidOnFail(state, 2)
     const plot = next.plots.find((p) => p.row === 7 && p.col === 'G')
-    expect(plot?.anchorInfluenceSuppressed).toBe(true)
+    expect(plot?.claimedBy).toBeUndefined()
+    expect(plot?.builtProperty).toBeUndefined()
+    expect(plot?.anchorInfluenceSuppressed).toBeFalsy()
   })
 
   it('resolveRebuttalRoll negates scandal on a 6', () => {
@@ -126,7 +132,41 @@ describe('rebuttal resolution helpers', () => {
     const resolved = resolveRebuttalRoll(state, 6)
     expect(resolved?.negated).toBe(true)
     const plot = resolved?.state.plots.find((p) => p.row === 3 && p.col === 'C')
-    expect(plot?.anchorInfluenceSuppressed).toBeFalsy()
+    expect(plot?.builtProperty).toBe('church')
+    expect(plot?.claimedBy).toBe(2)
+    expect(resolved?.state.pendingRebuttalRoll).toBeUndefined()
+  })
+
+  it('resolveRebuttalRoll vacates scandal target when not negated', () => {
+    let state = baseState({
+      pendingRebuttalRoll: {
+        kind: 'scandal',
+        targetPlayerId: 2,
+        attackerPlayerId: 1,
+        targetName: 'B',
+        attackerName: 'A',
+        actionInstanceId: 'act-1',
+        scandalContext: {
+          row: 3,
+          col: 'C',
+          anchorCardId: 'church',
+          anchorOwnerPlayerId: 2,
+        },
+      },
+    })
+    state = {
+      ...state,
+      plots: updatePlotAt(state.plots, 'C', 3, (p) => ({
+        ...p,
+        builtProperty: 'church',
+        claimedBy: 2,
+      })),
+    }
+    const resolved = resolveRebuttalRoll(state, 5)
+    expect(resolved?.negated).toBe(false)
+    const plot = resolved?.state.plots.find((p) => p.row === 3 && p.col === 'C')
+    expect(plot?.claimedBy).toBeUndefined()
+    expect(plot?.builtProperty).toBeUndefined()
     expect(resolved?.state.pendingRebuttalRoll).toBeUndefined()
   })
 })

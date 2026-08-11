@@ -142,9 +142,6 @@ export function IncomeDialog({
   const [showDoubleIncomePrompt, setShowDoubleIncomePrompt] = useState(true)
   const [showInitialChoice, setShowInitialChoice] = useState(true)
 
-  const diceOpen = open && !showInitialChoice
-  const { roll, isRolling, diceValue, isReady } = useDiceBox({ containerId, open: diceOpen })
-
   const doubleIncomeCards = (player?.actionCards || []).filter(instance => {
     const card = actionCards.find(c => c.id === instance.cardId)
     return card?.id === 'double-income'
@@ -154,6 +151,11 @@ export function IncomeDialog({
     hasBuiltPropertiesForIncomeRoll === true ||
     (hasBuiltPropertiesForIncomeRoll === undefined && totalIncome > 0)
   const bankValue = actionCards.find(c => c.id === 'income')?.bankValue ?? 4
+  /** Bots always roll when they have properties — skip Roll/Bank so the dice box mounts immediately. */
+  const botsSkipChooser = aiAutoplay && hasIncomeGeneratingProperties
+  const atChooser = showInitialChoice && !botsSkipChooser
+  const diceOpen = open && !atChooser && hasIncomeGeneratingProperties
+  const { roll, isRolling, diceValue, isReady } = useDiceBox({ containerId, open: diceOpen })
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -162,25 +164,35 @@ export function IncomeDialog({
       setDoubleIncomeActive(false)
       setSelectedDoubleIncomeId(null)
       setShowInitialChoice(true)
-      const hasDoubleIncome = (player?.actionCards || []).some(instance => {
-        const card = actionCards.find(c => c.id === instance.cardId)
+      const doubleInst = (player?.actionCards || []).find((instance) => {
+        const card = actionCards.find((c) => c.id === instance.cardId)
         return card?.id === 'double-income'
       })
-      setShowDoubleIncomePrompt(hasDoubleIncome && doubleIncomeAllowed)
+      const canDouble = Boolean(doubleInst) && doubleIncomeAllowed
+      // Bots: take Double Income immediately (no prompt UI) so the roll starts right away.
+      if (aiAutoplay && canDouble && doubleInst) {
+        setDoubleIncomeActive(true)
+        setSelectedDoubleIncomeId(doubleInst.instanceId)
+        setShowDoubleIncomePrompt(false)
+      } else {
+        setShowDoubleIncomePrompt(canDouble)
+      }
     }
-  }, [open, player, doubleIncomeAllowed])
+  }, [open, player, doubleIncomeAllowed, aiAutoplay])
 
   // Auto-roll when ready and prompts are dismissed
   useEffect(() => {
-    if (!showInitialChoice && !showDoubleIncomePrompt && !isRolling && !incomeResult && hasIncomeGeneratingProperties && isReady) {
+    const waitingOnDoublePrompt = showDoubleIncomePrompt && !aiAutoplay
+    if (!atChooser && !waitingOnDoublePrompt && !isRolling && !incomeResult && hasIncomeGeneratingProperties && isReady) {
       const timer = setTimeout(
         () => roll(),
-        aiAutoplay ? aiPlaybackDelay(300, aiFastPlayback) : 300
+        // Bots: roll as soon as the dice box is ready (no deliberate pause on the chooser).
+        aiAutoplay ? aiPlaybackDelay(40, true) : 300
       )
       return () => clearTimeout(timer)
     }
   }, [
-    showInitialChoice,
+    atChooser,
     showDoubleIncomePrompt,
     isRolling,
     incomeResult,
@@ -188,7 +200,6 @@ export function IncomeDialog({
     isReady,
     roll,
     aiAutoplay,
-    aiFastPlayback,
   ])
 
   // Compute income result when dice value changes
@@ -235,36 +246,13 @@ export function IncomeDialog({
       const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? bankValue
       playIncomeSound()
       onComplete(bv, undefined, 'bank-income-card')
-    }, aiPlaybackDelay(400, aiFastPlayback))
+    }, aiPlaybackDelay(120, aiFastPlayback))
     return () => window.clearTimeout(t)
   }, [open, aiAutoplay, aiFastPlayback, hasIncomeGeneratingProperties, bankValue, onComplete])
 
-  useEffect(() => {
-    if (!open || !aiAutoplay || !hasIncomeGeneratingProperties || !showInitialChoice) return
-    const t = window.setTimeout(() => setShowInitialChoice(false), aiPlaybackDelay(400, aiFastPlayback))
-    return () => window.clearTimeout(t)
-  }, [open, aiAutoplay, aiFastPlayback, hasIncomeGeneratingProperties, showInitialChoice])
+  /** Bots skip the Roll/Bank chooser via `botsSkipChooser` — no delayed dismiss needed. */
 
-  /** Bots always play Double Income when available — income maximization is the table goal. */
-  useEffect(() => {
-    if (!open || !aiAutoplay || showInitialChoice || !showDoubleIncomePrompt) return
-    const t = window.setTimeout(() => {
-      if (doubleIncomeAllowed && doubleIncomeCards.length > 0) {
-        setDoubleIncomeActive(true)
-        setSelectedDoubleIncomeId(doubleIncomeCards[0].instanceId)
-      }
-      setShowDoubleIncomePrompt(false)
-    }, aiPlaybackDelay(380, aiFastPlayback))
-    return () => window.clearTimeout(t)
-  }, [
-    open,
-    aiAutoplay,
-    aiFastPlayback,
-    showInitialChoice,
-    showDoubleIncomePrompt,
-    doubleIncomeAllowed,
-    doubleIncomeCards,
-  ])
+  /** Human Double Income prompt is handled in the UI; bots already resolved it on open. */
 
   useEffect(() => {
     if (!open || !aiAutoplay || !incomeResult) return
@@ -276,7 +264,7 @@ export function IncomeDialog({
       incomeAiCollectSentRef.current = stamp
       playIncomeSound()
       onComplete(amt, doubleIncomeAllowed ? sid : undefined, 'property-roll', diceValue ?? undefined)
-    }, aiPlaybackDelay(520, aiFastPlayback))
+    }, aiPlaybackDelay(420, aiFastPlayback))
     return () => window.clearTimeout(t)
   }, [open, aiAutoplay, aiFastPlayback, incomeResult, selectedDoubleIncomeId, doubleIncomeAllowed, onComplete, diceValue])
 
@@ -368,11 +356,13 @@ export function IncomeDialog({
             Income — {player.name}
           </DialogTitle>
           <DialogDescription style={{ fontSize: 13, color: '#8888a0', lineHeight: 1.4 }}>
-            {showInitialChoice && hasIncomeGeneratingProperties
+            {atChooser && hasIncomeGeneratingProperties
               ? `Roll the die for a chance at more income, or bank the card for a guaranteed $${bankValue}M.`
               : !hasIncomeGeneratingProperties
               ? `No properties to generate income. Bank this card for $${bankValue}M?`
-              : `Property income: $${totalIncome}M`}
+              : aiAutoplay
+                ? `${player.name} is rolling for income…`
+                : `Property income: $${totalIncome}M`}
           </DialogDescription>
         </DialogHeader>
 
@@ -401,7 +391,7 @@ export function IncomeDialog({
             </div>
           ) : (
             <>
-              {showInitialChoice && (
+              {atChooser && (
                 <div className="animate-fadeIn" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{ display: 'flex', gap: 10 }}>
                     <button
@@ -433,7 +423,7 @@ export function IncomeDialog({
                 </div>
               )}
 
-              {!showInitialChoice && (
+              {!atChooser && (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 4 }}>
                     <div
@@ -691,7 +681,7 @@ export function IncomeDialog({
                 </>
               )}
 
-              {!showInitialChoice && !incomeResult && showDoubleIncomePrompt && doubleIncomeCards.length > 0 && (
+              {!atChooser && !aiAutoplay && !incomeResult && showDoubleIncomePrompt && doubleIncomeCards.length > 0 && (
                 <div className="animate-fadeIn" style={{
                   background: 'linear-gradient(135deg, rgba(30,174,219,0.12), rgba(30,174,219,0.04))',
                   borderRadius: 10, padding: '12px 14px', border: '1px solid rgba(30,174,219,0.3)',
@@ -732,13 +722,13 @@ export function IncomeDialog({
                 </div>
               )}
 
-              {!showInitialChoice && diceValue !== null && (
+              {!atChooser && diceValue !== null && (
                 <div style={{ textAlign: 'center', fontSize: 32, fontWeight: 300, color: '#1eaedb', padding: '8px 0' }} className="animate-fadeIn">
                   Rolled: {diceValue}
                 </div>
               )}
 
-              {!showInitialChoice && incomeResult && (
+              {!atChooser && incomeResult && (
                 <div className="animate-fadeIn" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div style={{
                     borderRadius: 10, padding: '16px 14px', textAlign: 'center',

@@ -33,6 +33,19 @@ export function confrontationAttemptTitle(
   return `${attackerName} is attempting ${article} ${kind} against ${targetName}`
 }
 
+/**
+ * Investment / Double Investment banner — completed play, not an "attempt".
+ * Example: "Johnny invests in Dan's Ski & See"
+ */
+export function investmentNoticeTitle(
+  investorName: string,
+  ownerName: string,
+  propertyName: string
+): string {
+  const ownerPossessive = ownerName.endsWith('s') ? `${ownerName}'` : `${ownerName}'s`
+  return `${investorName} invests in ${ownerPossessive} ${propertyName}`
+}
+
 export function confrontationOutcomeLabel(outcome: ConfrontationOutcome): string {
   switch (outcome) {
     case 'success':

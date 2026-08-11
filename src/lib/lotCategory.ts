@@ -47,6 +47,7 @@ export function getPlotBoardLetter(
     return getPropertyCornerLetter(builtPropertyCard)
   }
 
+  // Legacy vacant "Union" label (now "Anchor Tenet") — no corner zoning letter.
   if (plot.building === 'Union') return null
 
   return plot.lotCategory ?? null

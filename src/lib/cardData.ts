@@ -1117,12 +1117,12 @@ export const propertyCards: PropertyCard[] = [
     bankValue: 4,
     endGameValue: 0,
     copies: 4,
-    buildLocations: ['Union designated anchors only'],
+    buildLocations: ['Any Anchor Tenet lot'],
     specialAbility:
-      'INFLUENCE: +1 in the district where this Union was played on Hostile Takeover, Rezoning, and Remove Investors rolls\n' +
-      'INCOME (Income resolution): Same block formula as Church Affiliation — +$1M per other built property you own on this Union anchor’s city block (Union cell excluded). Each built property another founder owns on that block suffers −$1M for their Income roll only — lost income; nothing is paid to you.\n' +
+      'INFLUENCE: +1 in the district where this Union was played on Hostile Takeover, Rezoning, and Remove Investors rolls (Farmland Union only affects Farmland, City Center only City Center, etc.). Multiple Unions stack.\n' +
+      'INCOME (Income resolution): Same block formula as Church Affiliation — +$1M per other built property you own on this Union’s city block (Union cell excluded). Each built property another founder owns on that block suffers −$1M on their Income roll only — lost income; nothing is paid to you.\n' +
       'End game value: 0M (only if played and built or banked)\n' +
-      'Build: Union designated anchors only',
+      'Build: Any vacant Anchor Tenet lot',
     category: 'anchor'
   }
 ]
@@ -1193,7 +1193,7 @@ export const actionCards: ActionCard[] = [
     type: 'action',
     category: 'social',
     name: 'Scandal',
-    description: 'Discontinue an anchor tenant\'s influence',
+    description: 'Overthrow an Anchor Tenet and vacate the lot',
     buildCost: 0,
     buildIncome: 0,
     bankValue: 5,
@@ -1202,7 +1202,7 @@ export const actionCards: ActionCard[] = [
     diceRollRule: 'Total 6+ on scandal roll (max +1 from Influencer and/or News Outlet — does not stack)',
     placementRule: 'Any built anchor property',
     actions:
-      'Pick which built anchor tenet to target and roll the die. Total 6+: that anchor’s influence is discontinued (passive bonuses no longer apply). Owning built Influencer and/or News Outlet with active influence grants at most +1 to your scandal roll (both anchors still cap at +1 total). The anchor owner rolls once — a 6 negates your success.',
+      'Pick which built Anchor Tenet to target and roll the die. Total 6+: that Anchor Tenet is overthrown — the lot returns to vacant Anchor Tenet (blueprint) and can be reclaimed by another anchor. Owning built Influencer and/or News Outlet with active influence grants at most +1 to your scandal roll (both anchors still cap at +1 total). The anchor owner rolls once — a 6 negates your success.',
   },
   {
     id: 'build-with-tax-dollars',
@@ -1237,7 +1237,7 @@ export const actionCards: ActionCard[] = [
     type: 'action',
     category: 'legal',
     name: 'Police Raid on Mafia',
-    description: 'Counter mafia effect',
+    description: 'Overthrow Mafia Anchor Tenets and vacate those lots',
     buildCost: 0,
     buildIncome: 0,
     bankValue: 5,
@@ -1245,7 +1245,7 @@ export const actionCards: ActionCard[] = [
     diceRequired: true,
     diceRollRule: 'Roll 5+ succeeds (4+ with raid influence); counter threshold shifts when attacker has raid influence',
     actions:
-      'Counter Mafia extortion by rolling the die. Natural roll plus max +1 raid influence if you own built Police, City Hall, and/or Courthouse anywhere on the board — total 5+ succeeds (otherwise fail). On success, the Mafia owner rolls once to counter: 6 negates if you had no raid influence; 5–6 negates if you had raid influence (+1).',
+      'Counter Mafia extortion by rolling the die. Natural roll plus max +1 raid influence if you own built Police, City Hall, and/or Courthouse anywhere on the board — total 5+ succeeds (otherwise fail). On success, the Mafia owner rolls once to counter: 6 negates if you had no raid influence; 5–6 negates if you had raid influence (+1). If the counter fails, that owner’s Mafia lots return to vacant Anchor Tenet and can be reclaimed.',
   },
   {
     id: 'investment',

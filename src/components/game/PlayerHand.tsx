@@ -569,8 +569,8 @@ export function PlayerHand({
             exit={{ opacity: 0, height: 0 }}
           >
             <span style={{ fontSize: 12, fontWeight: 500, color: '#e879f9' }}>
-              Scandal: click a fuchsia-highlighted built anchor tenant. Roll 6+ to succeed (Influencer you own gives +1). The owner may
-              roll 6 to negate.
+              Scandal: click a fuchsia-highlighted built Anchor Tenet. Roll 6+ to succeed (Influencer you own gives +1). On success (if not
+              negated by a 6), the lot returns to vacant Anchor Tenet.
             </span>
             <button
               type="button"
@@ -1005,7 +1005,7 @@ export function PlayerHand({
                   </>
                 ) : currentCard.id === 'union' ? (
                   <>
-                    Build Union on a Union-designated anchor lot. +1 district influence (printed). On Income: +$1M per other property you own on this block (like Church); rivals’ properties on this block lose $1M each on their own Income rolls (not paid to you). Or bank for $
+                    Build Union on any vacant Anchor Tenet lot. +1 action influence only within the district where it is built (stacks with other Unions). On Income: +$1M per other property you own on this Union’s city block; rivals’ properties on that block lose $1M each on their own Income rolls (not paid to you). Or bank for $
                     {currentCard.bankValue}M.
                   </>
                 ) : (

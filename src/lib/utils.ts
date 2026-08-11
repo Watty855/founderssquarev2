@@ -4,7 +4,11 @@ import { propertyCards } from './cardData'
 import type { PropertyCard } from './cardTypes'
 import { isCityBuildingCell } from './boardAdjacency'
 import { buildPlotIndex, getPlotAt } from './boardIndex'
-import { isPlotInCityBlock, plotSupportsInvestmentIncome } from './investmentTargets'
+import {
+  getCityBlockBounds,
+  isPlotInCityBlock,
+  plotSupportsInvestmentIncome,
+} from './investmentTargets'
 import { Plot, COLUMNS } from './types'
 import { getPlotDistricts, type District } from './districts'
 
@@ -599,8 +603,8 @@ export function getRegulationBureauIncomePenaltyForPlayer(
 
 /**
  * Union anchor owner — Income resolution:
- * +$1M per other built property this player owns on the same city block as any active Union anchor they own
- * (Union anchor cell excluded), mirroring Church Affiliation block bonuses.
+ * +$1M per other built property this player owns on the same city block as any active Union
+ * they own (Union cell excluded). Action-roll influence is district-scoped separately.
  */
 export function getUnionIncomeBonusForOwner(
   playerId: number,
@@ -624,8 +628,8 @@ export function getUnionIncomeBonusForOwner(
 
 /**
  * Union — rivals’ Income resolution:
- * −$1M per built property this player owns that sits in the same city block as another founder’s active Union anchor.
- * Lost income is not paid to the Union owner (contrast with Mafia tribute).
+ * −$1M per built property this player owns that sits in the same city block as another
+ * founder’s active Union. Lost income is not paid to the Union owner.
  */
 export function getUnionIncomePenaltyForPlayer(
   incomePlayerId: number,
@@ -656,15 +660,103 @@ export function getUnionIncomePenaltyForPlayer(
 
 export type AnchorInfluenceAction = 'takeover' | 'rezoning' | 'remove-investors'
 
+/** +1 when the acting founder owns 5+ built properties in the target lot’s city block. */
+export function getBlockPresenceInfluenceBonus(
+  playerId: number,
+  plots: Plot[],
+  targetRow: number,
+  targetCol: string
+): { bonus: number; labels: string[] } {
+  const bounds = getCityBlockBounds(targetRow, targetCol)
+  if (!bounds) return { bonus: 0, labels: [] }
+  let ownedInBlock = 0
+  for (const p of plots) {
+    if (p.type !== 'city' || p.claimedBy !== playerId || !p.builtProperty) continue
+    if (!isPlotInCityBlock(p, targetRow, targetCol)) continue
+    ownedInBlock += 1
+  }
+  if (ownedInBlock < 5) return { bonus: 0, labels: [] }
+  return { bonus: 1, labels: [`block presence (${ownedInBlock} lots)`] }
+}
+
 /**
- * Anchor Tenet influence from the reference card.
+ * +1 when the acting founder owns six sequential lots along one side of a street and the
+ * target sits directly opposite those lots across that street.
+ */
+export function getStreetOppositeInfluenceBonus(
+  playerId: number,
+  plots: Plot[],
+  targetRow: number,
+  targetCol: string
+): { bonus: number; labels: string[] } {
+  const ownedBuilt = (row: number, col: string): boolean => {
+    const p = plots.find((q) => q.row === row && q.col === col)
+    return (
+      p != null &&
+      p.type === 'city' &&
+      p.claimedBy === playerId &&
+      !!p.builtProperty
+    )
+  }
+
+  if (COLUMNS.indexOf(targetCol) < 0) return { bonus: 0, labels: [] }
+
+  // Horizontal streets (rows 5/9/13/17): six lots on one side → opposite row across street.
+  for (const streetRow of [5, 9, 13, 17] as const) {
+    const northRow = streetRow - 1
+    const southRow = streetRow + 1
+    for (let i = 0; i < BLOCK_COL_SPANS.length - 1; i++) {
+      const cols = [...BLOCK_COL_SPANS[i], ...BLOCK_COL_SPANS[i + 1]]
+      const ownsNorth = cols.every((c) => ownedBuilt(northRow, c))
+      const ownsSouth = cols.every((c) => ownedBuilt(southRow, c))
+      if (ownsNorth && targetRow === southRow && cols.includes(targetCol)) {
+        return { bonus: 1, labels: ['street opposite (6 along street)'] }
+      }
+      if (ownsSouth && targetRow === northRow && cols.includes(targetCol)) {
+        return { bonus: 1, labels: ['street opposite (6 along street)'] }
+      }
+    }
+  }
+
+  // Vertical streets (cols E/I/M/Q): six lots on one side → opposite col across street.
+  const streetCols = ['E', 'I', 'M', 'Q'] as const
+  for (const streetCol of streetCols) {
+    const sci = COLUMNS.indexOf(streetCol)
+    if (sci <= 0 || sci >= COLUMNS.length - 1) continue
+    const westCol = COLUMNS[sci - 1]!
+    const eastCol = COLUMNS[sci + 1]!
+    for (let i = 0; i < BLOCK_ROW_SPANS.length - 1; i++) {
+      const rows = [
+        BLOCK_ROW_SPANS[i][0],
+        BLOCK_ROW_SPANS[i][1],
+        BLOCK_ROW_SPANS[i][2],
+        BLOCK_ROW_SPANS[i + 1][0],
+        BLOCK_ROW_SPANS[i + 1][1],
+        BLOCK_ROW_SPANS[i + 1][2],
+      ]
+      const ownsWest = rows.every((r) => ownedBuilt(r, westCol))
+      const ownsEast = rows.every((r) => ownedBuilt(r, eastCol))
+      if (ownsWest && targetCol === eastCol && rows.includes(targetRow)) {
+        return { bonus: 1, labels: ['street opposite (6 along street)'] }
+      }
+      if (ownsEast && targetCol === westCol && rows.includes(targetRow)) {
+        return { bonus: 1, labels: ['street opposite (6 along street)'] }
+      }
+    }
+  }
+
+  return { bonus: 0, labels: [] }
+}
+
+/**
+ * Anchor Tenet influence for Hostile Takeover, Rezoning, and Remove Investors.
  *
- * Citywide: Church (T/R), Mafia (T/R/IR), Regulation Bureau (T/R/IR).
- * District: Farm Bureau, Port Authority, Arts Council, Tourism Office, and Union (T/R/IR).
+ * Citywide: Church (T/R), Mafia, Regulation Bureau — each active copy stacks.
+ * District: Farm Bureau, Port Authority, Arts Council, Tourism Office, Union —
+ * each active copy that covers the target district stacks.
+ * Community pressure: +1 for 5+ owned lots in the target block; +1 when targeting
+ * a lot directly opposite your six sequential lots along a street.
  * Block pressure: an opponent Regulation Bureau applies −1 on T/IR in its block.
- *
- * Each Anchor identity contributes at most once to a roll, even if the player owns
- * multiple copies. Different applicable identities stack.
  */
 export function getAnchorInfluenceForAction(
   playerId: number,
@@ -679,13 +771,18 @@ export function getAnchorInfluenceForAction(
     bonus += amount
     labels.push(label)
   }
-  const has = (id: string) => activeAnchorSourcePlots(plots, playerId, id).length > 0
 
-  if ((action === 'takeover' || action === 'rezoning') && has('church')) {
-    add(1, 'Church Affiliation (citywide)')
+  if (action === 'takeover' || action === 'rezoning') {
+    for (const church of activeAnchorSourcePlots(plots, playerId, 'church')) {
+      add(1, `Church Affiliation (citywide @ ${church.col}${church.row})`)
+    }
   }
-  if (has('mafia')) add(1, 'Mafia (citywide)')
-  if (has('regulation-bureau')) add(1, 'Regulation Bureau (citywide)')
+  for (const mafia of activeAnchorSourcePlots(plots, playerId, 'mafia')) {
+    add(1, `Mafia (citywide @ ${mafia.col}${mafia.row})`)
+  }
+  for (const bureau of activeAnchorSourcePlots(plots, playerId, 'regulation-bureau')) {
+    add(1, `Regulation Bureau (citywide @ ${bureau.col}${bureau.row})`)
+  }
 
   const targetDistricts = getPlotDistricts(targetRow, targetCol)
   const regional: Array<{ id: string; district: District; label: string }> = [
@@ -695,16 +792,25 @@ export function getAnchorInfluenceForAction(
     { id: 'tourism-office', district: 'Mountain Cove', label: 'Tourism Office (Mountain Cove)' },
   ]
   for (const entry of regional) {
-    if (targetDistricts.includes(entry.district) && has(entry.id)) {
-      add(1, entry.label)
+    if (!targetDistricts.includes(entry.district)) continue
+    for (const src of activeAnchorSourcePlots(plots, playerId, entry.id)) {
+      add(1, `${entry.label} @ ${src.col}${src.row}`)
     }
   }
 
-  const unionCoversTarget = activeAnchorSourcePlots(plots, playerId, 'union').some((union) => {
+  for (const union of activeAnchorSourcePlots(plots, playerId, 'union')) {
     const unionDistricts = getPlotDistricts(union.row, union.col)
-    return unionDistricts.some((district) => targetDistricts.includes(district))
-  })
-  if (unionCoversTarget) add(1, 'Union (played district)')
+    if (unionDistricts.some((district) => targetDistricts.includes(district))) {
+      const districtLabel = unionDistricts.join('/')
+      add(1, `Union (${districtLabel} @ ${union.col}${union.row})`)
+    }
+  }
+
+  const blockPresence = getBlockPresenceInfluenceBonus(playerId, plots, targetRow, targetCol)
+  if (blockPresence.bonus > 0) add(blockPresence.bonus, blockPresence.labels[0]!)
+
+  const streetOpp = getStreetOppositeInfluenceBonus(playerId, plots, targetRow, targetCol)
+  if (streetOpp.bonus > 0) add(streetOpp.bonus, streetOpp.labels[0]!)
 
   if (action === 'takeover' || action === 'remove-investors') {
     const rivalBureauInBlock = plots.some(

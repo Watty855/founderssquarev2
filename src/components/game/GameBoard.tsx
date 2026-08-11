@@ -720,7 +720,7 @@ export function GameBoard({
               : undefined
           const unionAnchorTooltip =
             isClaimed && builtPropertyCard?.type === 'anchor' && builtPropertyCard?.id === 'union'
-              ? `INFLUENCE: +1 (district where Union was played)\nINCOME: +$M on your other lots on this block (Church-style); rivals’ lots on this block −$M on their Income (lost, not paid to you)\nEnd game value: ${builtPropertyCard.endGameValue}M (if played and built or banked)\nBuild: Union designated anchors only`
+              ? `INFLUENCE: +1 in the district where this Union was played (stacks with other Unions)\nINCOME: +$M on your other lots on this city block; rivals’ lots on this block −$M on their Income (lost, not paid to you)\nEnd game value: ${builtPropertyCard.endGameValue}M (if played and built or banked)\nBuild: Any vacant Anchor Tenet lot`
               : undefined
           const claimingPlayer = isClaimed ? players.find((p) => p.id === plot.claimedBy) : undefined
 
