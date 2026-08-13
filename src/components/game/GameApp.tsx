@@ -78,12 +78,21 @@ import {
   playCrowdCheerSound,
   playInfluenceDwindleSound,
 } from '@/lib/soundEffects'
-import { trySimpleAiMainPhase, pickAiDiscardPropertyIds } from '@/lib/bot/simpleAiTurn'
+import {
+  trySimpleAiMainPhase,
+  pickAiDiscardPropertyIds,
+  pickAiActionCardDiscardIds,
+} from '@/lib/bot/simpleAiTurn'
 import type { SimpleAiTurnHandlers, SimpleAiTurnUi } from '@/lib/bot/simpleAiTurn'
 import { AI_MAIN_PHASE_DELAY_NORMAL_MS } from '@/lib/bot/aiTiming'
 import {
   confrontationAttemptTitle,
   investmentNoticeTitle,
+  hostileTakeoverAttemptTitle,
+  hostileTakeoverAttackerSuccessTitle,
+  hostileTakeoverDefenseSuccessTitle,
+  attackRollRequiredTitle,
+  defenseRollRequiredTitle,
   confrontationNoticeDetail,
   confrontationNoticeTitle,
   type ConfrontationKind,
@@ -689,6 +698,7 @@ function AppInner() {
     handleCancelRemoveInvestorsSelect: () => {},
     handleCancelDiscardPropertySelect: () => {},
     handleConfirmDiscardProperty: () => {},
+    handleDiscardActionCards: () => {},
     dismissTaxBuildPrompt: () => {},
     cancelPlacement: () => {},
     handlePlayCards: () => {},
@@ -839,11 +849,12 @@ function AppInner() {
       targetName: string,
       outcome: ConfrontationOutcome,
       detail: string,
-      sound?: BoardFx['sound']
+      sound?: BoardFx['sound'],
+      titleOverride?: string
     ) => {
       broadcastBoardFx({
         notice: {
-          title: confrontationNoticeTitle(kind, attackerName, targetName),
+          title: titleOverride ?? confrontationNoticeTitle(kind, attackerName, targetName),
           detail: confrontationNoticeDetail(outcome, detail),
         },
         sound,
@@ -855,7 +866,7 @@ function AppInner() {
 
   /**
    * Table-wide drama when a vs-player action is laid / targeted.
-   * Example: "Alice is attempting a Hostile Takeover against Bob"
+   * Example: "Alice attempts Hostile Takeover of Bob's Firehouse 01"
    */
   const announceConfrontationAttempt = useCallback(
     (
@@ -863,11 +874,12 @@ function AppInner() {
       attackerName: string,
       targetName: string,
       detail: string,
-      sound: BoardFx['sound'] = 'boo'
+      sound: BoardFx['sound'] = 'boo',
+      titleOverride?: string
     ) => {
       broadcastBoardFx({
         notice: {
-          title: confrontationAttemptTitle(kind, attackerName, targetName),
+          title: titleOverride ?? confrontationAttemptTitle(kind, attackerName, targetName),
           detail: confrontationNoticeDetail('attempting', detail),
           durationMs: 5500,
         },
@@ -959,17 +971,19 @@ function AppInner() {
         const vsTitle = confrontationNoticeTitle(kindLabel, e.attackerName, e.targetName)
         if (e.negated) {
           showBoardNotice(
-            vsTitle,
+            e.kind === 'hostile-takeover' ? hostileTakeoverDefenseSuccessTitle() : vsTitle,
             confrontationNoticeDetail(
               'blocked',
-              `${e.targetName} rolled ${e.result} — ${e.attackerName}'s play is repelled.`
+              e.kind === 'hostile-takeover'
+                ? `${e.targetName} rolled ${e.result} — the property stays with its owner.`
+                : `${e.targetName} rolled ${e.result} — ${e.attackerName}'s play is repelled.`
             ),
             isAiName(e.targetName) && isAiName(e.attackerName) ? { quick: true } : undefined
           )
           playCrowdCheerSound()
         } else {
           showBoardNotice(
-            vsTitle,
+            e.kind === 'hostile-takeover' ? hostileTakeoverAttackerSuccessTitle() : vsTitle,
             confrontationNoticeDetail(
               'success',
               e.kind === 'hostile-takeover'
@@ -1442,7 +1456,7 @@ function AppInner() {
     if (announcedFreezeKeyRef.current !== pendingFreezeKey) {
       announcedFreezeKeyRef.current = pendingFreezeKey
       showBoardNotice(
-        `🎲 City Council Freeze on ${pending.targetName}!`,
+        defenseRollRequiredTitle('City Council Freeze', pending.targetName),
         defender?.isAi === true
           ? `${pending.attackerName} succeeded — ${pending.targetName} (computer) rolls to negate.`
           : `${pending.attackerName} succeeded — ${pending.targetName} must roll a 6 to negate the freeze.`
@@ -1525,20 +1539,22 @@ function AppInner() {
         defender?.isAi === true
           ? `${pending.attackerName} succeeded. ${pending.targetName} (computer) initiates the defense roll.`
           : `${pending.attackerName} succeeded. ${pending.targetName} rolls on their own screen.`
-      showBoardNotice(`🎲 ${kindTitle} — ${pending.targetName} must roll!`, defenseDetail)
-      broadcastBoardFx(
-        {
-          sound: 'cheer',
-          notice: {
-            title: `🎲 ${kindTitle} defense roll`,
-            detail:
-              defender?.isAi === true
-                ? `${pending.targetName} (computer) is rolling.`
-                : `${pending.targetName} is rolling.`,
+      showBoardNotice(defenseRollRequiredTitle(kindTitle, pending.targetName), defenseDetail)
+      if (pending.kind !== 'hostile-takeover') {
+        broadcastBoardFx(
+          {
+            sound: 'cheer',
+            notice: {
+              title: defenseRollRequiredTitle(kindTitle, pending.targetName),
+              detail:
+                defender?.isAi === true
+                  ? `${pending.targetName} (computer) is rolling.`
+                  : `${pending.targetName} is rolling.`,
+            },
           },
-        },
-        { localEcho: false }
-      )
+          { localEcho: false }
+        )
+      }
     }
 
     const controlsDefender =
@@ -1609,11 +1625,50 @@ function AppInner() {
     if (announcedLocalDramaKeyRef.current === key) return
     announcedLocalDramaKeyRef.current = key
     const titles: Record<string, { title: string; detail: string }> = {
-      'hostile-takeover-defender': { title: '🎲 Hostile Takeover defense', detail: 'Owner rolls — only a 6 blocks the takeover.' },
-      'scandal-defender': { title: '🎲 Scandal defense', detail: 'Anchor owner rolls — only a 6 negates the scandal.' },
-      'council-freeze-defender': { title: '🎲 Freeze defense roll', detail: 'Frozen founder rolls — only a 6 negates.' },
-      'police-raid-defender': { title: '🎲 Mafia counter roll', detail: 'Mafia owner rolls to repel the raid.' },
-      'rezoning': { title: '🎲 Rezoning roll', detail: 'Founder is rolling to rezone a vacant lot.' },
+      'hostile-takeover-defender': {
+        title: defenseRollRequiredTitle(
+          'Hostile Takeover',
+          safeGameState.players.find((p) => p.id === rollDieDialogState.takeoverContext?.ownerPlayerId)
+            ?.name ?? 'Owner'
+        ),
+        detail: 'Only a 6 blocks the takeover.',
+      },
+      'scandal-defender': {
+        title: defenseRollRequiredTitle(
+          'Scandal',
+          safeGameState.players.find(
+            (p) => p.id === rollDieDialogState.scandalContext?.anchorOwnerPlayerId
+          )?.name ?? 'Anchor owner'
+        ),
+        detail: 'Only a 6 negates the scandal.',
+      },
+      'council-freeze-defender': {
+        title: defenseRollRequiredTitle(
+          'City Council Freeze',
+          rollDieDialogState.targetPlayerId != null
+            ? safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.name ??
+                'Founder'
+            : 'Founder'
+        ),
+        detail: 'Only a 6 negates the freeze.',
+      },
+      'police-raid-defender': {
+        title: defenseRollRequiredTitle(
+          'Police Raid on Mafia',
+          rollDieDialogState.targetPlayerId != null
+            ? safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.name ??
+                'Mafia owner'
+            : 'Mafia owner'
+        ),
+        detail: 'Mafia owner rolls to repel the raid.',
+      },
+      rezoning: {
+        title: attackRollRequiredTitle(
+          'Rezoning',
+          safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Founder'
+        ),
+        detail: 'Founder is rolling to rezone a vacant lot.',
+      },
     }
     const copy = titles[mode]
     if (copy) {
@@ -3290,6 +3345,13 @@ function AppInner() {
     }, 2000)
   }
 
+  /** Stable identity so DiscardDialog AI auto-confirm doesn't reset its timeout every render. */
+  const handleDiscardCompleteRef = useRef(handleDiscardComplete)
+  handleDiscardCompleteRef.current = handleDiscardComplete
+  const stableHandleDiscardComplete = useCallback((discardedInstanceIds: string[]) => {
+    handleDiscardCompleteRef.current(discardedInstanceIds)
+  }, [])
+
   const handleCancelInvestmentSelect = () => {
     setInvestmentSelectMode({ active: false, validPlots: [], actionInstanceId: null, contributionMillion: 4 })
     toast.info('Investment cancelled.')
@@ -3881,7 +3943,9 @@ function AppInner() {
       'Hostile Takeover',
       attackerPreview.name,
       ownerName,
-      `${attackerPreview.name} paid $1M and is rolling to seize ${col}${row}.`
+      `${attackerPreview.name} paid $1M and is rolling to seize ${col}${row}.`,
+      'boo',
+      hostileTakeoverAttemptTitle(attackerPreview.name, ownerName, propertyCard.name)
     )
     if (takeoverBonus !== 0) {
       const prefix = takeoverBonus > 0 ? `+${takeoverBonus}` : `${takeoverBonus}`
@@ -5006,8 +5070,9 @@ function AppInner() {
           attackerName,
           ownerName,
           'pending',
-          `Rolled ${takeoverTotal} — ${ownerName} must roll a 6 at ${ctx.col}${ctx.row} to block.`,
-          'boo'
+          `Rolled ${takeoverTotal} — ${ownerName} may roll once to defend; only a 6 blocks.`,
+          'boo',
+          hostileTakeoverAttackerSuccessTitle()
         )
       }
 
@@ -5056,8 +5121,9 @@ function AppInner() {
             attackerName,
             ownerName,
             'pending',
-            `Rolled ${takeoverTotal} — ${ownerName} must roll a 6 at ${ctx.col}${ctx.row} to block.`,
-            'boo'
+            `Rolled ${takeoverTotal} — ${ownerName} may roll once to defend; only a 6 blocks.`,
+            'boo',
+            hostileTakeoverAttackerSuccessTitle()
           )
         }
         return
@@ -5137,7 +5203,8 @@ function AppInner() {
           ownerName,
           'blocked',
           `${ownerName} rolled 6 — ${col}${row} stays with its owner.`,
-          'cheer'
+          'cheer',
+          hostileTakeoverDefenseSuccessTitle()
         )
       } else {
         patchGameState((current) => {
@@ -5196,7 +5263,8 @@ function AppInner() {
             ownerName,
             'success',
             `${attackerName} takes ${col}${row} — paid $${payment120Million}M (120% of end value).`,
-            'dwindle'
+            'dwindle',
+            hostileTakeoverAttackerSuccessTitle()
           )
         }
       }
@@ -6087,9 +6155,8 @@ function AppInner() {
     // Force-resolve excess-hand discard dialog for the acting seat.
     if (discardDialogState.open && acting) {
       const n = discardDialogState.numToDiscard
-      const hand = acting.actionCards || []
-      const ids = hand.slice(0, Math.min(Math.max(0, n), hand.length)).map((c) => c.instanceId)
-      handleDiscardComplete(ids)
+      const ids = pickAiActionCardDiscardIds(acting, n)
+      stableHandleDiscardComplete(ids)
       toast.success('Forced hand discard resolution — play continues.')
       return
     }
@@ -6280,6 +6347,7 @@ function AppInner() {
     handleCancelRemoveInvestorsSelect,
     handleCancelDiscardPropertySelect,
     handleConfirmDiscardProperty,
+    handleDiscardActionCards: stableHandleDiscardComplete,
     dismissTaxBuildPrompt: () => {
       taxPromptResumeRef.current = null
       setTaxBuildPrompt({
@@ -6314,6 +6382,7 @@ function AppInner() {
     taxBuildPromptOpen: taxBuildPrompt.open,
     discardPropertyConfirmOpen,
     discardDialogOpen: discardDialogState.open,
+    discardDialogNumToDiscard: discardDialogState.numToDiscard,
     rollDieDialogOpen: rollDieDialogState.open,
     incomeDialogOpen: incomeDialogState.open,
     takeoverSelectActive: takeoverSelectMode.active,
@@ -6501,8 +6570,8 @@ function AppInner() {
   const namedStreetsForBoard = namedRegionsForBoard.streets
 
   const calculateFinalScores = (): PlayerScore[] => {
-    /** Squares + Streets are computed once per scoring call; any number per player is allowed and each
-     *  earns its own $30M bonus. Names are formed from the founder's display name at scoring time. */
+    /** Squares + Streets are computed once per scoring call; any number per player is allowed.
+     *  Squares earn $50M each; streets earn $30M each. Names use the founder's display name at scoring. */
     const allSquares = findCompleteSquares(safeGameState.plots)
     const allStreets = findCompleteStreets(safeGameState.plots)
 
@@ -6567,9 +6636,17 @@ function AppInner() {
   const requiredAction: RequiredAction | null = (() => {
     if (rollDieDialogState.open) {
       const defenderName =
-        rollDieDialogState.targetPlayerId != null
-          ? safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.name
-          : undefined
+        rollDieDialogState.mode === 'hostile-takeover-defender'
+          ? safeGameState.players.find(
+              (p) => p.id === rollDieDialogState.takeoverContext?.ownerPlayerId
+            )?.name
+          : rollDieDialogState.mode === 'scandal-defender'
+            ? safeGameState.players.find(
+                (p) => p.id === rollDieDialogState.scandalContext?.anchorOwnerPlayerId
+              )?.name
+            : rollDieDialogState.targetPlayerId != null
+              ? safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.name
+              : undefined
       const aiDiceCta = rollDieAiAutoplay
         ? {
             ctaLabel: 'Unstick',
@@ -6581,12 +6658,13 @@ function AppInner() {
         case 'council-freeze-attacker':
           return {
             id: 'cf-att',
-            title: rollDieAiAutoplay
-              ? 'City Council Freeze — computer rolling'
-              : 'City Council Freeze — your roll',
+            title: attackRollRequiredTitle(
+              'City Council Freeze',
+              currentPlayer?.name ?? 'Founder'
+            ),
             detail:
               (rollDieAiAutoplay
-                ? 'Founderbot is rolling City Council Freeze.'
+                ? `${currentPlayer?.name ?? 'Founderbot'} is rolling City Council Freeze.`
                 : 'Roll the die in the dialog. First roll free; each retry costs $5M. After 3 misses the freeze fails.') +
               aiDiceCta.detailSuffix,
             tone: 'danger',
@@ -6596,11 +6674,14 @@ function AppInner() {
         case 'council-freeze-defender':
           return {
             id: 'cf-def',
-            title: `City Council Freeze — ${defenderName ?? 'defender'} rolls`,
+            title: defenseRollRequiredTitle(
+              'City Council Freeze',
+              defenderName ?? 'Founder'
+            ),
             detail:
               (rollDieAiAutoplay
                 ? `${defenderName ?? 'Computer'} is rolling to negate the freeze.`
-                : 'Defender rolls once in the dialog. Only a 6 negates the freeze.') +
+                : `${defenderName ?? 'Defender'} rolls once in the dialog. Only a 6 negates the freeze.`) +
               aiDiceCta.detailSuffix,
             tone: 'danger',
             ctaLabel: aiDiceCta.ctaLabel,
@@ -6609,12 +6690,13 @@ function AppInner() {
         case 'hostile-takeover-attacker':
           return {
             id: 'ht-att',
-            title: rollDieAiAutoplay
-              ? 'Hostile Takeover — computer rolling'
-              : 'Hostile Takeover — your roll',
+            title: attackRollRequiredTitle(
+              'Hostile Takeover',
+              currentPlayer?.name ?? 'Founder'
+            ),
             detail:
               (rollDieAiAutoplay
-                ? 'Founderbot is resolving Hostile Takeover.'
+                ? `${currentPlayer?.name ?? 'Founderbot'} is resolving Hostile Takeover.`
                 : '$1M attempt fee paid. Roll the die in the dialog — 5–6 succeeds. There is no exit until you roll.') +
               aiDiceCta.detailSuffix,
             tone: 'danger',
@@ -6624,11 +6706,12 @@ function AppInner() {
         case 'hostile-takeover-defender':
           return {
             id: 'ht-def',
-            title: `Hostile Takeover — ${defenderName ?? 'owner'} rolls`,
+            title: defenseRollRequiredTitle('Hostile Takeover', defenderName ?? 'Owner'),
             detail:
               (rollDieAiAutoplay
                 ? `${defenderName ?? 'Computer'} is rolling the defense.`
-                : 'Owner rolls once. Only a 6 blocks the takeover.') + aiDiceCta.detailSuffix,
+                : `${defenderName ?? 'Owner'} rolls once. Only a 6 blocks the takeover.`) +
+              aiDiceCta.detailSuffix,
             tone: 'danger',
             ctaLabel: aiDiceCta.ctaLabel,
             onCta: aiDiceCta.onCta,
@@ -6636,10 +6719,10 @@ function AppInner() {
         case 'scandal-attacker':
           return {
             id: 'sc-att',
-            title: rollDieAiAutoplay ? 'Scandal — computer rolling' : 'Scandal — your roll',
+            title: attackRollRequiredTitle('Scandal', currentPlayer?.name ?? 'Founder'),
             detail:
               (rollDieAiAutoplay
-                ? 'Founderbot is resolving Scandal.'
+                ? `${currentPlayer?.name ?? 'Founderbot'} is resolving Scandal.`
                 : 'Roll in the dialog. Total 6+ after Influencer / News Outlet bonuses succeeds.') +
               aiDiceCta.detailSuffix,
             tone: 'warning',
@@ -6649,11 +6732,12 @@ function AppInner() {
         case 'scandal-defender':
           return {
             id: 'sc-def',
-            title: `Scandal — ${defenderName ?? 'anchor owner'} rolls`,
+            title: defenseRollRequiredTitle('Scandal', defenderName ?? 'Anchor owner'),
             detail:
               (rollDieAiAutoplay
                 ? `${defenderName ?? 'Computer'} is rolling the defense.`
-                : 'Anchor owner rolls once. Only a 6 negates the scandal.') + aiDiceCta.detailSuffix,
+                : `${defenderName ?? 'Anchor owner'} rolls once. Only a 6 negates the scandal.`) +
+              aiDiceCta.detailSuffix,
             tone: 'warning',
             ctaLabel: aiDiceCta.ctaLabel,
             onCta: aiDiceCta.onCta,
@@ -6661,10 +6745,10 @@ function AppInner() {
         case 'rezoning':
           return {
             id: 'rz-roll',
-            title: rollDieAiAutoplay ? 'Rezoning — computer rolling' : 'Rezoning — roll required',
+            title: attackRollRequiredTitle('Rezoning', currentPlayer?.name ?? 'Founder'),
             detail:
               (rollDieAiAutoplay
-                ? 'Founderbot is rolling for Rezoning approval.'
+                ? `${currentPlayer?.name ?? 'Founderbot'} is rolling for Rezoning approval.`
                 : 'Roll in the dialog. 5–6 approves (4–6 with +1 civic influence).') +
               aiDiceCta.detailSuffix,
             tone: 'warning',
@@ -6674,12 +6758,13 @@ function AppInner() {
         case 'police-raid-attacker':
           return {
             id: 'pr-att',
-            title: rollDieAiAutoplay
-              ? 'Police Raid — computer rolling'
-              : 'Police Raid on Mafia — your roll',
+            title: attackRollRequiredTitle(
+              'Police Raid on Mafia',
+              currentPlayer?.name ?? 'Founder'
+            ),
             detail:
               (rollDieAiAutoplay
-                ? 'Founderbot is resolving Police Raid on Mafia.'
+                ? `${currentPlayer?.name ?? 'Founderbot'} is resolving Police Raid on Mafia.`
                 : 'Roll in the dialog. 5–6 succeeds (4–6 if you own a built Police lot).') +
               aiDiceCta.detailSuffix,
             tone: 'danger',
@@ -6689,11 +6774,15 @@ function AppInner() {
         case 'police-raid-defender':
           return {
             id: 'pr-def',
-            title: 'Police Raid on Mafia — Mafia counter roll',
+            title: defenseRollRequiredTitle(
+              'Police Raid on Mafia',
+              defenderName ?? 'Mafia owner'
+            ),
             detail:
               (rollDieAiAutoplay
-                ? 'Computer is rolling the Mafia counter.'
-                : 'Mafia rolls once. A 6 counters (5–6 if you own Police).') + aiDiceCta.detailSuffix,
+                ? `${defenderName ?? 'Computer'} is rolling the Mafia counter.`
+                : `${defenderName ?? 'Mafia owner'} rolls once. A 6 counters (5–6 if raid had influence).`) +
+              aiDiceCta.detailSuffix,
             tone: 'danger',
             ctaLabel: aiDiceCta.ctaLabel,
             onCta: aiDiceCta.onCta,
@@ -6701,12 +6790,13 @@ function AppInner() {
         case 'remove-investors':
           return {
             id: 'ri',
-            title: rollDieAiAutoplay
-              ? 'Remove Investors — computer rolling'
-              : 'Remove Investors — roll required',
+            title: attackRollRequiredTitle(
+              'Remove Investors',
+              currentPlayer?.name ?? 'Founder'
+            ),
             detail:
               (rollDieAiAutoplay
-                ? 'Founderbot is rolling to clear investors.'
+                ? `${currentPlayer?.name ?? 'Founderbot'} is rolling to clear investors.`
                 : 'Roll in the dialog. Total 5+ includes block anchor and civic influence. No investor counter-roll. On success pay each investor 50% of their stake; all stripes on that lot clear.') +
               aiDiceCta.detailSuffix,
             tone: 'warning',
@@ -6716,7 +6806,7 @@ function AppInner() {
         case 'roll-die':
           return {
             id: 'roll-die',
-            title: 'Roll required',
+            title: attackRollRequiredTitle('Roll', currentPlayer?.name ?? 'Founder'),
             detail: 'Roll the die in the dialog to continue.' + aiDiceCta.detailSuffix,
             tone: 'info',
             ctaLabel: aiDiceCta.ctaLabel,
@@ -6730,7 +6820,7 @@ function AppInner() {
         safeGameState.players.find((p) => p.id === pending.targetPlayerId)?.isAi === true
       return {
         id: 'cf-def-wait',
-        title: `City Council Freeze — ${pending.targetName} is rolling`,
+        title: defenseRollRequiredTitle('City Council Freeze', pending.targetName),
         detail: pendingDefAi
           ? `${pending.attackerName}'s freeze succeeded. ${pending.targetName} (computer) should auto-roll — tap Unstick if this hangs.`
           : `${pending.attackerName}'s freeze succeeded. ${pending.targetName} rolls on their own screen — only a 6 negates it.`,
@@ -6751,7 +6841,7 @@ function AppInner() {
         safeGameState.players.find((p) => p.id === pending.targetPlayerId)?.isAi === true
       return {
         id: 'rebuttal-wait',
-        title: `${kindTitle} — ${pending.targetName} is rolling`,
+        title: defenseRollRequiredTitle(kindTitle, pending.targetName),
         detail: pendingDefAi
           ? `${pending.attackerName}'s play succeeded. ${pending.targetName} (computer) should auto-roll — tap Unstick if this hangs.`
           : `${pending.attackerName}'s play succeeded. ${pending.targetName} rolls on their own screen.`,
@@ -7976,7 +8066,7 @@ function AppInner() {
           open={discardDialogState.open}
           player={safeGameState.players[safeGameState.currentPlayerIndex]}
           numToDiscard={discardDialogState.numToDiscard}
-          onComplete={handleDiscardComplete}
+          onComplete={stableHandleDiscardComplete}
           aiConfirmSelection={currentPlayer?.isAi === true}
         />
       )}
@@ -8004,7 +8094,8 @@ function AppInner() {
             influenceLabels={rollDieDialogState.influenceLabels ?? []}
             defenderName={
               rollDieDialogState.mode === 'council-freeze-attacker' ||
-              rollDieDialogState.mode === 'council-freeze-defender'
+              rollDieDialogState.mode === 'council-freeze-defender' ||
+              rollDieDialogState.mode === 'police-raid-defender'
                 ? rollDieDialogState.targetPlayerId != null
                   ? safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.name
                   : undefined
@@ -8017,7 +8108,11 @@ function AppInner() {
                     ? safeGameState.players.find(
                         (p) => p.id === rollDieDialogState.scandalContext!.anchorOwnerPlayerId
                       )?.name
-                    : undefined
+                    : rollDieDialogState.mode === 'hostile-takeover-attacker'
+                      ? safeGameState.players.find(
+                          (p) => p.id === rollDieDialogState.takeoverContext?.ownerPlayerId
+                        )?.name
+                      : undefined
             }
             actingPlayerName={currentPlayer.name}
             councilFreezeAttackerRollsCompleted={rollDieDialogState.councilFreezeAttackerRollsCompleted}

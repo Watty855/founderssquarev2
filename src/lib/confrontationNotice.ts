@@ -46,6 +46,53 @@ export function investmentNoticeTitle(
   return `${investorName} invests in ${ownerPossessive} ${propertyName}`
 }
 
+function ownerPossessiveName(ownerName: string): string {
+  return ownerName.endsWith('s') || ownerName.endsWith('S') ? `${ownerName}'` : `${ownerName}'s`
+}
+
+/** Possessive form for banner copy ("Alice's", "James'"). */
+export function playerPossessiveName(name: string): string {
+  return ownerPossessiveName(name)
+}
+
+/**
+ * Attacker / solo action die queued.
+ * Example: "Hostile Takeover — Alice's roll"
+ */
+export function attackRollRequiredTitle(kind: string, playerName: string): string {
+  return `${kind} — ${playerPossessiveName(playerName)} roll`
+}
+
+/**
+ * Defender counter die queued after a successful attack.
+ * Example: "Hostile Takeover — Bob's defense roll required"
+ */
+export function defenseRollRequiredTitle(kind: string, playerName: string): string {
+  return `${kind} — ${playerPossessiveName(playerName)} defense roll required`
+}
+
+/**
+ * Hostile Takeover attempt — includes the target property.
+ * Example: "Alice attempts Hostile Takeover of Bob's Firehouse 01"
+ */
+export function hostileTakeoverAttemptTitle(
+  attackerName: string,
+  ownerName: string,
+  propertyName: string
+): string {
+  return `${attackerName} attempts Hostile Takeover of ${ownerPossessiveName(ownerName)} ${propertyName}`
+}
+
+/** Attacker die succeeded (5+ after influence) — defender may still block with a 6. */
+export function hostileTakeoverAttackerSuccessTitle(): string {
+  return 'Hostile Takeover is successful.'
+}
+
+/** Defender rolled a 6 — ownership stays with the defending founder. */
+export function hostileTakeoverDefenseSuccessTitle(): string {
+  return 'Hostile Takeover defense is successful.'
+}
+
 export function confrontationOutcomeLabel(outcome: ConfrontationOutcome): string {
   switch (outcome) {
     case 'success':

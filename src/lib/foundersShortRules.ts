@@ -48,7 +48,7 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
   {
     title: 'Bonuses',
     lines: [
-      '$30M + naming bonus for every fully-owned 3×3 city block, allowing the square to be named in your honor.',
+      '$50M + naming bonus for every fully-owned 3×3 city block, allowing the square to be named in your honor.',
       '$30M + naming bonus for every 6-lot 3+3 run along a street; allowing the street to be named in your honor',
     ],
   },

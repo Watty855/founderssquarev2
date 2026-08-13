@@ -9,7 +9,7 @@ import {
   incomePercentageForDie,
   incomeRollMoodForDie,
 } from '@/lib/incomeDice'
-import { aiPlaybackDelay } from '@/lib/bot/aiTiming'
+import { AI_FAST_PLAYBACK_MS } from '@/lib/bot/aiTiming'
 import { playIncomeSound } from '@/lib/soundEffects'
 import { useDiceBox } from '@/hooks/use-dice-box'
 
@@ -126,7 +126,7 @@ export function IncomeDialog({
   onComplete,
   onCancel,
   aiAutoplay = false,
-  aiFastPlayback = false,
+  aiFastPlayback: _aiFastPlayback = false,
 }: IncomeDialogProps) {
   const instanceId = useId()
   const containerId = `dice-income-${instanceId.replace(/:/g, '')}`
@@ -151,11 +151,18 @@ export function IncomeDialog({
     hasBuiltPropertiesForIncomeRoll === true ||
     (hasBuiltPropertiesForIncomeRoll === undefined && totalIncome > 0)
   const bankValue = actionCards.find(c => c.id === 'income')?.bankValue ?? 4
-  /** Bots always roll when they have properties — skip Roll/Bank so the dice box mounts immediately. */
-  const botsSkipChooser = aiAutoplay && hasIncomeGeneratingProperties
-  const atChooser = showInitialChoice && !botsSkipChooser
-  const diceOpen = open && !atChooser && hasIncomeGeneratingProperties
+  /** Humans only — bots never see Roll/Bank/Cancel. */
+  const atChooser = showInitialChoice && !aiAutoplay
+  /**
+   * Bots skip the 3D dice box entirely (init can take seconds). Humans mount dice
+   * only after dismissing the chooser.
+   */
+  const diceOpen = open && !aiAutoplay && !atChooser && hasIncomeGeneratingProperties
   const { roll, isRolling, diceValue, isReady } = useDiceBox({ containerId, open: diceOpen })
+
+  const onCompleteRef = useRef(onComplete)
+  onCompleteRef.current = onComplete
+  const aiIncomeHandledRef = useRef(false)
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -164,34 +171,67 @@ export function IncomeDialog({
       setDoubleIncomeActive(false)
       setSelectedDoubleIncomeId(null)
       setShowInitialChoice(true)
-      const doubleInst = (player?.actionCards || []).find((instance) => {
+      const hasDoubleIncome = (player?.actionCards || []).some((instance) => {
         const card = actionCards.find((c) => c.id === instance.cardId)
         return card?.id === 'double-income'
       })
-      const canDouble = Boolean(doubleInst) && doubleIncomeAllowed
-      // Bots: take Double Income immediately (no prompt UI) so the roll starts right away.
-      if (aiAutoplay && canDouble && doubleInst) {
-        setDoubleIncomeActive(true)
-        setSelectedDoubleIncomeId(doubleInst.instanceId)
-        setShowDoubleIncomePrompt(false)
-      } else {
-        setShowDoubleIncomePrompt(canDouble)
-      }
+      setShowDoubleIncomePrompt(hasDoubleIncome && doubleIncomeAllowed && !aiAutoplay)
+      aiIncomeHandledRef.current = false
     }
   }, [open, player, doubleIncomeAllowed, aiAutoplay])
 
-  // Auto-roll when ready and prompts are dismissed
+  /**
+   * Founderbots: no chooser UI, no WebGL dice. Resolve Income in one short tick —
+   * bank when they have no properties, otherwise instant roll (+ Double Income when held).
+   */
   useEffect(() => {
-    const waitingOnDoublePrompt = showDoubleIncomePrompt && !aiAutoplay
-    if (!atChooser && !waitingOnDoublePrompt && !isRolling && !incomeResult && hasIncomeGeneratingProperties && isReady) {
-      const timer = setTimeout(
-        () => roll(),
-        // Bots: roll as soon as the dice box is ready (no deliberate pause on the chooser).
-        aiAutoplay ? aiPlaybackDelay(40, true) : 300
+    if (!open || !aiAutoplay || aiIncomeHandledRef.current) return
+    aiIncomeHandledRef.current = true
+
+    const doubleInst = (player?.actionCards || []).find((instance) => {
+      const card = actionCards.find((c) => c.id === instance.cardId)
+      return card?.id === 'double-income'
+    })
+    const useDouble = Boolean(doubleInst) && doubleIncomeAllowed
+
+    const t = window.setTimeout(() => {
+      playIncomeSound()
+      if (!hasIncomeGeneratingProperties) {
+        const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? bankValue
+        onCompleteRef.current(bv, undefined, 'bank-income-card')
+        return
+      }
+      const face = Math.floor(Math.random() * 6) + 1
+      const pct = incomePercentageForDie(face)
+      let amount = Math.floor((totalIncome * pct) / 100)
+      if (useDouble) amount *= 2
+      onCompleteRef.current(
+        amount,
+        useDouble && doubleInst ? doubleInst.instanceId : undefined,
+        'property-roll',
+        face
       )
+    }, AI_FAST_PLAYBACK_MS)
+    return () => window.clearTimeout(t)
+  }, [
+    open,
+    aiAutoplay,
+    hasIncomeGeneratingProperties,
+    bankValue,
+    totalIncome,
+    doubleIncomeAllowed,
+    player,
+  ])
+
+  // Auto-roll when ready and prompts are dismissed (humans only)
+  useEffect(() => {
+    if (aiAutoplay) return
+    if (!atChooser && !showDoubleIncomePrompt && !isRolling && !incomeResult && hasIncomeGeneratingProperties && isReady) {
+      const timer = setTimeout(() => roll(), 300)
       return () => clearTimeout(timer)
     }
   }, [
+    aiAutoplay,
     atChooser,
     showDoubleIncomePrompt,
     isRolling,
@@ -199,11 +239,11 @@ export function IncomeDialog({
     hasIncomeGeneratingProperties,
     isReady,
     roll,
-    aiAutoplay,
   ])
 
-  // Compute income result when dice value changes
+  // Compute income result when dice value changes (humans only)
   useEffect(() => {
+    if (aiAutoplay) return
     if (diceValue === null) return
 
     let percentage: number
@@ -227,88 +267,7 @@ export function IncomeDialog({
     // cash after investors so recipients never receive more than the payer can fund.
 
     setIncomeResult({ percentage, amount, status, event })
-  }, [diceValue, totalIncome, doubleIncomeActive])
-
-  const aiIncomeHandledRef = useRef(false)
-  const incomeAiCollectSentRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    if (!open) {
-      aiIncomeHandledRef.current = false
-      incomeAiCollectSentRef.current = null
-    }
-  }, [open])
-
-  useEffect(() => {
-    if (!open || !aiAutoplay || hasIncomeGeneratingProperties || aiIncomeHandledRef.current) return
-    aiIncomeHandledRef.current = true
-    const t = window.setTimeout(() => {
-      const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? bankValue
-      playIncomeSound()
-      onComplete(bv, undefined, 'bank-income-card')
-    }, aiPlaybackDelay(120, aiFastPlayback))
-    return () => window.clearTimeout(t)
-  }, [open, aiAutoplay, aiFastPlayback, hasIncomeGeneratingProperties, bankValue, onComplete])
-
-  /** Bots skip the Roll/Bank chooser via `botsSkipChooser` — no delayed dismiss needed. */
-
-  /** Human Double Income prompt is handled in the UI; bots already resolved it on open. */
-
-  useEffect(() => {
-    if (!open || !aiAutoplay || !incomeResult) return
-    const stamp = `${incomeResult.amount}|${selectedDoubleIncomeId ?? ''}|${incomeResult.status}`
-    if (incomeAiCollectSentRef.current === stamp) return
-    const amt = incomeResult.amount
-    const sid = selectedDoubleIncomeId || undefined
-    const t = window.setTimeout(() => {
-      incomeAiCollectSentRef.current = stamp
-      playIncomeSound()
-      onComplete(amt, doubleIncomeAllowed ? sid : undefined, 'property-roll', diceValue ?? undefined)
-    }, aiPlaybackDelay(420, aiFastPlayback))
-    return () => window.clearTimeout(t)
-  }, [open, aiAutoplay, aiFastPlayback, incomeResult, selectedDoubleIncomeId, doubleIncomeAllowed, onComplete, diceValue])
-
-  /**
-   * Hard watchdog: if a bot Income never settles (dice hang / isReady stuck), force-resolve
-   * so Founderbot turns cannot freeze the table.
-   */
-  useEffect(() => {
-    if (!open || !aiAutoplay) return
-    if (aiIncomeHandledRef.current) return
-    const t = window.setTimeout(() => {
-      if (aiIncomeHandledRef.current || incomeAiCollectSentRef.current != null) return
-      aiIncomeHandledRef.current = true
-      playIncomeSound()
-      if (!hasIncomeGeneratingProperties) {
-        const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? bankValue
-        onComplete(bv, undefined, 'bank-income-card')
-        return
-      }
-      const face = diceValue && diceValue >= 1 && diceValue <= 6 ? diceValue : 4
-      const pct = incomePercentageForDie(face)
-      let amount = Math.floor((totalIncome * pct) / 100)
-      if (doubleIncomeActive) amount *= 2
-      incomeAiCollectSentRef.current = `watchdog|${amount}`
-      onComplete(
-        amount,
-        doubleIncomeAllowed ? selectedDoubleIncomeId || undefined : undefined,
-        'property-roll',
-        face
-      )
-    }, 5000)
-    return () => window.clearTimeout(t)
-  }, [
-    open,
-    aiAutoplay,
-    hasIncomeGeneratingProperties,
-    bankValue,
-    totalIncome,
-    diceValue,
-    doubleIncomeActive,
-    doubleIncomeAllowed,
-    selectedDoubleIncomeId,
-    onComplete,
-  ])
+  }, [aiAutoplay, diceValue, totalIncome, doubleIncomeActive])
 
   const handleCollect = () => {
     if (incomeResult) {
@@ -356,18 +315,31 @@ export function IncomeDialog({
             Income — {player.name}
           </DialogTitle>
           <DialogDescription style={{ fontSize: 13, color: '#8888a0', lineHeight: 1.4 }}>
-            {atChooser && hasIncomeGeneratingProperties
-              ? `Roll the die for a chance at more income, or bank the card for a guaranteed $${bankValue}M.`
-              : !hasIncomeGeneratingProperties
-              ? `No properties to generate income. Bank this card for $${bankValue}M?`
-              : aiAutoplay
-                ? `${player.name} is rolling for income…`
-                : `Property income: $${totalIncome}M`}
+            {aiAutoplay
+              ? `${player.name} is collecting income…`
+              : atChooser && hasIncomeGeneratingProperties
+                ? `Roll the die for a chance at more income, or bank the card for a guaranteed $${bankValue}M.`
+                : !hasIncomeGeneratingProperties
+                  ? `No properties to generate income. Bank this card for $${bankValue}M?`
+                  : `Property income: $${totalIncome}M`}
           </DialogDescription>
         </DialogHeader>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {!hasIncomeGeneratingProperties ? (
+          {aiAutoplay ? (
+            <div
+              style={{
+                height: 48,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#666680',
+                fontSize: 13,
+              }}
+            >
+              Resolving…
+            </div>
+          ) : !hasIncomeGeneratingProperties ? (
             <div style={{ display: 'flex', gap: 10 }}>
               <button
                 onClick={handleBankCard}

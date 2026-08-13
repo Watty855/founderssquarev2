@@ -1,6 +1,6 @@
-import type { CardInstance, PropertyCard } from '@/lib/cardTypes'
+import type { ActionCard, CardInstance, PropertyCard } from '@/lib/cardTypes'
 import type { Player, GameState, Plot } from '@/lib/types'
-import { propertyCards, ANCHOR_WILD_CARD_EMULATE_IDS } from '@/lib/cardData'
+import { actionCards, propertyCards, ANCHOR_WILD_CARD_EMULATE_IDS } from '@/lib/cardData'
 import { isCivicFlexHandCard } from '@/lib/civicFlexProperty'
 import { getAvailableCivicVariantIds } from '@/lib/lotCategory'
 import { resolvePropertyPlacementTemplate } from '@/lib/placementTemplate'
@@ -12,12 +12,19 @@ import {
   HIGH_DENSITY_HOUSING_STATS,
   isHousingPropertyCard,
 } from '@/lib/housingEconomics'
-import { turnLimitReached, MAX_TURN_ACTIONS, canAttemptRezoning } from '@/lib/turnActions'
+import {
+  turnLimitReached,
+  MAX_TURN_ACTIONS,
+  MAX_ACTION_HAND_SIZE,
+  canAttemptRezoning,
+} from '@/lib/turnActions'
 import { getInvestablePlots, getTakeoverTargetPlots } from '@/lib/investmentTargets'
 import {
   getPlotsEligibleForScandal,
   checkForNineSequentialProperties,
   totalRemoveInvestorsBuyoutMillion,
+  countPlayerBuiltInCityBlock,
+  blockCompletionBiasScore,
 } from '@/lib/utils'
 import { buildPlotIndex, getPlotAt } from '@/lib/boardIndex'
 
@@ -46,6 +53,11 @@ export interface SimpleAiTurnHandlers {
    * Pass property instance ids to discard (may be empty — still spends the action).
    */
   handleConfirmDiscardProperty: (selectedPropertyInstanceIds?: string[]) => void
+  /**
+   * End-of-turn action-hand discard (soft cap of 8). Bots must resolve this in one shot —
+   * never cancel/reopen — or the turn stalls forever.
+   */
+  handleDiscardActionCards: (discardedInstanceIds: string[]) => void
   /** Close Tax Dollars prompt panel (reject half-cost shortcut). */
   dismissTaxBuildPrompt: () => void
   cancelPlacement: () => void
@@ -74,6 +86,8 @@ export interface SimpleAiTurnUi {
   taxBuildPromptOpen: boolean
   discardPropertyConfirmOpen: boolean
   discardDialogOpen: boolean
+  /** How many action cards the end-of-turn discard dialog requires. */
+  discardDialogNumToDiscard: number
   rollDieDialogOpen: boolean
   incomeDialogOpen: boolean
   takeoverSelectActive: boolean
@@ -126,6 +140,91 @@ export function pickAiDiscardPropertyIds(cp: Player): string[] {
   const excess = Math.max(0, cp.propertyCards.length - 4)
   const discardCount = Math.min(ranked.length, Math.max(excess > 0 ? 1 : 0, Math.min(excess, 3)))
   return ranked.slice(0, discardCount).map((r) => r.instanceId)
+}
+
+/**
+ * Keep-score for end-of-turn action discard / mid-turn banking.
+ * Higher = more valuable to keep (revenue + build tactics). Lower = discard or bank first.
+ */
+export function actionCardKeepScore(cardId: string): number {
+  switch (cardId) {
+    case 'income':
+      return 100
+    case 'double-income':
+      return 95
+    case 'investment':
+    case 'double-investment':
+      return 90
+    case 'rezoning':
+    case 'build-with-tax-dollars':
+    case 'crossing-the-line':
+      return 80
+    case 'hostile-takeover':
+    case 'remove-investors':
+    case 'city-council-freeze':
+    case 'scandal':
+    case 'police-raid-on-mafia':
+      return 45
+    case 'taxation':
+      return 35
+    case 'discard-property-cards':
+      return 25
+    case 'draw-2-action-cards':
+      return 10
+    case 'roll-die':
+      return 15
+    default:
+      return 30
+  }
+}
+
+function actionCardBankValue(cardId: string): number {
+  const card = actionCards.find((c) => c.id === cardId) as ActionCard | undefined
+  return card?.bankValue ?? 0
+}
+
+/**
+ * Choose which action cards to discard down to the soft hand cap.
+ * Discards lowest keep-score first (Draw 2 / fillers), keeps Income / Investment / build enablers.
+ */
+export function pickAiActionCardDiscardIds(cp: Player, discardCount: number): string[] {
+  const n = Math.max(0, Math.floor(discardCount))
+  if (n <= 0) return []
+  const hand = cp.actionCards || []
+  if (hand.length === 0) return []
+  const ranked = hand.map((inst) => ({
+    instanceId: inst.instanceId,
+    keep: actionCardKeepScore(inst.cardId),
+    bank: actionCardBankValue(inst.cardId),
+  }))
+  // Discard lowest keep first; among ties, discard lower bankValue (keep cashable cards if equal keep).
+  ranked.sort((a, b) => a.keep - b.keep || a.bank - b.bank)
+  return ranked.slice(0, Math.min(n, ranked.length)).map((r) => r.instanceId)
+}
+
+/**
+ * Mid-turn: bank low-keep action cards for cash instead of drawing more that must be discarded.
+ * Prefer cards with low keep-score but positive bankValue (cash flow).
+ */
+export function pickAiActionCardsToBank(cp: Player, maxToBank: number): string[] {
+  const n = Math.max(0, Math.floor(maxToBank))
+  if (n <= 0) return []
+  const hand = cp.actionCards || []
+  // Never bank core revenue engines — those should be played.
+  const bankable = hand
+    .filter((inst) => {
+      const keep = actionCardKeepScore(inst.cardId)
+      const bank = actionCardBankValue(inst.cardId)
+      return bank > 0 && keep < 80
+    })
+    .map((inst) => ({
+      instanceId: inst.instanceId,
+      keep: actionCardKeepScore(inst.cardId),
+      bank: actionCardBankValue(inst.cardId),
+    }))
+  // Bank lowest keep first; among ties, bank higher cash value.
+  bankable.sort((a, b) => a.keep - b.keep || b.bank - a.bank)
+  return bankable.slice(0, Math.min(n, bankable.length)).map((r) => r.instanceId)
 }
 
 /** $1M attempt + 120% of lot end value (Hostile Takeover buyout ceiling). */
@@ -450,10 +549,15 @@ function tryCompleteSelectMode(
 
 /**
  * Primary win condition for Founderbots: maximize income / cash.
- * Play Income (with Double Income when slots allow) before builds or confrontations.
+ * Play Income (with Double Income when slots allow) before builds or confrontations —
+ * but never open Income with zero built properties (that only shows bank/cancel).
  */
 function tryPlayIncomeFirst(gs: GameState, cp: Player, h: SimpleAiTurnHandlers): boolean {
   if (gs.incomeResolvedThisTurn === true) return false
+  const hasBuiltProperty = gs.plots.some(
+    (p) => p.claimedBy === cp.id && p.builtProperty != null && p.builtProperty !== ''
+  )
+  if (!hasBuiltProperty) return false
   const income = cp.actionCards.find((a) => a.cardId === 'income')
   if (!income) return false
   const consumed = gs.turnActionsConsumed ?? 0
@@ -480,13 +584,36 @@ function tryPlaySafeActionsOrEnd(gs: GameState, cp: Player, h: SimpleAiTurnHandl
   if (tryPlayIncomeFirst(gs, cp, h)) return
   if (tryPlayConfrontation(gs, cp, h)) return
 
-  // Income already attempted above; remaining safe actions grow the hand / economy.
-  const prefer = ['draw-2-action-cards', 'taxation', 'crossing-the-line', 'roll-die'] as const
+  const handSize = cp.actionCards?.length ?? 0
+  // Soft cap is 8 at end of turn. Prefer banking low-value cards for cash over
+  // Draw 2 (which forces a later discard of free money left on the table).
+  const nearOrOverCap = handSize >= MAX_ACTION_HAND_SIZE - 1
+  if (nearOrOverCap || cp.money < 8) {
+    const toBank = pickAiActionCardsToBank(cp, 1)
+    if (toBank.length > 0) {
+      h.handlePlayCards(null, [], toBank, undefined)
+      return
+    }
+  }
+
+  // Avoid Draw 2 when the hand is already at/near the end-of-turn cap.
+  const prefer = (
+    nearOrOverCap
+      ? (['taxation', 'crossing-the-line', 'roll-die'] as const)
+      : (['taxation', 'crossing-the-line', 'draw-2-action-cards', 'roll-die'] as const)
+  )
   for (const key of prefer) {
     const inst = cp.actionCards.find((a) => a.cardId === key)
     if (!inst) continue
     if ((gs.turnActionsConsumed ?? 0) + 1 > MAX_TURN_ACTIONS) continue
     h.handlePlayCards(null, [inst.instanceId], [], undefined)
+    return
+  }
+
+  // Last resort: bank something rather than ending with a bloated hand and $0 from it.
+  const fallbackBank = pickAiActionCardsToBank(cp, 1)
+  if (fallbackBank.length > 0) {
+    h.handlePlayCards(null, [], fallbackBank, undefined)
     return
   }
 
@@ -503,13 +630,18 @@ export function trySimpleAiMainPhase(
   if (!gs.isSetupComplete || gs.gameEnded) return false
   if (gs.openingNarrationComplete === false) return false
 
-  if (
-    ui.discardDialogOpen ||
-    ui.rollDieDialogOpen ||
-    ui.incomeDialogOpen ||
-    ui.showNewCardsAnimation
-  ) {
+  if (ui.rollDieDialogOpen || ui.incomeDialogOpen || ui.showNewCardsAnimation) {
     return false
+  }
+
+  // End-of-turn soft hand cap — resolve in one call (never cancel/reopen).
+  if (ui.discardDialogOpen) {
+    const n =
+      ui.discardDialogNumToDiscard > 0
+        ? ui.discardDialogNumToDiscard
+        : Math.max(0, (cp.actionCards?.length ?? 0) - MAX_ACTION_HAND_SIZE)
+    h.handleDiscardActionCards(pickAiActionCardDiscardIds(cp, n))
+    return true
   }
 
   if (ui.undoActionDialogOpen) {
@@ -588,8 +720,16 @@ export function trySimpleAiMainPhase(
       return true
     }
 
-    // Cheapest-affordable into the first legal cell (stable row/col order).
+    // Prefer lots that deepen / complete a city block the bot already owns; income-first card
+    // choice still wins — this only picks where to place after a card is in placement mode.
     validPlots.sort((a, b) => {
+      const scoreA = blockCompletionBiasScore(
+        countPlayerBuiltInCityBlock(cp.id, gs.plots, a.row, a.col)
+      )
+      const scoreB = blockCompletionBiasScore(
+        countPlayerBuiltInCityBlock(cp.id, gs.plots, b.row, b.col)
+      )
+      if (scoreA !== scoreB) return scoreB - scoreA
       if (a.row !== b.row) return a.row - b.row
       return a.col.localeCompare(b.col)
     })
@@ -648,10 +788,17 @@ export function trySimpleAiMainPhase(
         const endValue = highDensity
           ? HIGH_DENSITY_HOUSING_STATS.endGameValue
           : c.endGameValue
+        const blockScore = plots.reduce((best, p) => {
+          const s = blockCompletionBiasScore(
+            countPlayerBuiltInCityBlock(cp.id, gs.plots, p.row, p.col)
+          )
+          return s > best ? s : best
+        }, 0)
         return {
           inst,
           cost,
           income,
+          blockScore,
           endValue,
           nplots: plots.length,
           wildEmu,
@@ -662,16 +809,21 @@ export function trySimpleAiMainPhase(
       inst: CardInstance
       cost: number
       income: number
+      blockScore: number
       endValue: number
       nplots: number
       wildEmu?: string
       highDensity: boolean
     }[]
 
-    // Highest income first, then end-game value, then cheaper cost, then more legal lots.
+    // Highest income first, then city-block completion bias, then end value / cost / lot count.
     ranked.sort(
       (a, b) =>
-        b.income - a.income || b.endValue - a.endValue || a.cost - b.cost || b.nplots - a.nplots
+        b.income - a.income ||
+        b.blockScore - a.blockScore ||
+        b.endValue - a.endValue ||
+        a.cost - b.cost ||
+        b.nplots - a.nplots
     )
 
     if (ranked.length > 0) {

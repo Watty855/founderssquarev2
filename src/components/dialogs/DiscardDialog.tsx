@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { Player } from '@/lib/types'
-import { PropertyCard, ActionCard, CardInstance } from '@/lib/cardTypes'
-import { propertyCards, actionCards } from '@/lib/cardData'
+import { ActionCard, CardInstance } from '@/lib/cardTypes'
+import { actionCards } from '@/lib/cardData'
 import { CompactCardView } from '@/components/game/CompactCardView'
+import { pickAiActionCardDiscardIds } from '@/lib/bot/simpleAiTurn'
 import {
   Dialog,
   DialogContent,
@@ -18,7 +19,7 @@ interface DiscardDialogProps {
   player: Player
   numToDiscard: number
   onComplete: (discardedInstanceIds: string[]) => void
-  /** AI: auto-pick first N cards in hand order when the excess-hand dialog opens. */
+  /** AI: auto-pick discard targets when the excess-hand dialog opens. */
   aiConfirmSelection?: boolean
 }
 
@@ -35,17 +36,10 @@ export function DiscardDialog({
 
   useEffect(() => {
     if (!open || !aiConfirmSelection || numToDiscard <= 0) return
-    const hand = player.actionCards || []
-    if (hand.length === 0) {
-      const t = window.setTimeout(() => onComplete([]), 320)
-      return () => window.clearTimeout(t)
-    }
-    // Never stall if the hand is shorter than requested — discard what we can.
-    const n = Math.min(numToDiscard, hand.length)
-    const ids = hand.slice(0, n).map((c) => c.instanceId)
-    const t = window.setTimeout(() => onComplete(ids), 320)
+    const ids = pickAiActionCardDiscardIds(player, numToDiscard)
+    const t = window.setTimeout(() => onComplete(ids), 280)
     return () => window.clearTimeout(t)
-  }, [open, aiConfirmSelection, numToDiscard, handKey, onComplete, player.actionCards])
+  }, [open, aiConfirmSelection, numToDiscard, handKey, onComplete, player])
 
   const allCards = [
     ...(player.actionCards || []).map(instance => {

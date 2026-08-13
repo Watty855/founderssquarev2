@@ -167,7 +167,7 @@ export interface StreetBonus {
   bonusMillion: number
 }
 
-const SQUARE_BONUS_MILLION = 30
+const SQUARE_BONUS_MILLION = 50
 const STREET_BONUS_MILLION = 30
 
 /** Find every 3×3 city block fully owned (and built) by a single player. */
@@ -667,16 +667,40 @@ export function getBlockPresenceInfluenceBonus(
   targetRow: number,
   targetCol: string
 ): { bonus: number; labels: string[] } {
-  const bounds = getCityBlockBounds(targetRow, targetCol)
-  if (!bounds) return { bonus: 0, labels: [] }
+  const ownedInBlock = countPlayerBuiltInCityBlock(playerId, plots, targetRow, targetCol)
+  if (ownedInBlock < 5) return { bonus: 0, labels: [] }
+  return { bonus: 1, labels: [`block presence (${ownedInBlock} lots)`] }
+}
+
+/**
+ * How many built+claimed lots `playerId` already owns in the 3×3 city block containing `(row, col)`.
+ * Vacant candidates are not counted (0–8 when the cell is empty).
+ */
+export function countPlayerBuiltInCityBlock(
+  playerId: number,
+  plots: Plot[],
+  row: number,
+  col: string
+): number {
+  if (!getCityBlockBounds(row, col)) return 0
   let ownedInBlock = 0
   for (const p of plots) {
     if (p.type !== 'city' || p.claimedBy !== playerId || !p.builtProperty) continue
-    if (!isPlotInCityBlock(p, targetRow, targetCol)) continue
+    if (!isPlotInCityBlock(p, row, col)) continue
     ownedInBlock += 1
   }
-  if (ownedInBlock < 5) return { bonus: 0, labels: [] }
-  return { bonus: 1, labels: [`block presence (${ownedInBlock} lots)`] }
+  return ownedInBlock
+}
+
+/**
+ * Bot placement / build-ranking bias toward deepening or completing a city block.
+ * Completing the 9th lot (8 already owned) is a hard priority after income.
+ */
+export function blockCompletionBiasScore(ownedBuiltInBlock: number): number {
+  if (ownedBuiltInBlock <= 0) return 0
+  if (ownedBuiltInBlock >= 8) return 100
+  if (ownedBuiltInBlock >= 5) return 10 * ownedBuiltInBlock
+  return 2 * ownedBuiltInBlock
 }
 
 /**

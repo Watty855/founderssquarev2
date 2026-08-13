@@ -168,7 +168,7 @@ export interface PlayerScore {
   player: Player
   cashInHand: number
   propertyValue: number
-  /** Sum of all square + street $30M bonuses earned by this founder. */
+  /** Sum of square ($50M each) + street ($30M each) bonuses earned by this founder. */
   bonusMillion: number
   squareBonuses: SquareBonusEntry[]
   streetBonuses: StreetBonusEntry[]

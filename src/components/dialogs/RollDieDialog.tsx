@@ -6,6 +6,10 @@ import { useDiceBox } from '@/hooks/use-dice-box'
 import { XCircle } from '@phosphor-icons/react'
 import { actionCards } from '@/lib/cardData'
 import { playCrowdCheerSound } from '@/lib/soundEffects'
+import {
+  attackRollRequiredTitle,
+  defenseRollRequiredTitle,
+} from '@/lib/confrontationNotice'
 
 export type RollDieDialogMode =
   | 'roll-die'
@@ -223,27 +227,30 @@ function RollDieDialogInner({
       ? `Roll when you are ready to resolve your play against ${targetLabel}. First roll is free; each extra roll costs $5M (up to three).`
       : `Roll once when you are ready. A 6 negates the freeze; any other result applies it.`
 
+  const rollerName = hostileTakeoverExchange?.attackerName ?? actingPlayerName ?? 'Founder'
+  const defenderLabel = defenderName ?? 'Founder'
+
   const title =
     mode === 'council-freeze-attacker'
-      ? 'City Council Freeze — your roll'
+      ? attackRollRequiredTitle('City Council Freeze', actingPlayerName ?? rollerName)
       : mode === 'council-freeze-defender'
-        ? 'City Council Freeze — defender roll'
+        ? defenseRollRequiredTitle('City Council Freeze', defenderLabel)
         : mode === 'hostile-takeover-attacker'
-          ? 'Hostile Takeover — your roll'
+          ? attackRollRequiredTitle('Hostile Takeover', rollerName)
           : mode === 'hostile-takeover-defender'
-            ? 'Hostile Takeover — defender roll'
+            ? defenseRollRequiredTitle('Hostile Takeover', defenderLabel)
             : mode === 'scandal-attacker'
-              ? 'Scandal — your roll'
+              ? attackRollRequiredTitle('Scandal', actingPlayerName ?? rollerName)
               : mode === 'scandal-defender'
-                ? 'Scandal — anchor owner roll'
+                ? defenseRollRequiredTitle('Scandal', defenderLabel)
                 : mode === 'rezoning'
-                  ? 'Rezoning — roll required'
+                  ? attackRollRequiredTitle('Rezoning', actingPlayerName ?? rollerName)
                   : mode === 'police-raid-attacker'
-                    ? 'Police Raid on Mafia — your roll'
+                    ? attackRollRequiredTitle('Police Raid on Mafia', actingPlayerName ?? rollerName)
                     : mode === 'police-raid-defender'
-                      ? 'Police Raid on Mafia — Mafia counter roll'
+                      ? defenseRollRequiredTitle('Police Raid on Mafia', defenderLabel)
                       : mode === 'remove-investors'
-                        ? 'Remove Investors — roll required'
+                        ? attackRollRequiredTitle('Remove Investors', actingPlayerName ?? rollerName)
                         : 'Roll Die'
 
   const description =
