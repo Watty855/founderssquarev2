@@ -8,11 +8,11 @@
  *  - Safari Web Inspector console:  window.__fsFreezeLog()
  *  - Or watch for "[fs-watchdog]" console entries as they happen.
  *
- * Field note (Build 17 audit): no freeze-log dumps were checked into the repo.
- * Stalls ≥2.5s on visible tabs correlate with the previous always-mounted board
- * re-render + God-Component patch storms — board coord indexes, cell lookup
- * memoization, and lazy dice loading target that path. Re-check with
- * `window.__fsFreezeLog()` after TestFlight sessions.
+ * Field note: Build 27+ memoizes per-lot BoardLot cells and coalesces online
+ * `applyMergedView` (~100ms). After a TestFlight session that used to freeze,
+ * dump `window.__fsFreezeLog()` — empty/moved stalls mean the board path cooled;
+ * stalls still during AI/Income mean look at sync/AI next; stalls on dice open
+ * mean the WebGL path.
  */
 
 const STORAGE_KEY = 'fs-freeze-log'

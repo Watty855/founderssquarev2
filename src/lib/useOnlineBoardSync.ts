@@ -47,6 +47,12 @@ const RESYNC_GIVE_UP_MS = 12_000
 /** When stale, try one fresh hydrate this often in case the host woke up. */
 const STALE_RETRY_MS = 15_000
 const AUTHORITY_PERSIST_DEBOUNCE_MS = 400
+/**
+ * Coalesce rapid public_state / private_hand merges (AI flurries, dice-era bursts)
+ * so the React board does not rebuild on every wire tick. Leading flush when idle
+ * longer than this window; otherwise trailing flush at the window end.
+ */
+const MERGE_VIEW_COALESCE_MS = 100
 
 /** Wire envelope on the board channel (Supabase Realtime broadcast event "board"). */
 type BoardWire =
@@ -117,6 +123,8 @@ export function useOnlineBoardSync(params: {
   const latestHandJsonRef = useRef<Map<number, string>>(new Map())
   const latestHandRevRef = useRef<Map<number, number>>(new Map())
   const lastAppliedViewKeyRef = useRef('')
+  const lastMergedApplyAtRef = useRef(0)
+  const mergeCoalesceTimerRef = useRef<number | null>(null)
   const pendingRollbackRef = useRef<Map<string, GameState>>(new Map())
   /** Action ids whose events already fired optimistically on this device — skip the authoritative echo. */
   const optimisticEventsFiredRef = useRef<Set<string>>(new Set())
@@ -143,7 +151,7 @@ export function useOnlineBoardSync(params: {
     return resolveSeatRef.current?.(gameStateRef.current, boardConnIdRef.current) ?? null
   }, [])
 
-  const applyMergedView = useCallback(() => {
+  const applyMergedViewNow = useCallback(() => {
     const pub = latestPublicRef.current
     if (!pub) return
     const viewerId = resolveViewerId()
@@ -151,9 +159,11 @@ export function useOnlineBoardSync(params: {
       .sort(([a], [b]) => a - b)
       .map(([playerId, json]) => `${playerId}:${json}`)
       .join('|')
-    const viewKey = `${latestPublicJsonRef.current}|${viewerId ?? 'spectator'}|${handKey}`
+    // Rev + hands — avoid hashing the entire public JSON on every flush.
+    const viewKey = `${lastRevRef.current}|${viewerId ?? 'spectator'}|${handKey}`
     if (viewKey === lastAppliedViewKeyRef.current) return
     lastAppliedViewKeyRef.current = viewKey
+    lastMergedApplyAtRef.current = performance.now()
     const merged = mergePublicAndPrivateHands(
       pub,
       viewerId,
@@ -170,6 +180,33 @@ export function useOnlineBoardSync(params: {
     onSnapshotAppliedRef.current?.()
   }, [setGameState, resolveViewerId])
 
+  const scheduleApplyMergedView = useCallback(() => {
+    const now = performance.now()
+    const elapsed = now - lastMergedApplyAtRef.current
+    if (elapsed >= MERGE_VIEW_COALESCE_MS) {
+      if (mergeCoalesceTimerRef.current != null) {
+        window.clearTimeout(mergeCoalesceTimerRef.current)
+        mergeCoalesceTimerRef.current = null
+      }
+      applyMergedViewNow()
+      return
+    }
+    if (mergeCoalesceTimerRef.current != null) return
+    mergeCoalesceTimerRef.current = window.setTimeout(() => {
+      mergeCoalesceTimerRef.current = null
+      applyMergedViewNow()
+    }, MERGE_VIEW_COALESCE_MS - elapsed)
+  }, [applyMergedViewNow])
+
+  useEffect(() => {
+    return () => {
+      if (mergeCoalesceTimerRef.current != null) {
+        window.clearTimeout(mergeCoalesceTimerRef.current)
+        mergeCoalesceTimerRef.current = null
+      }
+    }
+  }, [])
+
   const ingestPublicState = useCallback(
     (rev: number, raw: unknown) => {
       if (!raw || typeof raw !== 'object') return
@@ -181,18 +218,20 @@ export function useOnlineBoardSync(params: {
         setConnectionStatus('connected')
         return
       }
-      const json = JSON.stringify(raw)
-      const sameSnapshot = rev === lastRevRef.current && json === latestPublicJsonRef.current
-      lastRevRef.current = Math.max(lastRevRef.current, rev)
       lastHeartbeatAtRef.current = Date.now()
       resyncStartedAtRef.current = 0
       setConnectionStatus('connected')
-      if (sameSnapshot) return
+      // Same-rev public echo (host local ingest + wire, or duplicate broadcast).
+      if (rev === lastRevRef.current && latestPublicRef.current) {
+        return
+      }
+      lastRevRef.current = Math.max(lastRevRef.current, rev)
       latestPublicRef.current = raw as PublicGameState
-      latestPublicJsonRef.current = json
-      applyMergedView()
+      // Keep a fingerprint only when needed for debugging / legacy callers; viewKey uses rev.
+      latestPublicJsonRef.current = ''
+      scheduleApplyMergedView()
     },
-    [applyMergedView]
+    [scheduleApplyMergedView]
   )
 
   const ingestPrivateHand = useCallback(
@@ -204,9 +243,9 @@ export function useOnlineBoardSync(params: {
       latestHandRevRef.current.set(hand.playerId, rev)
       latestHandJsonRef.current.set(hand.playerId, json)
       latestHandsRef.current.set(hand.playerId, hand)
-      applyMergedView()
+      scheduleApplyMergedView()
     },
-    [applyMergedView]
+    [scheduleApplyMergedView]
   )
 
   const sendWire = useCallback((msg: BoardWire) => {
@@ -768,8 +807,10 @@ export function useOnlineBoardSync(params: {
 
   useEffect(() => {
     if (!latestPublicRef.current) return
-    applyMergedView()
-  }, [boardPartyConnectionId, resolveSeatPlayerId, applyMergedView])
+    // Seat / connection identity changed — apply immediately so the viewer’s hand merges.
+    lastAppliedViewKeyRef.current = ''
+    applyMergedViewNow()
+  }, [boardPartyConnectionId, resolveSeatPlayerId, applyMergedViewNow])
 
   const requestResync = useCallback(
     () => requestSnapshot(true, { resetGiveUp: true }),
