@@ -43,4 +43,31 @@ describe('placementRules', () => {
     const valid = getValidPlotsForProperty(sample, plots, true)
     expect(valid.every((p) => p.type === 'city' && !p.builtProperty)).toBe(true)
   })
+
+  it('allows every anchor type on the four former Union lots once vacant', () => {
+    const plots = createInitialBoard()
+    const index = buildPlotIndex(plots)
+    const formerUnionLots = [
+      ['S', 11],
+      ['C', 11],
+      ['K', 19],
+      ['K', 3],
+    ] as const
+    const anchors = propertyCards.filter((c) => c.type === 'anchor') as PropertyCard[]
+
+    expect(anchors.length).toBeGreaterThan(0)
+    for (const [col, row] of formerUnionLots) {
+      const lot = getPlotAt(plots, col, row, index)
+      expect(lot, `${col}${row} should exist`).toBeTruthy()
+      if (!lot) continue
+      expect(lot.lotCategory).toBe('AT')
+      expect(lot.builtProperty).toBeUndefined()
+      for (const anchor of anchors) {
+        expect(
+          canPlaceProperty(anchor, lot, plots, false),
+          `${anchor.name} should be legal at ${col}${row}`
+        ).toBe(true)
+      }
+    }
+  })
 })

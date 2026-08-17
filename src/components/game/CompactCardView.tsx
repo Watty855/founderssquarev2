@@ -55,13 +55,21 @@ function getCardStyle(card: PropertyCard | ActionCard): {
       topAccent: '#0070cc',
       label: 'PROPERTY',
     }
-  } else {
-    // All action cards: Crimson/Red family
+  }
+
+  if ((card as ActionCard).category === 'calamity') {
     return {
-      bg: 'linear-gradient(180deg, #3d1520 0%, #2a0e16 100%)',
-      topAccent: '#c81b3a',
-      label: 'ACTION',
+      bg: 'linear-gradient(180deg, #7f1d1d 0%, #450a0a 100%)',
+      topAccent: '#ef4444',
+      label: 'CALAMITY',
     }
+  }
+
+  // All other action cards: Crimson/Red family
+  return {
+    bg: 'linear-gradient(180deg, #3d1520 0%, #2a0e16 100%)',
+    topAccent: '#c81b3a',
+    label: 'ACTION',
   }
 }
 
@@ -321,7 +329,7 @@ export function CompactCardView({
             ) : (
               <>
                 <span style={{ color: 'rgba(255,255,255,0.5)' }}>
-                  {formatCost(card.buildCost)}
+                  {card.id === 'anchor-wild-card' ? 'Varies' : formatCost(card.buildCost)}
                 </span>
                 <span style={{ color: 'rgba(255,255,255,0.5)' }}>
                   ${card.bankValue}M

@@ -63,10 +63,10 @@ export function applyBuildAt(state: GameState, params: BuildAtParams): ApplyGame
   }
 
   const highDensityPlacement = params.housingHighDensity === true && isHousingPropertyCard(card)
-  const ANCHOR_WILD_BUILD_COST_M = 6
-  const fullBuildCost = isWildBuild
-    ? ANCHOR_WILD_BUILD_COST_M
-    : getHousingBuildCost(card, highDensityPlacement)
+  const fullBuildCost = getHousingBuildCost(
+    isWildBuild ? placementTemplate : card,
+    highDensityPlacement
+  )
 
   const taxBuildActionInstanceId = params.taxBuildActionInstanceId
   const taxBuildCardInstance = taxBuildActionInstanceId

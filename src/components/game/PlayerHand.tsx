@@ -11,6 +11,7 @@ import {
 import { getVacantCivicLots } from '@/lib/lotCategory'
 import { needsEmulateChoiceBeforePlacement } from '@/lib/placementTemplate'
 import { CompactCardView } from '@/components/game/CompactCardView'
+import { HIGH_DENSITY_HOUSING_STATS } from '@/lib/housingEconomics'
 import {
   Dialog,
   DialogContent,
@@ -27,7 +28,7 @@ const springConfig = { type: 'spring' as const, stiffness: 300, damping: 24 }
 
 export type PlayCardsOptions = {
   councilFreezeTargetId?: number
-  /** Build Housing as high-density (5+ stories): $18M / $10M income / $18M end value; block takeover penalty. */
+  /** Build Housing as high-density (5+ stories): higher cost/income/end value; block takeover penalty. */
   housingHighDensity?: boolean
   /** Build selected property using Build with Tax Dollars card (half cost). */
   useTaxBuild?: boolean
@@ -490,7 +491,7 @@ export function PlayerHand({
                 cursor: 'pointer',
               }}
             >
-              Standard — $10M
+              Standard — $8M
             </button>
             <button
               type="button"
@@ -507,7 +508,7 @@ export function PlayerHand({
                 cursor: 'pointer',
               }}
             >
-              High-density — $18M
+              {`High-density — $${HIGH_DENSITY_HOUSING_STATS.buildCost}M`}
             </button>
             <button
               type="button"
@@ -602,7 +603,7 @@ export function PlayerHand({
           >
             <span style={{ fontSize: 12, fontWeight: 500, color: '#fcd34d' }}>
               Hostile Takeover: click an amber-highlighted opponent property (same block or orthogonal to your built
-              lots). You will pay $1M, then roll — 5–6 succeeds.
+              lots). You will pay $1M, then roll — 5–6 succeeds; +1 influence makes 4–6 succeed; +2 makes 3–6 succeed.
             </span>
             <button
               type="button"
@@ -738,7 +739,7 @@ export function PlayerHand({
           >
             <span style={{ fontSize: 12, fontWeight: 500, color: '#1eaedb' }}>
               {placementMode?.housingHighDensity
-                ? 'Select a plot — high-density housing ($18M). Large structure: neon outline, −1 takeover influence on this city block.'
+                ? `Select a plot — high-density housing ($${HIGH_DENSITY_HOUSING_STATS.buildCost}M). Large structure: neon outline, −1 takeover influence on this city block.`
                 : 'Legal lots pulse on the board for this card — click one to build, or Cancel build'}
             </span>
             {onCancelPlacement ? (
@@ -982,7 +983,7 @@ export function PlayerHand({
                   </>
                 ) : currentCard.id === 'anchor-wild-card' ? (
                   <>
-                    Build for $6M as any standard anchor below (placement and all rules match that anchor), or bank for $
+                    Build as any standard anchor below — cost matches that anchor (Church/Mafia/Regulation/Union $12M; others $10M). Placement and all rules match that anchor. Or bank for $
                     {currentCard.bankValue}M. Celebration and end-game scoring use the anchor you choose.
                   </>
                 ) : isCivicFlexHandCard(currentCard as PropertyCard) ? (
@@ -1038,7 +1039,7 @@ export function PlayerHand({
                           cursor: 'pointer',
                         }}
                       >
-                        Build ($6M)
+                        Build (varies)
                       </button>
                       <button
                         type="button"
@@ -1095,6 +1096,9 @@ export function PlayerHand({
                                 }}
                               >
                                 {ac.name}
+                                <span style={{ display: 'block', color: '#9aa0b4', fontSize: 10 }}>
+                                  ${ac.buildCost}M
+                                </span>
                               </button>
                             )
                           })}
@@ -1119,7 +1123,7 @@ export function PlayerHand({
                           {wildCardEmulateId
                             ? `Build as ${
                                 propertyCards.find((c) => c.id === wildCardEmulateId)?.name ?? 'anchor'
-                              } — $6M`
+                              } — $${propertyCards.find((c) => c.id === wildCardEmulateId)?.buildCost ?? '—'}M`
                             : 'Choose an anchor to build'}
                         </button>
                       </>
@@ -1242,7 +1246,7 @@ export function PlayerHand({
                 ) : currentCard.name === 'Housing' ? (
                   <>
                     <p style={{ fontSize: 12, color: '#8888a0', lineHeight: 1.45, marginBottom: 4 }}>
-                      Standard (1–4 stories): $10M, $5M income. High-density (5+ stories): $18M, $10M income, end value $18M —{' '}
+                      {`Standard (1–4 stories): $8M, $4M income, end value $8M. High-density (5+ stories): $${HIGH_DENSITY_HOUSING_STATS.buildCost}M, $${HIGH_DENSITY_HOUSING_STATS.buildIncome}M income, end value $${HIGH_DENSITY_HOUSING_STATS.endGameValue}M — `}
                       <span style={{ color: '#fbbf24' }}>−1 takeover influence</span> on this city block per high-density lot.
                     </p>
                     <button
@@ -1277,7 +1281,7 @@ export function PlayerHand({
                         cursor: 'pointer',
                       }}
                     >
-                      High-density — $18M
+                      {`High-density — $${HIGH_DENSITY_HOUSING_STATS.buildCost}M`}
                     </button>
                   </>
                 ) : (

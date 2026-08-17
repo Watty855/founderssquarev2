@@ -16,6 +16,7 @@ import { attachUndoSnapshotIfTurnAction, canUndoLastAction, restoreUndoSnapshot 
 import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyEndTurn } from '@/lib/gameEngine/applyEndTurn'
 import { applyBankActionCards } from '@/lib/gameEngine/applyBankAction'
+import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
 import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
 import {
   buildEndGameTriggerPatch,
@@ -23,7 +24,7 @@ import {
   clearCouncilFreezeIfEndingPlayer,
 } from '@/lib/gameEngine/statePatches'
 import { createInitialBoard } from '@/lib/boardData'
-import { createActionDeck, createPropertyDeck, drawCards, drawFromDeckWithDiscardReshuffle } from '@/lib/deckUtils'
+import { createActionDeck, createPropertyDeck, drawCards, drawFromDeckWithDiscardReshuffle, shuffleDeck } from '@/lib/deckUtils'
 import { GameSetupWizard } from '@/components/game/GameSetupWizard'
 import { GameOpeningSequence } from '@/components/game/GameOpeningSequence'
 import {
@@ -77,14 +78,31 @@ import {
   playCrowdBooSound,
   playCrowdCheerSound,
   playInfluenceDwindleSound,
+  playCalamitySound,
 } from '@/lib/soundEffects'
 import {
   trySimpleAiMainPhase,
   pickAiDiscardPropertyIds,
   pickAiActionCardDiscardIds,
+  playerHasBuiltIncomeProperty,
 } from '@/lib/bot/simpleAiTurn'
 import type { SimpleAiTurnHandlers, SimpleAiTurnUi } from '@/lib/bot/simpleAiTurn'
 import { AI_MAIN_PHASE_DELAY_NORMAL_MS } from '@/lib/bot/aiTiming'
+import {
+  applyCalamityRoll,
+  beginCalamity,
+  calamityAllowedThisRound,
+  calamityLossMillion,
+  calamityPercentForFace,
+  calamityPostRollBannerDetail,
+  CALAMITY_ACCEPT_LABEL,
+  CALAMITY_PRE_ROLL_INSTRUCTION,
+  dealActionHandSkippingCalamity,
+  findCalamityVariant,
+  ingestActionDraw,
+  pickCalamityVariant,
+  resolveCalamityDraw,
+} from '@/lib/calamity'
 import {
   confrontationAttemptTitle,
   investmentNoticeTitle,
@@ -134,6 +152,7 @@ import {
   getHousingBuildCost,
   getPlotPropertyEndValue,
   getPlotPropertyIncome,
+  HIGH_DENSITY_HOUSING_STATS,
   isHousingPropertyCard,
 } from '@/lib/housingEconomics'
 import { getBuildCelebrationNotice, getPlotLotDisplayName } from '@/lib/buildCelebrationMessages'
@@ -204,14 +223,20 @@ function rollSeatIsAi(
     case 'council-freeze-defender':
       return playerIsAi(rd.targetPlayerId)
     case 'hostile-takeover-defender':
-      return playerIsAi(rd.takeoverContext?.ownerPlayerId)
+      return playerIsAi(rd.takeoverContext?.ownerPlayerId ?? rd.targetPlayerId)
     case 'scandal-defender':
       return playerIsAi(rd.scandalContext?.anchorOwnerPlayerId)
     case 'police-raid-defender':
       return playerIsAi(rd.targetPlayerId)
+    case 'calamity':
+      return playerIsAi(rd.targetPlayerId)
     default:
       return currentSeat?.isAi === true
   }
+}
+
+function isAiSeat(p: { isAi?: boolean; aiDifficulty?: unknown } | null | undefined): boolean {
+  return p?.isAi === true || p?.aiDifficulty != null
 }
 
 const initialGameState: GameState = {
@@ -626,6 +651,8 @@ function AppInner() {
     open: boolean
     numToDiscard: number
   }>({ open: false, numToDiscard: 0 })
+  const discardDialogStateRef = useRef(discardDialogState)
+  discardDialogStateRef.current = discardDialogState
   const [undoActionDialogOpen, setUndoActionDialogOpen] = useState(false)
   const [rollDieDialogState, setRollDieDialogState] = useState<{
     open: boolean
@@ -641,6 +668,7 @@ function AppInner() {
       | 'police-raid-attacker'
       | 'police-raid-defender'
       | 'remove-investors'
+      | 'calamity'
     actionInstanceId: string | null
     targetPlayerId?: number
     influenceBonus?: number
@@ -794,16 +822,39 @@ function AppInner() {
     taxActionInstanceId: string
   } | null>(null)
 
-  const [boardNotice, setBoardNotice] = useState<{ title: ReactNode; detail?: string } | null>(null)
+  const [calamityAcceptPending, setCalamityAcceptPending] = useState<{
+    face: number
+    variantKey: string
+    variantTitle: string
+    variantFlavor: string
+    percent: number
+    lossMillion: number
+    playerName: string
+  } | null>(null)
+  const calamityAcceptPendingRef = useRef(calamityAcceptPending)
+  calamityAcceptPendingRef.current = calamityAcceptPending
+  const calamityCommitInFlightRef = useRef(false)
+
+  const [boardNotice, setBoardNotice] = useState<{
+    title: ReactNode
+    detail?: string
+    tone?: 'default' | 'calamity'
+  } | null>(null)
   const boardNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showBoardNotice = useCallback(
-    (title: ReactNode, detail?: string, opts?: { quick?: boolean; durationMs?: number }) => {
+    (
+      title: ReactNode,
+      detail?: string,
+      opts?: { quick?: boolean; durationMs?: number; tone?: 'default' | 'calamity' }
+    ) => {
       if (boardNoticeTimerRef.current) {
         clearTimeout(boardNoticeTimerRef.current)
         boardNoticeTimerRef.current = null
       }
-      setBoardNotice({ title, detail })
-      const ms = opts?.durationMs ?? (opts?.quick ? 900 : 4000)
+      setBoardNotice({ title, detail, tone: opts?.tone })
+      const ms =
+        opts?.durationMs ??
+        (opts?.tone === 'calamity' ? 10000 : opts?.quick ? 900 : 4000)
       boardNoticeTimerRef.current = setTimeout(() => {
         setBoardNotice(null)
         boardNoticeTimerRef.current = null
@@ -819,9 +870,11 @@ function AppInner() {
     else if (fx.sound === 'boo') playCrowdBooSound()
     else if (fx.sound === 'cheer') playCrowdCheerSound()
     else if (fx.sound === 'dwindle') playInfluenceDwindleSound()
+    else if (fx.sound === 'calamity') playCalamitySound(fx.calamityFace ?? 4)
     if (fx.notice) {
       showBoardNotice(fx.notice.title, fx.notice.detail, {
         durationMs: fx.notice.durationMs,
+        tone: fx.notice.tone,
       })
     }
   }
@@ -996,6 +1049,19 @@ function AppInner() {
           )
           playInfluenceDwindleSound()
         }
+      } else if (e.type === 'calamity_result') {
+        showBoardNotice(
+          'Calamity',
+          calamityPostRollBannerDetail({
+            face: e.result,
+            playerName: e.playerName,
+            percent: e.percent,
+            lossMillion: e.lossMillion,
+            variant: { key: '', title: e.variantTitle, flavor: e.variantFlavor },
+          }) + (e.cityWideComplete ? '\nCalamity resolved — play resumes.' : ''),
+          { tone: 'calamity', durationMs: 10000 }
+        )
+        playCalamitySound(e.result)
       }
     }
   }
@@ -1064,8 +1130,8 @@ function AppInner() {
     }
   }, [])
 
-  /** At the start of each seat’s turn during the final round, show the strip briefly so the board stays clear for play. */
-  const FINAL_TURN_BANNER_VISIBLE_MS = 5000
+  /** Re-show long enough on every final-round seat change that local and online players cannot miss it. */
+  const FINAL_TURN_BANNER_VISIBLE_MS = 10_000
   const [showFinalTurnBanner, setShowFinalTurnBanner] = useState(false)
   const [rulesQuickOpen, setRulesQuickOpen] = useState(false)
   const [anchorTenetsOpen, setAnchorTenetsOpen] = useState(false)
@@ -1604,6 +1670,124 @@ function AppInner() {
     partyBoardSeatPlayer?.id,
   ])
 
+  /** City-wide Calamity — each founder rolls on the device that controls their seat. */
+  const pendingCalamity = gameState.pendingCalamity ?? null
+  const pendingCalamityKey = pendingCalamity
+    ? `${pendingCalamity.instance.instanceId}|${pendingCalamity.currentRollIndex}|${pendingCalamity.rollOrderPlayerIds.join(',')}`
+    : ''
+  const announcedCalamityKeyRef = useRef('')
+  useEffect(() => {
+    const pending = gameState.pendingCalamity
+    if (!pending) {
+      announcedCalamityKeyRef.current = ''
+      setCalamityAcceptPending(null)
+      setRollDieDialogState((prev) =>
+        prev.open && prev.mode === 'calamity'
+          ? { open: false, mode: 'roll-die', actionInstanceId: null }
+          : prev
+      )
+      return
+    }
+    if (gameState.openingNarrationComplete === false) return
+    if (calamityAcceptPending) return
+
+    const rollerId = pending.rollOrderPlayerIds[pending.currentRollIndex]
+    const roller = gameState.players.find((p) => p.id === rollerId)
+    const announceKey = `${pending.instance.instanceId}|${pending.currentRollIndex}`
+    if (announcedCalamityKeyRef.current !== announceKey) {
+      announcedCalamityKeyRef.current = announceKey
+      const step = pending.currentRollIndex + 1
+      const total = pending.rollOrderPlayerIds.length
+      showBoardNotice(
+        'Calamity',
+        `${CALAMITY_PRE_ROLL_INSTRUCTION}\n${
+          pending.currentRollIndex === 0
+            ? `${pending.drawnByName} drew Calamity. ${roller?.name ?? 'The next founder'} rolls first (${step} of ${total}).`
+            : `${roller?.name ?? 'Next founder'} rolls (${step} of ${total}).`
+        }`,
+        { tone: 'calamity', durationMs: 10000 }
+      )
+    }
+
+    const controlsRoller =
+      !partyBoardConfig
+        ? true
+        : roller?.isAi === true
+          ? partyBoardConfig.role === 'host'
+          : partyBoardSeatPlayer?.id === rollerId
+    if (!controlsRoller) return
+
+    setRollDieDialogState((prev) => {
+      if (
+        prev.open &&
+        prev.mode === 'calamity' &&
+        prev.targetPlayerId === rollerId &&
+        prev.actionInstanceId === pending.instance.instanceId
+      ) {
+        return prev
+      }
+      return {
+        open: true,
+        mode: 'calamity',
+        actionInstanceId: pending.instance.instanceId,
+        targetPlayerId: rollerId,
+        influenceBonus: 0,
+        influenceLabels: [],
+        councilFreezeAttackerRollsCompleted: undefined,
+        councilFreezeAttackerLastNatural: undefined,
+        councilFreezeFailAuto: false,
+        diceRetryNonce: pending.currentRollIndex,
+        takeoverContext: undefined,
+        rezoningContext: undefined,
+        scandalContext: undefined,
+        removeInvestorsContext: undefined,
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pendingCalamityKey,
+    rollDieDialogState.open,
+    partyBoardConfig?.role,
+    partyBoardSeatPlayer?.id,
+    gameState.openingNarrationComplete,
+    calamityAcceptPending,
+  ])
+
+  const handleCalamitySettled = useCallback(
+    (info: { face: number; variant: { key: string; title: string; flavor: string } }) => {
+      const pending = gameState.pendingCalamity
+      if (!pending) return
+      const rollerId = pending.rollOrderPlayerIds[pending.currentRollIndex]
+      const roller = gameState.players.find((p) => p.id === rollerId)
+      const face = info.face
+      const percent = calamityPercentForFace(face)
+      const lossMillion = calamityLossMillion(roller?.money ?? 0, face)
+      const playerName = roller?.name ?? 'Founder'
+      setCalamityAcceptPending({
+        face,
+        variantKey: info.variant.key,
+        variantTitle: info.variant.title,
+        variantFlavor: info.variant.flavor,
+        percent,
+        lossMillion,
+        playerName,
+      })
+      playCalamitySound(face)
+      if (boardNoticeTimerRef.current) {
+        clearTimeout(boardNoticeTimerRef.current)
+        boardNoticeTimerRef.current = null
+      }
+      setBoardNotice(null)
+      setRollDieDialogState({
+        open: false,
+        mode: 'roll-die',
+        actionInstanceId: null,
+        targetPlayerId: undefined,
+      })
+    },
+    [gameState.pendingCalamity, gameState.players]
+  )
+
   /** Mirror local dice-dialog drama to every device (attacker rolls, income, etc.). */
   const announcedLocalDramaKeyRef = useRef('')
   useEffect(() => {
@@ -1677,9 +1861,18 @@ function AppInner() {
   }, [rollDieDialogState.open, rollDieDialogState.mode, rollDieDialogState.diceRetryNonce, rollDieDialogState.actionInstanceId])
 
   const announcedIncomeKeyRef = useRef('')
+  const incomeCompleteLockRef = useRef(false)
+  const actingSeatIsAi = safeGameState.players[safeGameState.currentPlayerIndex]?.isAi === true
   useEffect(() => {
     if (!incomeDialogState.open) {
       announcedIncomeKeyRef.current = ''
+      incomeCompleteLockRef.current = false
+      return
+    }
+    const incomeActorIsAi = incomeDialogState.player?.isAi === true || actingSeatIsAi
+    // Founderbots with no lots only hit this dialog if a play leaked through —
+    // never splash the table with a roll banner for a bank/cancel.
+    if (incomeActorIsAi && incomeDialogState.hasBuiltPropertiesForIncomeRoll !== true) {
       return
     }
     const key = `${incomeDialogState.player?.id ?? ''}|${incomeDialogState.actionInstanceId ?? ''}`
@@ -1691,11 +1884,27 @@ function AppInner() {
           title: '🎲 Income resolution',
           detail: `${incomeDialogState.player?.name ?? 'A founder'} is rolling for income.`,
         },
-        sound: 'income',
       },
       { localEcho: false }
     )
-  }, [incomeDialogState.open, incomeDialogState.player?.id, incomeDialogState.actionInstanceId, incomeDialogState.player?.name])
+  }, [
+    incomeDialogState.open,
+    incomeDialogState.player?.id,
+    incomeDialogState.actionInstanceId,
+    incomeDialogState.player?.name,
+    incomeDialogState.player?.isAi,
+    incomeDialogState.hasBuiltPropertiesForIncomeRoll,
+    actingSeatIsAi,
+  ])
+
+  // Leftover Founderbot Income dialog (HMR / failed autoplay) must not stay open —
+  // it stalls the AI tick (`incomeDialogOpen`) and rerolls forever.
+  useEffect(() => {
+    if (!incomeDialogState.open || !isAiSeat(incomeDialogState.player)) return
+    setIncomeDialogState((s) =>
+      s.open ? { ...s, open: false, player: null, actionInstanceId: null } : s
+    )
+  }, [incomeDialogState.open, incomeDialogState.player])
 
   const handleSetupComplete = (players: Player[], partyBoard?: PartyBoardSyncMeta) => {
     if (partyBoard) {
@@ -1714,37 +1923,35 @@ function AppInner() {
     let remainingActionDeck = actionDeck
     let remainingPropertyDeck = propertyDeck
 
-    const playersWithCards = players.map((player, index) => {
-      const { drawn: actionCards, remaining: remainingActions } = drawCards(remainingActionDeck, 5)
+    const playersWithCards = players.map((player) => {
+      const { hand: dealtActions, remaining: remainingActions } = dealActionHandSkippingCalamity(
+        remainingActionDeck,
+        5
+      )
       remainingActionDeck = remainingActions
 
-      const { drawn: propertyCards, remaining: remainingProperties } = drawCards(remainingPropertyDeck, 5)
+      const { drawn: propertyHand, remaining: remainingProperties } = drawCards(remainingPropertyDeck, 5)
       remainingPropertyDeck = remainingProperties
 
       const updatedPlayer: Player = {
         ...player,
-        actionCards,
-        propertyCards
+        actionCards: dealtActions,
+        propertyCards: propertyHand,
       }
       return updatedPlayer
     })
 
-    const firstPlayer = playersWithCards[0]
-    const { drawn: initialActionCards, remaining: finalActionDeck } = drawCards(remainingActionDeck, 2)
-
-    const playersWithInitialDraw = playersWithCards.map((player, index) =>
-      index === 0 ? { ...player, actionCards: [...player.actionCards, ...initialActionCards] } : player
-    )
+    const { drawn: initialActionCards, remaining: afterExtraDraw } = drawCards(remainingActionDeck, 2)
 
     dismissOpeningProTip()
 
     setGameState((current) => {
-      return {
+      const base: GameState = {
         ...current,
-        players: playersWithInitialDraw,
+        players: playersWithCards,
         plots: createInitialBoard(),
         isSetupComplete: true,
-        actionDeck: finalActionDeck,
+        actionDeck: remainingActionDeck,
         propertyDeck: remainingPropertyDeck,
         currentPlayerIndex: 0,
         actionDiscard: [],
@@ -1752,11 +1959,8 @@ function AppInner() {
         turnActionsConsumed: 0,
         incomeResolvedThisTurn: false,
         awaitingEndTurnActionDiscard: undefined,
-        newCardsDrawn: initialActionCards,
-        showNewCardsAnimation: true,
         openingNarrationComplete: false,
         playRoundNumber: 1,
-        // Do not inherit these from persisted `...current` — they would block end-game detection and scoring.
         crossingTheLineActive: false,
         playedPropertyCardThisTurn: undefined,
         propertiesBuiltThisTurn: 0,
@@ -1764,7 +1968,11 @@ function AppInner() {
         lastBuiltProperty: undefined,
         councilFreezeBlockBuildForPlayerId: undefined,
         pendingCouncilFreezeDefense: undefined,
+        pendingRebuttalRoll: undefined,
         pendingIncomeTaxPlayerIds: [],
+        pendingCalamity: undefined,
+        calamityUsedVariantKeys: [],
+        lastCalamityPlayRound: undefined,
         gameEnded: undefined,
         winningSequence: undefined,
         endGameTriggered: undefined,
@@ -1772,6 +1980,8 @@ function AppInner() {
         endGameTriggerLocation: undefined,
         finalRoundTurnsRemaining: undefined,
       }
+      // First founder's extra 2 is a real draw — Calamity here fires immediately after narration.
+      return ingestActionDraw(base, 0, initialActionCards, afterExtraDraw, [], 'append')
     })
     toast.success('Game started! Each player received 5 property cards and 5 action cards.')
 
@@ -1796,6 +2006,10 @@ function AppInner() {
       toast.info(
         `Discard down to ${MAX_ACTION_HAND_SIZE} action cards to finish ending your turn.`
       )
+      return
+    }
+    if (safeGameState.pendingCalamity) {
+      toast.info('Finish the city-wide Calamity rolls before playing.')
       return
     }
     if (propertyInstanceId) {
@@ -1988,12 +2202,11 @@ function AppInner() {
           toast.info(
             options?.useTaxBuild
               ? 'Build with Tax Dollars active (50% cost): select a lot for high-density housing.'
-              : 'High-density housing ($18M): select a lot. After build, the lot shows your color with a neon outline.'
+              : `High-density housing ($${HIGH_DENSITY_HOUSING_STATS.buildCost}M): select a lot. After build, the lot shows your color with a neon outline.`
           )
         } else {
           const placeName = needsEmulate ? placementTemplate.name : card.name
-          const buildCostLabel =
-            isWild ? '$6M' : `$${(needsEmulate ? placementTemplate : card).buildCost}M`
+          const buildCostLabel = `$${(needsEmulate ? placementTemplate : card).buildCost}M`
           toast.info(
             options?.useTaxBuild
               ? `Build with Tax Dollars active (50% cost): select a lot to build ${placeName}.`
@@ -2079,6 +2292,17 @@ function AppInner() {
     })
     if (hasIncome && safeGameState.incomeResolvedThisTurn) {
       toast.error('You already resolved Income this turn — only one Income resolution per turn.')
+      return
+    }
+    // Founderbots must not open Income (host dialog / bank-cancel) until they own a built lot.
+    // Humans may still bank the card with zero properties. Online host drives bots locally,
+    // so this guard is required even when the AI chooser already skipped.
+    const actingForIncome = safeGameState.players[cpIdx]
+    if (
+      hasIncome &&
+      actingForIncome?.isAi === true &&
+      !playerHasBuiltIncomeProperty(safeGameState.plots, actingForIncome.id)
+    ) {
       return
     }
 
@@ -2587,7 +2811,7 @@ function AppInner() {
         }
         setRezoningMode({ phase: 'pick-property', actionInstanceId: actionInstanceIds[0] })
         toast.info(
-          'Rezoning: click a highlighted property card, then a vacant lot. Roll a total of 5+ after applicable Anchor Tenet influence to approve the build (success uses 2 actions).'
+          'Rezoning: click a highlighted property card, then a vacant lot. Roll 5–6 to approve; +1 influence makes 4–6 approve; +2 makes 3–6 approve (success uses 2 actions).'
         )
         return
       }
@@ -2664,6 +2888,9 @@ function AppInner() {
       let crossingActivated = current.crossingTheLineActive
       let updatedActionDeck = [...current.actionDeck]
       let pendingIncomeTaxPlayerIds = [...(current.pendingIncomeTaxPlayerIds ?? [])]
+      /** Property Taxation: playerId → immediate city assessment (not rebuttable). */
+      const propertyTaxByPlayerId = new Map<number, number>()
+      let drawnCalamities: CardInstance[] = []
 
       if (convertToCashInstanceIds.length > 0) {
         let totalCash = 0
@@ -2829,12 +3056,26 @@ function AppInner() {
                   deck: deckAfter,
                   discard: discardAfter,
                 } = drawFromDeckWithDiscardReshuffle(updatedActionDeck, updatedActionDiscard, 2)
-                updatedActionDeck = deckAfter
-                updatedActionDiscard = [...discardAfter, instance]
-                updatedActionCards = [...updatedActionCards, ...drawn]
-                if (drawn.length === 2) {
+                const resolved = resolveCalamityDraw(
+                  current,
+                  drawn,
+                  deckAfter,
+                  discardAfter,
+                  { forceBury: drawnCalamities.length > 0 }
+                )
+                drawnCalamities = [...drawnCalamities, ...resolved.firing]
+                updatedActionDeck = resolved.deck
+                updatedActionDiscard = [...resolved.discard, instance]
+                updatedActionCards = [...updatedActionCards, ...resolved.kept]
+                if (resolved.firing.length > 0) {
+                  toast.info(
+                    resolved.kept.length > 0
+                      ? `Played ${card.name} — drew ${resolved.kept.length} action card${resolved.kept.length === 1 ? '' : 's'}; Calamity strikes the city!`
+                      : `Played ${card.name} — Calamity strikes the city!`
+                  )
+                } else if (resolved.kept.length === 2) {
                   toast.success(`Played ${card.name} — drew 2 new action cards into your hand.`)
-                } else if (drawn.length === 1) {
+                } else if (resolved.kept.length === 1) {
                   toast.success(`Played ${card.name} — drew 1 action card (deck and discard had one available).`)
                 } else {
                   toast.info(`Played ${card.name} — no action cards left in deck or discard to draw.`)
@@ -2852,10 +3093,54 @@ function AppInner() {
                 broadcastBoardFx({
                   sound: 'boo',
                   notice: {
-                    title: 'Taxation levied!',
+                    title: 'Income Taxation levied!',
                     detail: `${currentPlayer.name} sheltered their income — all other founders face a 50% city assessment.`,
                   },
                 })
+                return
+              }
+
+              if (card.id === 'property-taxation') {
+                updatedActionCards = updatedActionCards.filter((c) => c.instanceId !== instanceId)
+                updatedActionDiscard.push(instance)
+                actionsPlayedCount++
+                const actorId = currentPlayer.id
+                const assessedNames: string[] = []
+                current.players.forEach((p) => {
+                  if (p.id === actorId) return
+                  let ownedValue = 0
+                  current.plots.forEach((plot) => {
+                    if (plot.claimedBy !== p.id || !plot.builtProperty) return
+                    const propertyCard = propertyCards.find((c) => c.id === plot.builtProperty)
+                    if (propertyCard) ownedValue += getPlotPropertyEndValue(plot, propertyCard)
+                  })
+                  // 10% of total property value, paid to the city. Not rebuttable —
+                  // no pendingRebuttalRoll is created. Never drives money below $0M.
+                  const assessed = Math.min(p.money, Math.floor(ownedValue * 0.1))
+                  const prior = propertyTaxByPlayerId.get(p.id) ?? 0
+                  propertyTaxByPlayerId.set(p.id, prior + assessed)
+                  if (assessed > 0) assessedNames.push(`${p.name} $${assessed}M`)
+                })
+                broadcastBoardFx({
+                  sound: 'boo',
+                  notice: {
+                    title: 'Property Taxation assessed!',
+                    detail:
+                      assessedNames.length > 0
+                        ? `${currentPlayer.name} sheltered their holdings — the city collects 10% of property value: ${assessedNames.join(', ')}. No rebuttal allowed.`
+                        : `${currentPlayer.name} sheltered their holdings — no other founder owns taxable property yet.`,
+                  },
+                })
+                return
+              }
+
+              if (card.id === 'calamity') {
+                updatedActionCards = updatedActionCards.filter((c) => c.instanceId !== instanceId)
+                if (calamityAllowedThisRound(current) && drawnCalamities.length === 0) {
+                  drawnCalamities = [...drawnCalamities, instance]
+                } else {
+                  updatedActionDeck = shuffleDeck([...updatedActionDeck, instance])
+                }
                 return
               }
 
@@ -2881,6 +3166,9 @@ function AppInner() {
         })
 
         if (incomeCardInstance) {
+          if (isAiSeat(currentPlayer) && !playerHasBuiltIncomeProperty(current.plots, currentPlayer.id)) {
+            return current
+          }
           const ownedPlots = current.plots.filter(p => p.claimedBy === currentPlayer.id && p.builtProperty)
           let baseIncome = 0
 
@@ -2940,6 +3228,48 @@ function AppInner() {
             unionIncomePenalty
           const totalIncome = Math.max(0, grossIncomePool)
 
+          // Founderbots never open IncomeDialog — the host dice/autoplay loop was
+          // cancelling collect and reopening the roll forever. Resolve in this patch.
+          if (isAiSeat(currentPlayer)) {
+            if (current.incomeResolvedThisTurn) return current
+            const doubleFromPlay = actionInstanceIds
+              .map((id) => currentPlayer.actionCards.find((c) => c.instanceId === id))
+              .find((inst) => inst?.cardId === 'double-income')
+            const consumed = current.turnActionsConsumed ?? 0
+            const canDouble = Boolean(doubleFromPlay) && consumed + 2 <= MAX_TURN_ACTIONS
+            const face = Math.floor(Math.random() * 6) + 1
+            const pct = incomePercentageForDie(face)
+            let earned = Math.floor((totalIncome * pct) / 100)
+            if (canDouble) earned *= 2
+            const result = applyIncomeComplete(current, {
+              incomeInstanceId: incomeCardInstance,
+              earnedIncome: earned,
+              totalPropertyIncomeBase: totalIncome,
+              doubleIncomeInstanceId: canDouble ? doubleFromPlay?.instanceId : undefined,
+              incomeResolution: 'property-roll',
+            })
+            if (!result.ok) return current
+            const gained =
+              (result.state.players[result.state.currentPlayerIndex]?.money ?? currentPlayer.money) -
+              currentPlayer.money
+            queueMicrotask(() => {
+              toast.success(
+                `${currentPlayer.name} collected income: $${Math.max(0, gained)}M (rolled ${face}).`
+              )
+              broadcastBoardFx({
+                sound: 'income',
+                notice: {
+                  title: `${currentPlayer.name} collected income`,
+                  detail: `Rolled ${face} — $${Math.max(0, gained)}M added to their treasury.`,
+                },
+              })
+            })
+            if (turnLimitReached(result.state.turnActionsConsumed ?? 0)) {
+              scheduleEndOfTurn()
+            }
+            return result.state
+          }
+
           setIncomeDialogState({
             open: true,
             player: currentPlayer,
@@ -2982,11 +3312,13 @@ function AppInner() {
       const newTurnActionsConsumed =
         (current.turnActionsConsumed ?? 0) + bankStepCount + actionsPlayedCount
 
-      const updatedPlayers = current.players.map((p, idx) =>
-        idx === current.currentPlayerIndex
-          ? { ...p, money: updatedMoney, propertyCards: updatedPropertyCards, actionCards: updatedActionCards }
-          : p
-      )
+      const updatedPlayers = current.players.map((p, idx) => {
+        if (idx === current.currentPlayerIndex) {
+          return { ...p, money: updatedMoney, propertyCards: updatedPropertyCards, actionCards: updatedActionCards }
+        }
+        const propertyTax = propertyTaxByPlayerId.get(p.id) ?? 0
+        return propertyTax > 0 ? { ...p, money: Math.max(0, p.money - propertyTax) } : p
+      })
 
       const newState: GameState = {
         ...current,
@@ -3004,7 +3336,11 @@ function AppInner() {
         scheduleEndOfTurn()
       }
 
-      return withReplenishedActionHand(newState, current.currentPlayerIndex)
+      return beginCalamity(
+        withReplenishedActionHand(newState, current.currentPlayerIndex),
+        current.currentPlayerIndex,
+        drawnCalamities
+      )
     })
   }
 
@@ -3127,9 +3463,14 @@ function AppInner() {
         rollDieDialogState.mode === 'rezoning' ||
         rollDieDialogState.mode === 'police-raid-attacker' ||
         rollDieDialogState.mode === 'police-raid-defender' ||
-        rollDieDialogState.mode === 'remove-investors')
+        rollDieDialogState.mode === 'remove-investors' ||
+        rollDieDialogState.mode === 'calamity')
     ) {
       toast.error('Finish the dice roll before ending your turn.')
+      return
+    }
+    if (safeGameState.pendingCalamity) {
+      toast.error('Finish the city-wide Calamity rolls before ending your turn.')
       return
     }
     if (rezoningMode.phase !== 'inactive') {
@@ -3164,12 +3505,25 @@ function AppInner() {
         wildCardEmulatePropertyId: undefined,
       })
     }
+    if (placementMode.active) {
+      setPlacementMode({
+        active: false,
+        propertyCardId: null,
+        housingHighDensity: undefined,
+        taxBuildActionInstanceId: undefined,
+        wildCardEmulatePropertyId: undefined,
+      })
+    }
+    // Seat captured at call time: a stale/double end turn (seat advanced before this
+    // lands) becomes a precise no-op inside applyEndTurn instead of hitting the next
+    // founder — while a legit over-cap end turn now enters the discard phase.
+    const seatAtCall = aiGsRef.current?.currentPlayerIndex ?? safeGameState.currentPlayerIndex
     if (isOnlineActor) {
-      sendAction({ type: 'end_turn' })
+      sendAction({ type: 'end_turn', seatIndex: seatAtCall })
       return
     }
     setGameState((current) => {
-      const result = applyEndTurn(current)
+      const result = applyEndTurn(current, { expectedSeatIndex: seatAtCall })
       if (!result.ok) {
         toast.error(result.error)
         return current
@@ -3237,6 +3591,15 @@ function AppInner() {
     // A turn change must never leave the previous founder's discard dialog open on
     // the new founder (who may legally hold 9+ after their start-of-turn draw 2).
     setDiscardDialogState((prev) => (prev.open ? { open: false, numToDiscard: 0 } : prev))
+    // Placement belongs to exactly one acting seat. Never carry its property instance id
+    // into the next founder's hand, where applyBuildAt would correctly reject it as missing.
+    setPlacementMode({
+      active: false,
+      propertyCardId: null,
+      housingHighDensity: undefined,
+      taxBuildActionInstanceId: undefined,
+      wildCardEmulatePropertyId: undefined,
+    })
   }, [safeGameState.currentPlayerIndex])
 
   /**
@@ -3283,6 +3646,7 @@ function AppInner() {
   ])
 
   const handleDiscardComplete = (discardedInstanceIds: string[]) => {
+    if (!discardDialogStateRef.current.open) return
     if (isOnlineActor) {
       // Online: the engine removes the cards and re-runs end turn, so decks and
       // the next player's draw resolve on the authority's full state.
@@ -4247,6 +4611,8 @@ function AppInner() {
     dieFace?: number
   ) => {
     if (!incomeDialogState.actionInstanceId) return
+    if (incomeCompleteLockRef.current) return
+    incomeCompleteLockRef.current = true
 
     // The acting device's IncomeDialog already played the cash register locally;
     // mirror it to the rest of the table so income lands with sound everywhere.
@@ -4336,7 +4702,12 @@ function AppInner() {
         actionInstanceId: null,
       })
 
-    if (isOnlineActor) {
+    // Founderbots (host-driven, including Play Online) resolve locally then
+    // commit_actor_state — the same path as their other card plays. Typed
+    // income_complete looks the card up on the authority snapshot; if that hand
+    // is empty/stale the action fails, the dialog reopens, and the bot rerolls forever.
+    const incomeActorIsAi = isAiSeat(incomeDialogState.player)
+    if (isOnlineActor && !incomeActorIsAi) {
       sendAction({
         type: 'income_complete',
         incomeInstanceId: incomeDialogState.actionInstanceId,
@@ -4345,9 +4716,9 @@ function AppInner() {
         doubleIncomeInstanceId: effectiveDoubleIncomeId,
         incomeResolution,
       })
-      resetIncomeDialog()
     } else {
       patchGameState((current) => {
+      if (current.incomeResolvedThisTurn) return current
       const currentPlayer = current.players[current.currentPlayerIndex]
       const ownerIdResolved = currentPlayer.id
       const stillPendingTax = (current.pendingIncomeTaxPlayerIds ?? []).includes(ownerIdResolved)
@@ -4436,9 +4807,7 @@ function AppInner() {
     })
     }
 
-    if (!isOnlineActor) {
-      resetIncomeDialog()
-    }
+    resetIncomeDialog()
 
     if (isPropertyRoll && dieFace != null) {
       broadcastDiceRollNotice(
@@ -4559,6 +4928,24 @@ function AppInner() {
       setUndoActionDialogOpen(true)
     }
   }
+
+  const handlePlotClaimRef = useRef(handlePlotClaim)
+  handlePlotClaimRef.current = handlePlotClaim
+  const stableHandlePlotClaim = useCallback((row: number, col: string) => {
+    handlePlotClaimRef.current(row, col)
+  }, [])
+
+  const handlePropertyClickRef = useRef(handlePropertyClick)
+  handlePropertyClickRef.current = handlePropertyClick
+  const stableHandlePropertyClick = useCallback((row: number, col: string) => {
+    handlePropertyClickRef.current(row, col)
+  }, [])
+
+  const handleVacantLotHint = useCallback(() => {
+    toast.info(
+      'Claim a lot by placing a property: click the card (or expand it), then click a highlighted lot. Play required action cards first (for example Crossing the Line where district rules apply).'
+    )
+  }, [])
 
   const handleUndoLastAction = () => {
     const label = safeGameState.undoLastAction?.label ?? 'Last action'
@@ -4780,8 +5167,65 @@ function AppInner() {
     })
   }, [])
 
-  const handleRollDieComplete = (result: number) => {
+  const commitCalamityRoll = (result: number, extras?: { calamityVariantKey?: string }) => {
+    if (calamityCommitInFlightRef.current) return
+    const pending = aiGsRef.current?.pendingCalamity ?? safeGameState.pendingCalamity
+    if (!pending) {
+      setCalamityAcceptPending(null)
+      setRollDieDialogState({ open: false, mode: 'roll-die', actionInstanceId: null })
+      return
+    }
+    calamityCommitInFlightRef.current = true
+    const face = Math.round(result)
+    const usedKeys = aiGsRef.current?.calamityUsedVariantKeys ?? safeGameState.calamityUsedVariantKeys
+    const variant = extras?.calamityVariantKey
+      ? findCalamityVariant(face, extras.calamityVariantKey) ?? pickCalamityVariant(face, usedKeys)
+      : pickCalamityVariant(face, usedKeys)
+    setCalamityAcceptPending(null)
+    const release = () => {
+      queueMicrotask(() => {
+        calamityCommitInFlightRef.current = false
+      })
+    }
+    if (isOnlineActor) {
+      sendAction({ type: 'calamity_roll', result: face, variantKey: variant.key })
+      setRollDieDialogState({ open: false, mode: 'roll-die', actionInstanceId: null })
+      release()
+      return
+    }
+    patchGameState((current) => {
+      const applied = applyCalamityRoll(current, face, variant.key)
+      if (!applied.ok) return current
+      queueMicrotask(() => {
+        if (applied.cityWideComplete) {
+          toast.info('Calamity resolved — play resumes.')
+        }
+      })
+      if (turnLimitReached(applied.state.turnActionsConsumed) && !applied.state.pendingCalamity) {
+        scheduleEndOfTurn()
+      }
+      return applied.state
+    })
+    setRollDieDialogState({ open: false, mode: 'roll-die', actionInstanceId: null })
+    release()
+  }
+
+  const handleAcceptCalamity = () => {
+    const pending = calamityAcceptPendingRef.current
+    if (!pending) return
+    commitCalamityRoll(pending.face, { calamityVariantKey: pending.variantKey })
+  }
+
+  const handleRollDieComplete = (result: number, extras?: { calamityVariantKey?: string }) => {
     const dialog = rollDieDialogStateRef.current
+    if (dialog.mode === 'calamity') {
+      commitCalamityRoll(result, extras)
+      return
+    }
+    if (calamityAcceptPendingRef.current && !dialog.open) {
+      commitCalamityRoll(result, extras)
+      return
+    }
     if (!dialog.actionInstanceId || !dialog.open) return
 
     if (dialog.mode === 'council-freeze-attacker') {
@@ -5819,7 +6263,7 @@ function AppInner() {
         open: true,
         mode: 'police-raid-defender',
         actionInstanceId: instanceId,
-        targetPlayerId: undefined,
+        targetPlayerId: mafiaOwnerId,
         influenceBonus: bonus,
         influenceLabels: dialog.influenceLabels ?? [],
         councilFreezeAttackerRollsCompleted: undefined,
@@ -6091,7 +6535,8 @@ function AppInner() {
       rollDieDialogStateRef.current.mode === 'council-freeze-defender' ||
       rollDieDialogStateRef.current.mode === 'police-raid-attacker' ||
       rollDieDialogStateRef.current.mode === 'police-raid-defender' ||
-      rollDieDialogStateRef.current.mode === 'remove-investors'
+      rollDieDialogStateRef.current.mode === 'remove-investors' ||
+      rollDieDialogStateRef.current.mode === 'calamity'
     ) {
       toast.error('This action must be resolved with a die roll. Roll the die to continue.')
       return
@@ -6121,6 +6566,11 @@ function AppInner() {
    */
   const handleUnstickPlay = () => {
     const canDriveBots = !partyBoardConfig || partyBoardConfig.role === 'host'
+    if (calamityAcceptPendingRef.current) {
+      handleAcceptCalamity()
+      toast.success('Accepted Calamity — play continues.')
+      return
+    }
     if (!canDriveBots) {
       // A roll dialog open on THIS device is driven by this device (e.g. a guest's
       // own defense roll). Force-resolve it locally so a hung dice renderer cannot
@@ -6292,6 +6742,37 @@ function AppInner() {
         toast.success('Resumed computer defense roll.')
         return
       }
+    }
+
+    const pendingCalamityStuck = safeGameState.pendingCalamity
+    if (pendingCalamityStuck) {
+      const rollerId = pendingCalamityStuck.rollOrderPlayerIds[pendingCalamityStuck.currentRollIndex]
+      const roller = safeGameState.players.find((p) => p.id === rollerId)
+      setRollDieDialogState({
+        open: true,
+        mode: 'calamity',
+        actionInstanceId: pendingCalamityStuck.instance.instanceId,
+        targetPlayerId: rollerId,
+        influenceBonus: 0,
+        influenceLabels: [],
+        councilFreezeAttackerRollsCompleted: undefined,
+        councilFreezeAttackerLastNatural: undefined,
+        councilFreezeFailAuto: false,
+        diceRetryNonce: pendingCalamityStuck.currentRollIndex,
+        takeoverContext: undefined,
+        rezoningContext: undefined,
+        scandalContext: undefined,
+        removeInvestorsContext: undefined,
+      })
+      window.setTimeout(() => {
+        handleRollDieComplete(Math.floor(Math.random() * 6) + 1)
+      }, 120)
+      toast.success(
+        roller?.isAi === true
+          ? `Forced Calamity roll for ${roller.name}.`
+          : 'Forced Calamity roll — play continues.'
+      )
+      return
     }
 
     if (acting?.isAi === true) {
@@ -6634,6 +7115,16 @@ function AppInner() {
 
   /** Compute the single, hard-to-miss "Required Action" banner step from current UI state. Order matters — most-blocking first. */
   const requiredAction: RequiredAction | null = (() => {
+    if (calamityAcceptPending) {
+      return {
+        id: `calamity-accept-${calamityAcceptPending.face}-${calamityAcceptPending.variantKey}`,
+        title: 'Calamity',
+        detail: `Rolled ${calamityAcceptPending.face}. ${calamityAcceptPending.percent}% of cash reserve lost. ${calamityAcceptPending.variantTitle}: ${calamityAcceptPending.variantFlavor}`,
+        tone: 'calamity',
+        ctaLabel: CALAMITY_ACCEPT_LABEL,
+        onCta: handleAcceptCalamity,
+      }
+    }
     if (rollDieDialogState.open) {
       const defenderName =
         rollDieDialogState.mode === 'hostile-takeover-defender'
@@ -6697,7 +7188,7 @@ function AppInner() {
             detail:
               (rollDieAiAutoplay
                 ? `${currentPlayer?.name ?? 'Founderbot'} is resolving Hostile Takeover.`
-                : '$1M attempt fee paid. Roll the die in the dialog — 5–6 succeeds. There is no exit until you roll.') +
+                : '$1M attempt fee paid. Roll in the dialog — 5–6 succeeds; +1 influence makes 4–6 succeed; +2 makes 3–6 succeed.') +
               aiDiceCta.detailSuffix,
             tone: 'danger',
             ctaLabel: aiDiceCta.ctaLabel,
@@ -6749,7 +7240,7 @@ function AppInner() {
             detail:
               (rollDieAiAutoplay
                 ? `${currentPlayer?.name ?? 'Founderbot'} is rolling for Rezoning approval.`
-                : 'Roll in the dialog. 5–6 approves (4–6 with +1 civic influence).') +
+                : 'Roll in the dialog — 5–6 approves; +1 influence makes 4–6 approve; +2 makes 3–6 approve.') +
               aiDiceCta.detailSuffix,
             tone: 'warning',
             ctaLabel: aiDiceCta.ctaLabel,
@@ -6765,7 +7256,7 @@ function AppInner() {
             detail:
               (rollDieAiAutoplay
                 ? `${currentPlayer?.name ?? 'Founderbot'} is resolving Police Raid on Mafia.`
-                : 'Roll in the dialog. 5–6 succeeds (4–6 if you own a built Police lot).') +
+                : 'Roll in the dialog. Total 5+ after eligible raid influence succeeds.') +
               aiDiceCta.detailSuffix,
             tone: 'danger',
             ctaLabel: aiDiceCta.ctaLabel,
@@ -6812,6 +7303,40 @@ function AppInner() {
             ctaLabel: aiDiceCta.ctaLabel,
             onCta: aiDiceCta.onCta,
           }
+        case 'calamity': {
+          const calamityRoller =
+            rollDieDialogState.targetPlayerId != null
+              ? safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)
+              : currentPlayer
+          return {
+            id: `calamity-${rollDieDialogState.targetPlayerId ?? 'x'}`,
+            title: 'Calamity',
+            detail:
+              (rollDieAiAutoplay
+                ? `${calamityRoller?.name ?? 'Founderbot'} is rolling. ${CALAMITY_PRE_ROLL_INSTRUCTION}`
+                : `${calamityRoller?.name ?? 'You'} must roll. ${CALAMITY_PRE_ROLL_INSTRUCTION}`) +
+              aiDiceCta.detailSuffix,
+            tone: 'calamity',
+            ctaLabel: aiDiceCta.ctaLabel,
+            onCta: aiDiceCta.onCta,
+          }
+        }
+      }
+    }
+    if (safeGameState.pendingCalamity) {
+      const pending = safeGameState.pendingCalamity
+      const rollerId = pending.rollOrderPlayerIds[pending.currentRollIndex]
+      const roller = safeGameState.players.find((p) => p.id === rollerId)
+      const pendingRollerAi = roller?.isAi === true
+      return {
+        id: `calamity-wait-${pending.currentRollIndex}`,
+        title: 'Calamity',
+        detail: pendingRollerAi
+          ? `${roller?.name ?? 'A Founderbot'} should auto-roll — tap Unstick if this hangs.`
+          : `${roller?.name ?? 'The next founder'} rolls on their own screen. ${CALAMITY_PRE_ROLL_INSTRUCTION}`,
+        tone: 'calamity',
+        ctaLabel: pendingRollerAi ? 'Unstick' : 'Waiting for their roll',
+        onCta: pendingRollerAi ? handleUnstickPlay : undefined,
       }
     }
     if (safeGameState.pendingCouncilFreezeDefense) {
@@ -6883,7 +7408,7 @@ function AppInner() {
       return {
         id: 'rz-density',
         title: 'Rezoning — choose Housing density',
-        detail: 'Pick standard ($10M) or high-density ($18M) housing in your hand panel.',
+        detail: `Pick standard ($8M) or high-density ($${HIGH_DENSITY_HOUSING_STATS.buildCost}M) housing in your hand panel.`,
         tone: 'warning',
         cancelLabel: 'Cancel Rezoning',
         onCancel: handleCancelRezoning,
@@ -7778,9 +8303,9 @@ function AppInner() {
               compact={isCompactLayout}
               plots={safeGameState.plots}
               players={safeGameState.players}
-              onPlotClaim={handlePlotClaim}
+              onPlotClaim={stableHandlePlotClaim}
               winningSequence={safeGameState.winningSequence}
-              onPropertyClick={handlePropertyClick}
+              onPropertyClick={stableHandlePropertyClick}
               placementMode={boardPlacementMode}
               namedSquares={namedSquaresForBoard}
               namedStreets={namedStreetsForBoard}
@@ -7846,11 +8371,7 @@ function AppInner() {
               openingProTip={
                 showOpeningProTip ? <OpeningProTipOverlay onSkip={dismissOpeningProTip} /> : null
               }
-              onVacantLotHint={() =>
-                toast.info(
-                  'Claim a lot by placing a property: click the card (or expand it), then click a highlighted lot. Play required action cards first (for example Crossing the Line where district rules apply).'
-                )
-              }
+              onVacantLotHint={handleVacantLotHint}
             />
             </div>
             {safeGameState.openingNarrationComplete === false ? (
@@ -7864,19 +8385,117 @@ function AppInner() {
                 }}
               />
             ) : null}
-            {boardNotice && (
+            {calamityAcceptPending ? (
+              <div
+                className="absolute inset-0 z-40 flex items-center justify-center p-3 sm:p-6"
+                aria-live="assertive"
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby="fs-calamity-accept-title"
+              >
+                <div
+                  className="max-w-[min(94vw,32rem)] rounded-xl border px-5 py-5 text-center sm:rounded-2xl sm:px-8 sm:py-7"
+                  style={{
+                    background: 'linear-gradient(180deg, #dc2626 0%, #991b1b 42%, #7f1d1d 100%)',
+                    borderColor: 'rgba(254, 202, 202, 0.55)',
+                    boxShadow:
+                      '0 0 0 1px rgba(127, 29, 29, 0.9), 0 0 72px rgba(185, 28, 28, 0.72), 0 24px 48px rgba(0,0,0,0.55)',
+                  }}
+                >
+                  <p
+                    id="fs-calamity-accept-title"
+                    style={{
+                      fontSize: 'clamp(1.35rem, 3.4vw, 2.1rem)',
+                      fontWeight: 800,
+                      lineHeight: 1.2,
+                      letterSpacing: '0.18em',
+                      textTransform: 'uppercase',
+                      color: 'rgba(248,250,252,0.98)',
+                      margin: 0,
+                    }}
+                  >
+                    Calamity
+                  </p>
+                  <p
+                    style={{
+                      marginTop: 14,
+                      fontSize: 'clamp(13px, 1.8vw, 16px)',
+                      fontWeight: 600,
+                      color: 'rgba(254, 226, 226, 0.95)',
+                      letterSpacing: '0.01em',
+                      whiteSpace: 'pre-line',
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {calamityPostRollBannerDetail({
+                      face: calamityAcceptPending.face,
+                      playerName: calamityAcceptPending.playerName,
+                      percent: calamityAcceptPending.percent,
+                      lossMillion: calamityAcceptPending.lossMillion,
+                      variant: {
+                        key: calamityAcceptPending.variantKey,
+                        title: calamityAcceptPending.variantTitle,
+                        flavor: calamityAcceptPending.variantFlavor,
+                      },
+                    })}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAcceptCalamity}
+                    className="fs-required-banner-cta"
+                    style={{
+                      marginTop: 18,
+                      height: 44,
+                      padding: '0 22px',
+                      borderRadius: 999,
+                      backgroundColor: '#7f1d1d',
+                      color: '#fff',
+                      border: '1px solid #fecaca',
+                      fontSize: 13,
+                      fontWeight: 800,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {CALAMITY_ACCEPT_LABEL}
+                  </button>
+                </div>
+              </div>
+            ) : boardNotice ? (
               <div
                 className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-3 sm:p-6"
                 aria-live="polite"
                 role="status"
               >
-                <div className="fs-board-notice-panel max-w-[min(92vw,28rem)] rounded-xl border border-white/25 bg-black/80 px-4 py-3 text-center shadow-[0_0_40px_rgba(0,0,0,0.55)] backdrop-blur-md sm:rounded-2xl sm:px-6 sm:py-5">
+                <div
+                  className={
+                    boardNotice.tone === 'calamity'
+                      ? 'fs-board-notice-panel max-w-[min(94vw,32rem)] rounded-xl border px-5 py-5 text-center sm:rounded-2xl sm:px-8 sm:py-7'
+                      : 'fs-board-notice-panel max-w-[min(92vw,28rem)] rounded-xl border border-white/25 bg-black/80 px-4 py-3 text-center shadow-[0_0_40px_rgba(0,0,0,0.55)] backdrop-blur-md sm:rounded-2xl sm:px-6 sm:py-5'
+                  }
+                  style={
+                    boardNotice.tone === 'calamity'
+                      ? {
+                          background:
+                            'linear-gradient(180deg, #dc2626 0%, #991b1b 42%, #7f1d1d 100%)',
+                          borderColor: 'rgba(254, 202, 202, 0.55)',
+                          boxShadow:
+                            '0 0 0 1px rgba(127, 29, 29, 0.9), 0 0 72px rgba(185, 28, 28, 0.72), 0 24px 48px rgba(0,0,0,0.55)',
+                        }
+                      : undefined
+                  }
+                >
                   <p
                     style={{
-                      fontSize: 'clamp(0.95rem, 2.2vw, 1.35rem)',
-                      fontWeight: 600,
-                      lineHeight: 1.35,
-                      letterSpacing: '0.01em',
+                      fontSize:
+                        boardNotice.tone === 'calamity'
+                          ? 'clamp(1.35rem, 3.4vw, 2.1rem)'
+                          : 'clamp(0.95rem, 2.2vw, 1.35rem)',
+                      fontWeight: boardNotice.tone === 'calamity' ? 800 : 600,
+                      lineHeight: 1.2,
+                      letterSpacing: boardNotice.tone === 'calamity' ? '0.18em' : '0.01em',
+                      textTransform: boardNotice.tone === 'calamity' ? 'uppercase' : undefined,
                       color: 'rgba(248,250,252,0.98)',
                       margin: 0,
                     }}
@@ -7886,11 +8505,19 @@ function AppInner() {
                   {boardNotice.detail ? (
                     <p
                       style={{
-                        marginTop: 8,
-                        fontSize: 'clamp(12px, 1.6vw, 14px)',
-                        fontWeight: 500,
-                        color: 'rgba(226,232,240,0.72)',
-                        letterSpacing: '0.04em',
+                        marginTop: boardNotice.tone === 'calamity' ? 14 : 8,
+                        fontSize:
+                          boardNotice.tone === 'calamity'
+                            ? 'clamp(13px, 1.8vw, 16px)'
+                            : 'clamp(12px, 1.6vw, 14px)',
+                        fontWeight: boardNotice.tone === 'calamity' ? 600 : 500,
+                        color:
+                          boardNotice.tone === 'calamity'
+                            ? 'rgba(254, 226, 226, 0.95)'
+                            : 'rgba(226,232,240,0.72)',
+                        letterSpacing: boardNotice.tone === 'calamity' ? '0.01em' : '0.04em',
+                        whiteSpace: boardNotice.tone === 'calamity' ? 'pre-line' : undefined,
+                        lineHeight: 1.45,
                       }}
                     >
                       {boardNotice.detail}
@@ -7898,7 +8525,7 @@ function AppInner() {
                   ) : null}
                 </div>
               </div>
-            )}
+            ) : null}
             </div>
           </BoardPinchZoom>
 
@@ -7907,12 +8534,12 @@ function AppInner() {
             className={
               isCompactLayout
                 ? isLandscapeLayout
-                  ? 'flex-shrink-0 border-t border-[#d8b75a40] px-2 py-1'
-                  : 'flex-shrink-0 border-t border-[#d8b75a40] px-2 py-2'
-                : 'flex-shrink-0 border-t border-[#d8b75a40] px-8 py-5'
+                  ? 'flex-shrink-0 border-t border-white/10 px-2 py-1'
+                  : 'flex-shrink-0 border-t border-white/10 px-2 py-2'
+                : 'flex-shrink-0 border-t border-white/10 px-8 py-5'
             }
             style={{
-              background: 'linear-gradient(180deg, #4a4028 0%, #362e1a 55%, #2a2414 100%)',
+              background: 'transparent',
               pointerEvents: showOpeningProTip ? 'none' : 'auto',
               opacity: showOpeningProTip ? 0.55 : 1,
               transition: 'opacity 200ms ease',
@@ -7963,9 +8590,6 @@ function AppInner() {
               onCancelTakeover={handleCancelTakeoverSelect}
               onCancelScandal={handleCancelScandalSelect}
               onCancelPlacement={handleCancelPlacement}
-              onPropertyCardPeekPlacement={(instanceId) =>
-                handlePlayCards(instanceId, [], [], { suppressPlacementToast: true })
-              }
               showNewCardsAnimation={safeGameState.showNewCardsAnimation}
               newCardsDrawn={safeGameState.newCardsDrawn}
               hiddenInstanceIds={hiddenInstanceIds}
@@ -8024,7 +8648,7 @@ function AppInner() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {incomeDialogState.open && incomeDialogState.player && (
+      {incomeDialogState.open && incomeDialogState.player && !isAiSeat(incomeDialogState.player) && (
         <IncomeDialog
           open={incomeDialogState.open}
           player={incomeDialogState.player}
@@ -8058,7 +8682,10 @@ function AppInner() {
           doubleIncomeAllowed={(safeGameState.turnActionsConsumed ?? 0) + 2 <= MAX_TURN_ACTIONS}
           onComplete={handleIncomeComplete}
           onCancel={handleIncomeCancel}
-          aiAutoplay={incomeDialogState.player?.isAi === true}
+          aiAutoplay={
+            incomeDialogState.player?.isAi === true ||
+            incomeDialogState.player?.aiDifficulty != null
+          }
         />
       )}
       {discardDialogState.open && (
@@ -8114,7 +8741,12 @@ function AppInner() {
                         )?.name
                       : undefined
             }
-            actingPlayerName={currentPlayer.name}
+            actingPlayerName={
+              rollDieDialogState.mode === 'calamity' && rollDieDialogState.targetPlayerId != null
+                ? safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.name ??
+                  currentPlayer.name
+                : currentPlayer.name
+            }
             councilFreezeAttackerRollsCompleted={rollDieDialogState.councilFreezeAttackerRollsCompleted}
             attackerMoney={currentPlayer.money}
             councilFreezeFailAuto={rollDieDialogState.councilFreezeFailAuto === true}
@@ -8127,7 +8759,24 @@ function AppInner() {
             hostileTakeoverExchange={hostileTakeoverExchange}
             rezoningSummary={rezoningSummaryForDialog}
             scandalSummary={scandalSummaryForDialog}
+            calamitySummary={
+              rollDieDialogState.mode === 'calamity' && safeGameState.pendingCalamity
+                ? {
+                    rollerName:
+                      safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.name ??
+                      currentPlayer.name,
+                    drawerName: safeGameState.pendingCalamity.drawnByName,
+                    rollIndex: safeGameState.pendingCalamity.currentRollIndex,
+                    totalPlayers: safeGameState.pendingCalamity.rollOrderPlayerIds.length,
+                    usedVariantKeys: safeGameState.calamityUsedVariantKeys,
+                    rollerMoney:
+                      safeGameState.players.find((p) => p.id === rollDieDialogState.targetPlayerId)?.money ??
+                      currentPlayer.money,
+                  }
+                : undefined
+            }
             aiAutoplay={rollDieAiAutoplay}
+            onCalamitySettled={handleCalamitySettled}
           />
       )}
       <AlertDialog

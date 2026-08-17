@@ -11,6 +11,7 @@ import { attachUndoSnapshotIfTurnAction } from '@/lib/undoLastAction'
 import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
 import { resolveRebuttalRoll } from '@/lib/gameEngine/applyRebuttalResolution'
+import { applyCalamityRoll, currentCalamityRoller } from '@/lib/calamity'
 import {
   MAX_ACTION_HAND_SIZE,
   MAX_TURN_ACTIONS,
@@ -104,7 +105,9 @@ export function applyGameAction(
     case 'end_turn': {
       const turnErr = assertActorTurn(state, ctx)
       if (turnErr) return turnErr
-      return applyEndTurn(state)
+      return applyEndTurn(state, {
+        expectedSeatIndex: action.seatIndex ?? state.currentPlayerIndex,
+      })
     }
 
     case 'build_at': {
@@ -258,6 +261,48 @@ export function applyGameAction(
             result,
             negated: resolved.negated,
             plotLabel: resolved.plotLabel,
+          },
+        ],
+      })
+    }
+
+    case 'calamity_roll': {
+      const pending = state.pendingCalamity
+      if (!pending) {
+        return { ok: false, error: 'No calamity is pending.', code: 'no_pending_calamity' }
+      }
+      const roller = currentCalamityRoller(state)
+      if (!roller) {
+        return { ok: false, error: 'Calamity roller not found.', code: 'bad_roller' }
+      }
+      if (roller.isAi) {
+        if (!ctx.senderIsHost) {
+          return { ok: false, error: 'AI seats are driven by the host.', code: 'ai_seat' }
+        }
+      } else {
+        const senderIdx = findHostSeatIndexForConnection(state, ctx.senderConnectionId)
+        const rollerIdx = state.players.findIndex((p) => p.id === roller.id)
+        if (senderIdx !== rollerIdx) {
+          return { ok: false, error: 'Only the current calamity founder may roll.', code: 'wrong_calamity_roller' }
+        }
+      }
+      const applied = applyCalamityRoll(state, action.result, action.variantKey)
+      if (!applied.ok) {
+        return { ok: false, error: applied.error, code: applied.code }
+      }
+      return withAutoAdvanceIfBudgetSpent({
+        ok: true,
+        state: applied.state,
+        events: [
+          {
+            type: 'calamity_result',
+            playerName: applied.playerName,
+            result: applied.result,
+            percent: applied.percent,
+            lossMillion: applied.lossMillion,
+            variantTitle: applied.variant.title,
+            variantFlavor: applied.variant.flavor,
+            cityWideComplete: applied.cityWideComplete,
           },
         ],
       })

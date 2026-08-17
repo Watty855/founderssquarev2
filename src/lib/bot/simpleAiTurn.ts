@@ -166,7 +166,10 @@ export function actionCardKeepScore(cardId: string): number {
     case 'police-raid-on-mafia':
       return 45
     case 'taxation':
+    case 'property-taxation':
       return 35
+    case 'calamity':
+      return 0
     case 'discard-property-cards':
       return 25
     case 'draw-2-action-cards':
@@ -548,16 +551,37 @@ function tryCompleteSelectMode(
 }
 
 /**
+ * True when this founder owns at least one built city lot that can generate Income.
+ * Online snapshots can drop `id` or stringify `claimedBy`; treat those as "no property"
+ * rather than matching vacant lots (`undefined === undefined`).
+ */
+export function playerHasBuiltIncomeProperty(
+  plots: Plot[] | undefined | null,
+  playerId: number | undefined | null
+): boolean {
+  if (playerId == null) return false
+  const id = typeof playerId === 'number' ? playerId : Number(playerId)
+  if (!Number.isFinite(id)) return false
+  if (!plots || plots.length === 0) return false
+  return plots.some((p) => {
+    if (p.type !== 'city') return false
+    if (p.claimedBy == null) return false
+    const owner = typeof p.claimedBy === 'number' ? p.claimedBy : Number(p.claimedBy)
+    if (!Number.isFinite(owner) || owner !== id) return false
+    const built = p.builtProperty
+    if (typeof built !== 'string' || built.length === 0) return false
+    return propertyCards.some((c) => c.id === built)
+  })
+}
+
+/**
  * Primary win condition for Founderbots: maximize income / cash.
  * Play Income (with Double Income when slots allow) before builds or confrontations —
  * but never open Income with zero built properties (that only shows bank/cancel).
  */
 function tryPlayIncomeFirst(gs: GameState, cp: Player, h: SimpleAiTurnHandlers): boolean {
   if (gs.incomeResolvedThisTurn === true) return false
-  const hasBuiltProperty = gs.plots.some(
-    (p) => p.claimedBy === cp.id && p.builtProperty != null && p.builtProperty !== ''
-  )
-  if (!hasBuiltProperty) return false
+  if (!playerHasBuiltIncomeProperty(gs.plots, cp.id)) return false
   const income = cp.actionCards.find((a) => a.cardId === 'income')
   if (!income) return false
   const consumed = gs.turnActionsConsumed ?? 0
@@ -599,8 +623,8 @@ function tryPlaySafeActionsOrEnd(gs: GameState, cp: Player, h: SimpleAiTurnHandl
   // Avoid Draw 2 when the hand is already at/near the end-of-turn cap.
   const prefer = (
     nearOrOverCap
-      ? (['taxation', 'crossing-the-line', 'roll-die'] as const)
-      : (['taxation', 'crossing-the-line', 'draw-2-action-cards', 'roll-die'] as const)
+      ? (['property-taxation', 'taxation', 'crossing-the-line', 'roll-die'] as const)
+      : (['property-taxation', 'taxation', 'crossing-the-line', 'draw-2-action-cards', 'roll-die'] as const)
   )
   for (const key of prefer) {
     const inst = cp.actionCards.find((a) => a.cardId === key)
@@ -633,6 +657,7 @@ export function trySimpleAiMainPhase(
   if (ui.rollDieDialogOpen || ui.incomeDialogOpen || ui.showNewCardsAnimation) {
     return false
   }
+  if (gs.pendingCalamity) return false
 
   // End-of-turn soft hand cap — resolve in one call (never cancel/reopen).
   if (ui.discardDialogOpen) {
@@ -710,7 +735,7 @@ export function trySimpleAiMainPhase(
     validPlots = validPlots.filter((plot) => {
       const at = getPlotAt(gs.plots, plot.col, plot.row, index)
       if (!at) return false
-      const fullCost = card.id === 'anchor-wild-card' ? 6 : getHousingBuildCost(card, hd)
+      const fullCost = getHousingBuildCost(template, hd)
       return cp.money >= fullCost
     })
 
@@ -769,7 +794,7 @@ export function trySimpleAiMainPhase(
         const plots = getValidPlotsForProperty(template, gs.plots, gs.crossingTheLineActive)
         if (plots.length === 0) return null
 
-        const costStd = c.id === 'anchor-wild-card' ? 6 : getHousingBuildCost(c, false)
+        const costStd = getHousingBuildCost(template, false)
         const canStd = cp.money >= costStd
         const housing = isHousingPropertyCard(c)
         const costHd = housing ? getHousingBuildCost(c, true) : costStd

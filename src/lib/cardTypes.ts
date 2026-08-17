@@ -19,7 +19,7 @@ export interface PropertyCard {
 export interface ActionCard {
   id: string
   type: 'action'
-  category: 'legal' | 'financial' | 'social' | 'regulatory'
+  category: 'legal' | 'financial' | 'social' | 'regulatory' | 'calamity'
   name: string
   description: string
   buildCost: number | string

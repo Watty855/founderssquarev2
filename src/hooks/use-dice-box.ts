@@ -8,8 +8,8 @@ interface UseDiceBoxOptions {
   open: boolean
 }
 
-/** 3D roll animations normally settle in ~2-3s; past this we assume the canvas hung. */
-const ROLL_TIMEOUT_MS = 8000
+/** 3D rolls should settle quickly; at 3s we assume the canvas hung and fall back instantly. */
+const ROLL_TIMEOUT_MS = 3000
 
 /**
  * WebGL + asset init normally finishes well under a second. WKWebView can stall
@@ -17,7 +17,7 @@ const ROLL_TIMEOUT_MS = 8000
  * without rejecting — past this we switch to the instant-roll fallback so the roll
  * button can never stay stuck on "Loading...".
  */
-const INIT_TIMEOUT_MS = 5000
+const INIT_TIMEOUT_MS = 2000
 
 function randomDie(): number {
   return Math.floor(Math.random() * 6) + 1

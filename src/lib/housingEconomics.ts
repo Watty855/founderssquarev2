@@ -4,9 +4,9 @@ import { plotsShareAnyDistrict } from './districts'
 
 /** Stats when player builds housing with more than four stories (high density). */
 export const HIGH_DENSITY_HOUSING_STATS = {
-  buildCost: 18,
-  buildIncome: 10,
-  endGameValue: 18,
+  buildCost: 12,
+  buildIncome: 6,
+  endGameValue: 12,
 } as const
 
 export function isHousingPropertyCard(card: PropertyCard): boolean {

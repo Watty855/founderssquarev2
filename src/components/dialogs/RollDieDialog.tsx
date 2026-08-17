@@ -1,15 +1,25 @@
 'use client'
 
-import { useId, useEffect, useState, useCallback } from 'react'
+import { useId, useEffect, useState, useCallback, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useDiceBox } from '@/hooks/use-dice-box'
 import { XCircle } from '@phosphor-icons/react'
 import { actionCards } from '@/lib/cardData'
 import { playCrowdCheerSound } from '@/lib/soundEffects'
 import {
+  calamityLossMillion,
+  calamityPercentForFace,
+  calamityPostRollBannerDetail,
+  CALAMITY_ACCEPT_LABEL,
+  CALAMITY_PRE_ROLL_INSTRUCTION,
+  pickCalamityVariant,
+  type CalamityVariant,
+} from '@/lib/calamity'
+import {
   attackRollRequiredTitle,
   defenseRollRequiredTitle,
 } from '@/lib/confrontationNotice'
+import { AI_FAST_PLAYBACK_MS } from '@/lib/bot/aiTiming'
 
 export type RollDieDialogMode =
   | 'roll-die'
@@ -23,10 +33,11 @@ export type RollDieDialogMode =
   | 'police-raid-attacker'
   | 'police-raid-defender'
   | 'remove-investors'
+  | 'calamity'
 
 interface RollDieDialogProps {
   open: boolean
-  onComplete: (result: number) => void
+  onComplete: (result: number, extras?: { calamityVariantKey?: string }) => void
   onCancel: () => void
   mode?: RollDieDialogMode
   /** Natural die + this value for City Council Freeze attacker check */
@@ -68,6 +79,17 @@ interface RollDieDialogProps {
     plotLabel: string
     ownerName: string
   }
+  /** City-wide Calamity: who is rolling and where they sit in the order. */
+  calamitySummary?: {
+    rollerName: string
+    drawerName: string
+    rollIndex: number
+    totalPlayers: number
+    usedVariantKeys?: string[]
+    rollerMoney?: number
+  }
+  /** Fired once when a human calamity die settles, before Accept Calamity. */
+  onCalamitySettled?: (info: { face: number; variant: CalamityVariant }) => void
   /** AI player: dismiss intros and Continue without clicks (uses dice results). */
   aiAutoplay?: boolean
 }
@@ -95,6 +117,8 @@ function RollDieDialogInner({
   hostileTakeoverExchange,
   rezoningSummary,
   scandalSummary,
+  calamitySummary,
+  onCalamitySettled,
   aiAutoplay = false,
 }: RollDieDialogProps) {
   const instanceId = useId()
@@ -103,8 +127,14 @@ function RollDieDialogInner({
   const councilFreezeBankValue = actionCards.find((c) => c.id === 'city-council-freeze')?.bankValue ?? 2
 
   const [showCouncilFreezeIntro, setShowCouncilFreezeIntro] = useState(true)
-  const diceBoxOpen = open && (!councilFreezeFlow || !showCouncilFreezeIntro)
+  const diceBoxOpen = open && !aiAutoplay && (!councilFreezeFlow || !showCouncilFreezeIntro)
   const showNonIntroDiceUi = !councilFreezeFlow || !showCouncilFreezeIntro
+  const aiResolvedKeyRef = useRef('')
+  const onCompleteRef = useRef(onComplete)
+  onCompleteRef.current = onComplete
+  const onCalamitySettledRef = useRef(onCalamitySettled)
+  onCalamitySettledRef.current = onCalamitySettled
+  const calamitySettledKeyRef = useRef('')
 
   const { roll, isRolling, diceValue, reset, isReady } = useDiceBox({ containerId, open: diceBoxOpen })
 
@@ -113,6 +143,25 @@ function RollDieDialogInner({
   const rezoningFlow = mode === 'rezoning'
   const policeRaidFlow = mode === 'police-raid-attacker' || mode === 'police-raid-defender'
   const removeInvestorsFlow = mode === 'remove-investors'
+  const calamityFlow = mode === 'calamity'
+  const [calamityVariant, setCalamityVariant] = useState<CalamityVariant | null>(null)
+
+  useEffect(() => {
+    if (!calamityFlow || diceValue == null) {
+      setCalamityVariant(null)
+      if (!calamityFlow) calamitySettledKeyRef.current = ''
+      return
+    }
+    const variant = pickCalamityVariant(diceValue, calamitySummary?.usedVariantKeys)
+    setCalamityVariant(variant)
+    if (aiAutoplay) return
+    const settleKey = `${calamitySummary?.rollIndex ?? 0}|${diceValue}|${variant.key}`
+    if (calamitySettledKeyRef.current === settleKey) return
+    calamitySettledKeyRef.current = settleKey
+    onCalamitySettledRef.current?.({ face: diceValue, variant })
+    // Pick once per settled face for this founder — do not re-roll flavor on used-keys changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calamityFlow, diceValue, calamitySummary?.rollIndex, aiAutoplay])
 
   useEffect(() => {
     if (open && councilFreezeFlow) {
@@ -142,6 +191,7 @@ function RollDieDialogInner({
   }, [roll, onAttackerDieSettled])
 
   useEffect(() => {
+    if (aiAutoplay) return
     if (!open || !councilFreezeFlow || showCouncilFreezeIntro || councilFreezeFailAuto) return
     if (isRolling || diceValue !== null || !isReady) return
     const t = window.setTimeout(() => {
@@ -160,60 +210,42 @@ function RollDieDialogInner({
     mode,
     roll,
     runAttackerRoll,
-  ])
-
-  useEffect(() => {
-    if (!open || !aiAutoplay || !councilFreezeFlow || !showCouncilFreezeIntro) return
-    // Skip the human "Roll Die" intro immediately for bots — delayed dismiss raced with
-    // remounts and left City Council Freeze stuck on the intro / badge.
-    setShowCouncilFreezeIntro(false)
-  }, [open, aiAutoplay, councilFreezeFlow, showCouncilFreezeIntro])
-
-  /** Founderbots / AI: initiate the roll themselves — host never has to tap Roll. */
-  useEffect(() => {
-    if (!open || !aiAutoplay || councilFreezeFailAuto) return
-    // Council-freeze already auto-rolls in the effect above.
-    if (councilFreezeFlow) return
-    if (isRolling || diceValue !== null || !isReady) return
-    const t = window.setTimeout(() => {
-      void roll()
-    }, 380)
-    return () => window.clearTimeout(t)
-  }, [
-    open,
     aiAutoplay,
-    councilFreezeFailAuto,
-    councilFreezeFlow,
-    isRolling,
-    diceValue,
-    isReady,
-    roll,
   ])
 
   /**
-   * Hard watchdog: if a bot roll never settles (WebGL hang, isReady stuck, onComplete not fired),
-   * synthesize a 1–6 and advance so the table cannot freeze on confrontation cards.
+   * Founderbots do not wait on a prompt, WebGL die, or Continue button. Resolve the
+   * required roll in one short tick; the parent queues a defender roll when applicable.
+   *
+   * React Strict Mode (localhost) runs this effect twice: arm timer, cleanup, arm again.
+   * The resolved-key must be set only when the timeout actually fires. Setting it before
+   * the timer made the second run skip scheduling, which froze Hostile Takeover (and
+   * other) Founderbot defense rolls on "Computer resolving…".
    */
   useEffect(() => {
     if (!open || !aiAutoplay || councilFreezeFailAuto) return
-    if (diceValue !== null) return
+    const key = `${mode}|${diceRetryNonce}|${hostileTakeoverExchange?.attackerName ?? ''}|${defenderName ?? ''}|${calamitySummary?.rollerName ?? ''}|${calamitySummary?.rollIndex ?? ''}`
+    let cancelled = false
     const t = window.setTimeout(() => {
-      const forced = Math.floor(Math.random() * 6) + 1
-      if (mode === 'council-freeze-attacker') {
-        onAttackerDieSettled?.(forced)
-      }
-      onComplete(forced)
-    }, 5000)
-    return () => window.clearTimeout(t)
+      if (cancelled) return
+      if (aiResolvedKeyRef.current === key) return
+      aiResolvedKeyRef.current = key
+      onCompleteRef.current(Math.floor(Math.random() * 6) + 1)
+    }, AI_FAST_PLAYBACK_MS)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
   }, [
     open,
     aiAutoplay,
     councilFreezeFailAuto,
-    diceValue,
     mode,
-    onAttackerDieSettled,
-    onComplete,
     diceRetryNonce,
+    hostileTakeoverExchange?.attackerName,
+    defenderName,
+    calamitySummary?.rollerName,
+    calamitySummary?.rollIndex,
   ])
 
   const councilFreezeIntroTitle =
@@ -251,6 +283,8 @@ function RollDieDialogInner({
                       ? defenseRollRequiredTitle('Police Raid on Mafia', defenderLabel)
                       : mode === 'remove-investors'
                         ? attackRollRequiredTitle('Remove Investors', actingPlayerName ?? rollerName)
+                        : mode === 'calamity'
+                          ? 'Calamity'
                         : 'Roll Die'
 
   const description =
@@ -259,7 +293,7 @@ function RollDieDialogInner({
       : mode === 'council-freeze-defender'
         ? `${defenderName ?? 'The target player'} rolls once. A 6 negates the freeze.`
         : mode === 'hostile-takeover-attacker'
-          ? 'Roll the die; total 5+ succeeds. Citywide, district, and block Anchor Tenet modifiers apply to the target lot. On success, the owner rolls once — only a 6 blocks; otherwise you pay 120% of end value and the lot becomes yours.'
+          ? 'Roll the die: 5–6 succeeds; +1 influence makes 4–6 succeed; +2 makes 3–6 succeed. Eligible citywide, district, and block Anchor Tenet modifiers apply to the target lot. On success, the owner rolls once — only a 6 blocks; otherwise you pay 120% of end value and the lot becomes yours.'
           : mode === 'hostile-takeover-defender'
             ? `${defenderName ?? 'The property owner'} rolls once. A 6 blocks the takeover and keeps the property.`
             : mode === 'scandal-attacker'
@@ -267,13 +301,15 @@ function RollDieDialogInner({
               : mode === 'scandal-defender'
                 ? `${defenderName ?? 'The anchor owner'} rolls once. A 6 negates the scandal; any other result discontinues this anchor’s influence on this lot.`
                 : mode === 'rezoning'
-                  ? 'Roll a total of 5+ to approve Rezoning. Applicable citywide and district Anchor Tenet influence modifies this roll. On a lower total, zoning stays the same, Rezoning is discarded, and this build fails on that lot.'
+                  ? 'Roll to approve Rezoning: 5–6 approves; +1 influence makes 4–6 approve; +2 makes 3–6 approve. Applicable citywide and district Anchor Tenet influence modifies this roll. On a lower total, zoning stays the same, Rezoning is discarded, and this build fails on that lot.'
                   : mode === 'police-raid-attacker'
                     ? 'Roll the die. Total 5+ succeeds (including max +1 raid influence when you own built Police, City Hall, and/or Courthouse anywhere). On success, the Mafia owner counters — they need 6 if you had no raid influence, or 5–6 if you did. If they fail to counter, their Mafia lots return to vacant Anchor Tenet.'
                     : mode === 'police-raid-defender'
                       ? `${defenderName ?? 'The Mafia owner'} rolls once to counter. ${influenceBonus > 0 ? 'They need 5–6 because you had raid influence (+1).' : 'They need a 6.'} Failure vacates their Mafia lots back to Anchor Tenet.`
                       : mode === 'remove-investors'
                         ? 'Roll the die. Total 5+ includes applicable citywide, district, and rival Regulation Bureau block influence. No investor counter-roll. If you succeed, pay each investor 50% of their contribution, then clear all stripes on that lot.'
+                        : mode === 'calamity'
+                          ? `${CALAMITY_PRE_ROLL_INSTRUCTION} ${calamitySummary?.rollerName ?? 'You'} rolls (${(calamitySummary?.rollIndex ?? 0) + 1} of ${calamitySummary?.totalPlayers ?? 1}).${calamitySummary?.drawerName ? ` ${calamitySummary.drawerName} drew the card.` : ''}`
                         : 'Click to roll and see your result'
 
   const total =
@@ -347,32 +383,11 @@ function RollDieDialogInner({
     (mode === 'scandal-attacker' && diceValue !== null) ||
     (mode === 'rezoning' && diceValue !== null) ||
     (policeRaidFlow && diceValue !== null) ||
-    (removeInvestorsFlow && diceValue !== null)
+    (removeInvestorsFlow && diceValue !== null) ||
+    (calamityFlow && diceValue !== null)
 
   const suppressBackdropDismiss =
-    councilFreezeFailAuto || takeoverFlow || scandalFlow || rezoningFlow || policeRaidFlow || removeInvestorsFlow
-
-  useEffect(() => {
-    if (!open || !aiAutoplay || diceValue === null || councilFreezeFailAuto) return
-
-    const shouldAdvance =
-      showAttackerFailChoices || showGenericRollAgain || singleContinueAfterRoll
-
-    if (!shouldAdvance) return
-
-    const v = diceValue
-    const t = window.setTimeout(() => onComplete(v), 520)
-    return () => window.clearTimeout(t)
-  }, [
-    open,
-    aiAutoplay,
-    diceValue,
-    councilFreezeFailAuto,
-    showAttackerFailChoices,
-    showGenericRollAgain,
-    singleContinueAfterRoll,
-    onComplete,
-  ])
+    councilFreezeFailAuto || takeoverFlow || scandalFlow || rezoningFlow || policeRaidFlow || removeInvestorsFlow || calamityFlow
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && !suppressBackdropDismiss && onCancel()}>
@@ -387,8 +402,8 @@ function RollDieDialogInner({
       <DialogContent
         className="max-w-[min(360px,92vw)] max-h-[min(85dvh,640px)] overflow-y-auto overscroll-contain [&>button:first-child]:hidden"
         style={{
-          backgroundColor: '#141418',
-          border: '1px solid rgba(255,255,255,0.1)',
+          backgroundColor: calamityFlow ? '#7f1d1d' : '#141418',
+          border: calamityFlow ? '1px solid rgba(254, 202, 202, 0.5)' : '1px solid rgba(255,255,255,0.1)',
           borderRadius: 14,
           padding: 16,
         }}
@@ -421,11 +436,24 @@ function RollDieDialogInner({
         )}
 
         <DialogHeader style={{ marginBottom: 4 }}>
-          <DialogTitle style={{ fontSize: 18, fontWeight: 400 }}>
+          <DialogTitle
+            style={{
+              fontSize: calamityFlow ? 22 : 18,
+              fontWeight: calamityFlow ? 800 : 400,
+              letterSpacing: calamityFlow ? '0.16em' : undefined,
+              textTransform: calamityFlow ? 'uppercase' : undefined,
+              color: calamityFlow ? '#fff' : undefined,
+            }}
+          >
             {councilFreezeFlow && showCouncilFreezeIntro ? councilFreezeIntroTitle : title}
           </DialogTitle>
           <DialogDescription
-            style={{ fontSize: 13, color: '#8888a0', ...(councilFreezeFlow && showCouncilFreezeIntro ? { lineHeight: 1.4 } : {}) }}
+            style={{
+              fontSize: 13,
+              color: calamityFlow ? 'rgba(254, 226, 226, 0.92)' : '#8888a0',
+              ...(councilFreezeFlow && showCouncilFreezeIntro ? { lineHeight: 1.4 } : {}),
+              ...(calamityFlow ? { lineHeight: 1.45 } : {}),
+            }}
           >
             {councilFreezeFlow && showCouncilFreezeIntro ? councilFreezeIntroDescription : description}
           </DialogDescription>
@@ -591,7 +619,7 @@ function RollDieDialogInner({
                   <strong>${rezoningSummary.buildCostMillion}M</strong> if the roll succeeds.
                 </p>
                 <p style={{ margin: '10px 0 0', fontSize: 12, fontWeight: 600, color: '#a78bfa', lineHeight: 1.45 }}>
-                  Roll required: 5–6 succeeds, or 4–6 with max +1 board-wide civic influence.
+                  Roll required: 5–6 succeeds; +1 influence makes 4–6 succeed; +2 makes 3–6 succeed.
                 </p>
               </div>
             )}
@@ -756,6 +784,27 @@ function RollDieDialogInner({
                   Need 5+ after influence — rolled {removeInvestorsTotal ?? diceValue}. Investors stay; Remove Investors is discarded.
                 </p>
               )}
+              {calamityFlow && diceValue !== null && calamityVariant && (
+                <p
+                  style={{
+                    textAlign: 'center',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: '#fee2e2',
+                    margin: 0,
+                    whiteSpace: 'pre-line',
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {calamityPostRollBannerDetail({
+                    face: diceValue,
+                    playerName: calamitySummary?.rollerName ?? 'You',
+                    percent: calamityPercentForFace(diceValue),
+                    lossMillion: calamityLossMillion(calamitySummary?.rollerMoney ?? 0, diceValue),
+                    variant: calamityVariant,
+                  })}
+                </p>
+              )}
               {mode === 'council-freeze-defender' && diceValue !== null && (
                 <p style={{ textAlign: 'center', fontSize: 13, color: diceValue === 6 ? '#6ee7b7' : '#fca5a5', margin: 0 }}>
                   {diceValue === 6
@@ -818,14 +867,22 @@ function RollDieDialogInner({
                   </p>
                 ) : (
                 <button
-                  onClick={() => diceValue !== null && onComplete(diceValue)}
+                  onClick={() => {
+                    if (diceValue === null) return
+                    onComplete(
+                      diceValue,
+                      calamityFlow && calamityVariant
+                        ? { calamityVariantKey: calamityVariant.key }
+                        : undefined
+                    )
+                  }}
                   className="btn-ps"
                   style={{
-                    width: '100%', height: 42, borderRadius: 10, backgroundColor: '#0070cc', color: '#fff',
-                    fontSize: 14, fontWeight: 600, border: '2px solid transparent', cursor: 'pointer',
+                    width: '100%', height: 42, borderRadius: 10, backgroundColor: calamityFlow ? '#991b1b' : '#0070cc', color: '#fff',
+                    fontSize: 14, fontWeight: 600, border: calamityFlow ? '1px solid #fecaca' : '2px solid transparent', cursor: 'pointer',
                   }}
                 >
-                  Continue
+                  {calamityFlow ? CALAMITY_ACCEPT_LABEL : 'Continue'}
                 </button>
                 )
               ) : showAttackerFailChoices ? (

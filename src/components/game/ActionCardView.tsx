@@ -16,6 +16,7 @@ function getCategoryColor(category: string): string {
     case 'financial': return '#059669'
     case 'social': return '#0284c7'
     case 'regulatory': return '#dc2626'
+    case 'calamity': return '#ef4444'
     default: return '#6b7280'
   }
 }
@@ -34,6 +35,7 @@ export function ActionCardView({ card, className, onClick, showBack = false }: A
   }
 
   const color = getCategoryColor(card.category)
+  const isCalamity = card.category === 'calamity'
 
   const formatCost = (cost: number | string): string => {
     if (typeof cost === 'number') return cost === 0 ? 'Free' : `$${cost}M`
@@ -54,8 +56,8 @@ export function ActionCardView({ card, className, onClick, showBack = false }: A
         borderRadius: 16,
         overflow: 'hidden',
         cursor: onClick ? 'pointer' : 'default',
-        backgroundColor: '#1e0a10',
-        border: `1px solid ${color}33`,
+        backgroundColor: isCalamity ? '#3f0a0a' : '#1e0a10',
+        border: `1px solid ${color}${isCalamity ? '99' : '33'}`,
         boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
         display: 'flex',
         flexDirection: 'column',
@@ -127,9 +129,17 @@ export function ActionCardView({ card, className, onClick, showBack = false }: A
             Income: <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>${card.buildIncome}M</span>
           </span>
         ) : null}
-        <span style={{ color: 'rgba(255,255,255,0.4)' }}>
-          Bank: <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>${card.bankValue}M</span>
-        </span>
+        {card.bankValue > 0 ? (
+          <span style={{ color: 'rgba(255,255,255,0.4)' }}>
+            Bank: <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>${card.bankValue}M</span>
+          </span>
+        ) : isCalamity ? (
+          <span style={{ color: 'rgba(255,255,255,0.55)' }}>Cannot bank — play immediately</span>
+        ) : (
+          <span style={{ color: 'rgba(255,255,255,0.4)' }}>
+            Bank: <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>${card.bankValue}M</span>
+          </span>
+        )}
         {bookM != null && bookM > 0 ? (
           <span style={{ color: 'rgba(255,255,255,0.4)', width: '100%', textAlign: 'center' }}>
             End book: <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 500 }}>${bookM}M</span> on property

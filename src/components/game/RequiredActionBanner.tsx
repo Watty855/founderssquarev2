@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-export type RequiredActionTone = 'info' | 'warning' | 'danger' | 'success'
+export type RequiredActionTone = 'info' | 'warning' | 'danger' | 'success' | 'calamity'
 
 export interface RequiredAction {
   /** Stable id, used as the React key so the banner re-mounts (re-pulses) on step changes. */
@@ -78,6 +78,19 @@ const TONE_STYLES: Record<RequiredActionTone, {
     ctaColor: '#250505',
     ctaBorder: '#fca5a5',
   },
+  calamity: {
+    background: '#b91c1c',
+    borderColor: '#fecaca',
+    ringColor: 'rgba(254, 202, 202, 0.75)',
+    pulseColor: '#fee2e2',
+    iconBackground: 'rgba(127, 29, 29, 0.85)',
+    iconColor: '#fecaca',
+    titleColor: '#fff7f7',
+    detailColor: 'rgba(254, 226, 226, 0.95)',
+    ctaBackground: '#7f1d1d',
+    ctaColor: '#fff',
+    ctaBorder: '#fecaca',
+  },
   success: {
     background: 'rgba(34, 197, 94, 0.18)',
     borderColor: 'rgba(34, 197, 94, 0.5)',
@@ -119,7 +132,7 @@ export function RequiredActionBanner({ action, layout = 'header' }: RequiredActi
       style={{
         position: 'relative',
         padding: strip ? '6px 12px' : dock ? '9px 11px' : '14px 32px',
-        backgroundColor: compact ? 'rgba(12, 14, 22, 0.92)' : tone.background,
+        backgroundColor: action.tone === 'calamity' ? tone.background : compact ? 'rgba(12, 14, 22, 0.92)' : tone.background,
         borderRadius: strip ? 10 : dock ? 12 : 0,
         border: compact ? `1px solid ${tone.borderColor}` : undefined,
         borderTop: compact ? undefined : `1px solid ${tone.borderColor}`,
@@ -203,9 +216,9 @@ export function RequiredActionBanner({ action, layout = 'header' }: RequiredActi
                 fontWeight: 600,
                 lineHeight: 1.35,
                 color: tone.titleColor,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
+                whiteSpace: action.tone === 'calamity' ? 'normal' : 'nowrap',
+                overflow: action.tone === 'calamity' ? 'visible' : 'hidden',
+                textOverflow: action.tone === 'calamity' ? undefined : 'ellipsis',
               }}
             >
               <span style={{ fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase' }}>

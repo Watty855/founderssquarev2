@@ -137,9 +137,28 @@ export interface GameState {
   /**
    * Player ids who must take a city income tax on their next Income card resolution:
    * they keep max(0, collected − floor(property income total × 50%)); flag clears after that resolution.
-   * The founder who played Taxation is never added here.
+   * The founder who played Income Taxation is never added here.
    */
   pendingIncomeTaxPlayerIds?: number[]
+  /**
+   * A Calamity card was just drawn and is resolving city-wide. Every founder rolls
+   * in order starting with the drawer; the card is not in any hand until this clears.
+   */
+  pendingCalamity?: {
+    instance: CardInstance
+    drawnByPlayerId: number
+    drawnByName: string
+    rollOrderPlayerIds: number[]
+    currentRollIndex: number
+    queuedInstances: CardInstance[]
+  }
+  /** Recently shown Calamity flavor keys so the electronic table avoids repeats. */
+  calamityUsedVariantKeys?: string[]
+  /**
+   * Play-round number when the last Calamity event started. The next Calamity
+   * cannot fire until `playRoundNumber >= lastCalamityPlayRound + 6`.
+   */
+  lastCalamityPlayRound?: number
   /** After lobby setup, false until the player finishes the opening narration; omitted in older saves (treated as done). */
   openingNarrationComplete?: boolean
   /** Full table round: increments when turn passes from the last founder back to the first. */

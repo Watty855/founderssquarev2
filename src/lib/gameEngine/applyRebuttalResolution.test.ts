@@ -169,4 +169,45 @@ describe('rebuttal resolution helpers', () => {
     expect(plot?.builtProperty).toBeUndefined()
     expect(resolved?.state.pendingRebuttalRoll).toBeUndefined()
   })
+
+  it('does not spend Hostile Takeover a second time after online target commit', () => {
+    let state = baseState({
+      players: [
+        { ...mkPlayer(1, 'A', 40), actionCards: [] },
+        mkPlayer(2, 'B', 10),
+      ],
+      actionDiscard: [{ instanceId: 'act-1', cardId: 'hostile-takeover', cardNumber: 1 }],
+      actionsPlayedThisTurn: 1,
+      turnActionsConsumed: 1,
+      pendingRebuttalRoll: {
+        kind: 'hostile-takeover',
+        targetPlayerId: 2,
+        attackerPlayerId: 1,
+        targetName: 'B',
+        attackerName: 'A',
+        actionInstanceId: 'act-1',
+        takeoverContext: {
+          row: 2,
+          col: 'B',
+          ownerPlayerId: 2,
+          payment120Million: 12,
+        },
+      },
+    })
+    state = {
+      ...state,
+      plots: updatePlotAt(state.plots, 'B', 2, (p) => ({
+        ...p,
+        builtProperty: 'restaurant',
+        claimedBy: 2,
+      })),
+    }
+
+    const resolved = resolveRebuttalRoll(state, 3)
+    expect(resolved?.negated).toBe(false)
+    expect(resolved?.state.turnActionsConsumed).toBe(1)
+    expect(resolved?.state.actionsPlayedThisTurn).toBe(1)
+    expect(resolved?.state.actionDiscard).toHaveLength(1)
+    expect(resolved?.state.plots.find((p) => p.row === 2 && p.col === 'B')?.claimedBy).toBe(1)
+  })
 })

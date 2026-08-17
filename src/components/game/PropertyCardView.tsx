@@ -123,7 +123,9 @@ export function PropertyCardView({ card, className, onClick }: PropertyCardViewP
       <div style={{ padding: '0 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <div style={{ textAlign: 'center', padding: '10px 0', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10 }}>
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: 4 }}>Cost</div>
-          <div style={{ fontSize: 22, fontWeight: 300 }}>${card.buildCost}M</div>
+          <div style={{ fontSize: 22, fontWeight: 300 }}>
+            {card.id === 'anchor-wild-card' ? 'Varies' : `$${card.buildCost}M`}
+          </div>
         </div>
         <div style={{ textAlign: 'center', padding: '10px 0', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10 }}>
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase' as const, marginBottom: 4 }}>Value</div>

@@ -1,5 +1,6 @@
 import { drawFromDeckWithDiscardReshuffle } from './deckUtils'
 import type { GameState } from './types'
+import { ingestActionDraw } from './calamity'
 
 export const MAX_TURN_ACTIONS = 3
 
@@ -32,6 +33,7 @@ export function shouldAutoAdvanceTurn(state: GameState): boolean {
   if (!turnLimitReached(state.turnActionsConsumed)) return false
   if (state.pendingCouncilFreezeDefense != null) return false
   if (state.pendingRebuttalRoll != null) return false
+  if (state.pendingCalamity != null) return false
   if (state.showNewCardsAnimation === true) return false
   return true
 }
@@ -57,19 +59,11 @@ export function replenishCurrentPlayerActionHand(state: GameState, playerIndex: 
 
   if (drawn.length === 0) return { state, drew: 0 }
 
-  const players = state.players.map((pl, i) =>
-    i === playerIndex ? { ...pl, actionCards: drawn } : pl
-  )
+  const next = ingestActionDraw(state, playerIndex, drawn, deck, discard, 'replace')
+  const keptCount = next.players[playerIndex]?.actionCards.length ?? 0
 
   return {
-    state: {
-      ...state,
-      players,
-      actionDeck: deck,
-      actionDiscard: discard,
-      newCardsDrawn: drawn,
-      showNewCardsAnimation: true,
-    },
-    drew: drawn.length,
+    state: next,
+    drew: keptCount,
   }
 }

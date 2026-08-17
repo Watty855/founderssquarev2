@@ -162,48 +162,58 @@ export function IncomeDialog({
 
   const onCompleteRef = useRef(onComplete)
   onCompleteRef.current = onComplete
-  const aiIncomeHandledRef = useRef(false)
+  const playerRef = useRef(player)
+  playerRef.current = player
+  const totalIncomeRef = useRef(totalIncome)
+  totalIncomeRef.current = totalIncome
+  const hasPropsRef = useRef(hasIncomeGeneratingProperties)
+  hasPropsRef.current = hasIncomeGeneratingProperties
+  const doubleAllowedRef = useRef(doubleIncomeAllowed)
+  doubleAllowedRef.current = doubleIncomeAllowed
+  const bankValueRef = useRef(bankValue)
+  bankValueRef.current = bankValue
 
-  // Reset state when dialog opens
+  // Reset chooser UI only when the dialog opens. Parent re-renders pass a new
+  // `player` object identity; depending on it here cancelled Founderbot collect.
   useEffect(() => {
-    if (open) {
-      setIncomeResult(null)
-      setDoubleIncomeActive(false)
-      setSelectedDoubleIncomeId(null)
-      setShowInitialChoice(true)
-      const hasDoubleIncome = (player?.actionCards || []).some((instance) => {
-        const card = actionCards.find((c) => c.id === instance.cardId)
-        return card?.id === 'double-income'
-      })
-      setShowDoubleIncomePrompt(hasDoubleIncome && doubleIncomeAllowed && !aiAutoplay)
-      aiIncomeHandledRef.current = false
-    }
-  }, [open, player, doubleIncomeAllowed, aiAutoplay])
+    if (!open) return
+    setIncomeResult(null)
+    setDoubleIncomeActive(false)
+    setSelectedDoubleIncomeId(null)
+    setShowInitialChoice(true)
+    const hasDoubleIncome = (playerRef.current?.actionCards || []).some((instance) => {
+      const card = actionCards.find((c) => c.id === instance.cardId)
+      return card?.id === 'double-income'
+    })
+    setShowDoubleIncomePrompt(hasDoubleIncome && doubleAllowedRef.current && !aiAutoplay)
+  }, [open, aiAutoplay])
 
   /**
    * Founderbots: no chooser UI, no WebGL dice. Resolve Income in one short tick —
    * bank when they have no properties, otherwise instant roll (+ Double Income when held).
+   * Deps are only open/aiAutoplay so parent re-renders cannot cancel the timeout
+   * (that loop looked like an endless reroll that never collected).
    */
   useEffect(() => {
-    if (!open || !aiAutoplay || aiIncomeHandledRef.current) return
-    aiIncomeHandledRef.current = true
-
-    const doubleInst = (player?.actionCards || []).find((instance) => {
-      const card = actionCards.find((c) => c.id === instance.cardId)
-      return card?.id === 'double-income'
-    })
-    const useDouble = Boolean(doubleInst) && doubleIncomeAllowed
-
+    if (!open || !aiAutoplay) return
+    let cancelled = false
     const t = window.setTimeout(() => {
+      if (cancelled) return
+      const p = playerRef.current
+      const doubleInst = (p?.actionCards || []).find((instance) => {
+        const card = actionCards.find((c) => c.id === instance.cardId)
+        return card?.id === 'double-income'
+      })
+      const useDouble = Boolean(doubleInst) && doubleAllowedRef.current
       playIncomeSound()
-      if (!hasIncomeGeneratingProperties) {
-        const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? bankValue
+      if (!hasPropsRef.current) {
+        const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? bankValueRef.current
         onCompleteRef.current(bv, undefined, 'bank-income-card')
         return
       }
       const face = Math.floor(Math.random() * 6) + 1
       const pct = incomePercentageForDie(face)
-      let amount = Math.floor((totalIncome * pct) / 100)
+      let amount = Math.floor((totalIncomeRef.current * pct) / 100)
       if (useDouble) amount *= 2
       onCompleteRef.current(
         amount,
@@ -212,16 +222,11 @@ export function IncomeDialog({
         face
       )
     }, AI_FAST_PLAYBACK_MS)
-    return () => window.clearTimeout(t)
-  }, [
-    open,
-    aiAutoplay,
-    hasIncomeGeneratingProperties,
-    bankValue,
-    totalIncome,
-    doubleIncomeAllowed,
-    player,
-  ])
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [open, aiAutoplay])
 
   // Auto-roll when ready and prompts are dismissed (humans only)
   useEffect(() => {

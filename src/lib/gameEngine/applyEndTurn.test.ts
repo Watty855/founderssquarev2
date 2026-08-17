@@ -130,6 +130,57 @@ describe('applyEndTurn action-hand soft cap', () => {
     expect(after.state.awaitingEndTurnActionDiscard).toBeFalsy()
   })
 
+  it('seat-verified end turn with 0 actions and an over-cap hand enters the discard phase (no silent swallow)', () => {
+    // The silent no-op here deadlocked humans (End Turn did nothing) and looped
+    // Founderbots forever when they held >8 cards with nothing playable/bankable.
+    const stuck = baseState({ turnActionsConsumed: 0 })
+    const result = applyEndTurn(stuck, { expectedSeatIndex: 0 })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events.some((e) => e.type === 'discard_required')).toBe(true)
+    expect(result.state.awaitingEndTurnActionDiscard).toBe(true)
+    expect(result.state.turnActionsConsumed).toBe(MAX_TURN_ACTIONS)
+  })
+
+  it('seat-verified end turn mid-turn with an over-cap hand also enters the discard phase', () => {
+    const midTurn = baseState({ turnActionsConsumed: 1 })
+    const result = applyEndTurn(midTurn, { expectedSeatIndex: 0 })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events.some((e) => e.type === 'discard_required')).toBe(true)
+    expect(result.state.awaitingEndTurnActionDiscard).toBe(true)
+  })
+
+  it('stale seat-verified end turn is a precise no-op against the advanced seat', () => {
+    const bobTurn = baseState({
+      players: [mkPlayer(1, 'Alice', 5, 'alice-conn'), mkPlayer(2, 'Bob', 10, 'bob-conn')],
+      currentPlayerIndex: 1,
+      turnActionsConsumed: 2,
+    })
+    // Caller believed seat 0 was still acting — seat already advanced to Bob.
+    const result = applyEndTurn(bobTurn, { expectedSeatIndex: 0 })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state).toBe(bobTurn)
+    expect(result.events).toEqual([])
+  })
+
+  it('online end_turn with a stale seatIndex does not disturb the acting founder', () => {
+    const bobTurn = baseState({
+      players: [mkPlayer(1, 'Alice', 5, 'alice-conn'), mkPlayer(2, 'Bob', 10, 'bob-conn')],
+      currentPlayerIndex: 1,
+      turnActionsConsumed: 0,
+    })
+    const result = applyGameAction(
+      bobTurn,
+      { type: 'end_turn', seatIndex: 0 },
+      { senderConnectionId: 'bob-conn' }
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state).toBe(bobTurn)
+  })
+
   it('rejects discard_action_cards before the 3-action budget is spent', () => {
     const midTurn = baseState({
       turnActionsConsumed: 2,

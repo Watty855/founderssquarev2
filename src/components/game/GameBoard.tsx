@@ -276,9 +276,16 @@ export function GameBoard({
     return () => window.clearTimeout(t)
   }, [plots])
 
+  const validPlotsKey =
+    placementMode?.active && placementMode.validPlots
+      ? placementMode.validPlots.map((p) => `${p.col}${p.row}`).join(',')
+      : ''
   const validPlotKeys = useMemo(
     () => (placementMode?.active ? coordKeySet(placementMode.validPlots) : new Set<string>()),
-    [placementMode?.active, placementMode?.validPlots]
+    // Serialize lot keys so a new validPlots array with the same cells does not
+    // rebuild the Set (that busted BoardLot memo on every GameApp render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [placementMode?.active, validPlotsKey]
   )
   const winningPlotKeys = useMemo(() => coordKeySet(winningSequence), [winningSequence])
   const playerById = useMemo(() => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Player } from '@/lib/types'
 import { ActionCard, CardInstance } from '@/lib/cardTypes'
 import { actionCards } from '@/lib/cardData'
@@ -33,13 +33,35 @@ export function DiscardDialog({
   const [selectedCards, setSelectedCards] = useState<string[]>([])
 
   const handKey = (player.actionCards || []).map((c) => c.instanceId).join('|')
+  const playerRef = useRef(player)
+  playerRef.current = player
+  const onCompleteRef = useRef(onComplete)
+  onCompleteRef.current = onComplete
+  const resolvedKeyRef = useRef('')
 
+  /**
+   * Founderbot discard: resolve in one tick. Do not depend on `player` / `onComplete`
+   * identity — GameApp re-renders cancelled this timeout before it fired (same class
+   * of freeze as Income autoplay). Strict Mode: set the resolved key only when firing.
+   */
   useEffect(() => {
-    if (!open || !aiConfirmSelection || numToDiscard <= 0) return
-    const ids = pickAiActionCardDiscardIds(player, numToDiscard)
-    const t = window.setTimeout(() => onComplete(ids), 280)
-    return () => window.clearTimeout(t)
-  }, [open, aiConfirmSelection, numToDiscard, handKey, onComplete, player])
+    if (!open || !aiConfirmSelection || numToDiscard <= 0) {
+      if (!open) resolvedKeyRef.current = ''
+      return
+    }
+    const key = `${handKey}|${numToDiscard}`
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      if (cancelled) return
+      if (resolvedKeyRef.current === key) return
+      resolvedKeyRef.current = key
+      onCompleteRef.current(pickAiActionCardDiscardIds(playerRef.current, numToDiscard))
+    }, 280)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [open, aiConfirmSelection, numToDiscard, handKey])
 
   const allCards = [
     ...(player.actionCards || []).map(instance => {

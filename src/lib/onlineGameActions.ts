@@ -13,7 +13,8 @@ export type PlayCardsOptionsPayload = {
 
 /** Client → PartyKit room authority. */
 export type GameAction =
-  | { type: 'end_turn' }
+  /** `seatIndex` = the seat ending its turn, so the authority can drop stale end_turns precisely. */
+  | { type: 'end_turn'; seatIndex?: number }
   | {
       type: 'build_at'
       row: number
@@ -47,6 +48,8 @@ export type GameAction =
   | { type: 'council_freeze_defense'; result: number }
   /** PvP rebuttal roll (scandal / hostile takeover / police raid) reported by the defender's device. */
   | { type: 'rebuttal_roll'; result: number }
+  /** Current calamity roller reports their die + the flavor key chosen on their device. */
+  | { type: 'calamity_roll'; result: number; variantKey: string }
 
 export type GameEvent =
   | { type: 'discard_required'; numToDiscard: number }
@@ -72,11 +75,30 @@ export type GameEvent =
       negated: boolean
       plotLabel?: string
     }
+  | {
+      type: 'calamity_result'
+      playerName: string
+      result: number
+      percent: number
+      lossMillion: number
+      variantTitle: string
+      variantFlavor: string
+      cityWideComplete: boolean
+    }
 
 /** Fire-and-forget effects (sounds / board notices) mirrored to every device on the board channel. */
 export type BoardFx = {
-  sound?: 'construction' | 'anchor' | 'income' | 'boo' | 'cheer' | 'dwindle'
-  notice?: { title: string; detail?: string; /** Override default board-notice duration (ms). */ durationMs?: number }
+  sound?: 'construction' | 'anchor' | 'income' | 'boo' | 'cheer' | 'dwindle' | 'calamity'
+  /** Die face 1–6 when `sound` is `calamity` — drives SFX intensity. */
+  calamityFace?: number
+  notice?: {
+    title: string
+    detail?: string
+    /** Override default board-notice duration (ms). */
+    durationMs?: number
+    /** Strong red overlay for city-wide Calamity. */
+    tone?: 'default' | 'calamity'
+  }
 }
 
 export type ApplyGameActionResult =

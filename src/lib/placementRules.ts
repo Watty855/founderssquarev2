@@ -51,6 +51,13 @@ const PORT_AUTHORITY_ANCHOR_COORDS = new Set(['S3', 'S7', 'S15', 'S19'])
 /** Farm Bureau — Farmland district AT cells. */
 const FARM_COOP_ANCHOR_COORDS = new Set(['C19', 'G19', 'O19', 'S19'])
 
+/**
+ * These four cells were formerly printed/reserved as Union lots. Once vacated they are
+ * ordinary Anchor Tenet lots: every concrete anchor may build there, regardless of its
+ * normal district-specific AT coordinate set.
+ */
+const FORMER_UNION_ANCHOR_COORDS = new Set(['S11', 'C11', 'K19', 'K3'])
+
 function plotCoordKey(plot: Plot): string {
   return `${plot.col}${plot.row}`
 }
@@ -112,6 +119,8 @@ export function canPlaceProperty(
     if (!isAnchorTenetLot) return false
     // Union may build on any vacant Anchor Tenet lot; district of the lot sets its influence.
     if (card.id === 'union') return true
+    // Former Union spaces become unrestricted Anchor Tenet lots after they are vacated.
+    if (FORMER_UNION_ANCHOR_COORDS.has(key)) return true
     const coords = anchorBuildCoordsForCardId(card.id)
     return coords !== null && coords.has(key)
   }

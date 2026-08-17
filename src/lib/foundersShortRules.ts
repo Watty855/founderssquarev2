@@ -28,6 +28,7 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
     title: 'Actions & property cards',
     lines: [
       'When you play an action, follow the on-screen copy and prompts — that text is the rule for that play.',
+      'Calamity (red) is played the instant it is drawn, but never more than once every 6 rounds of play: every founder rolls in order, starting with the drawer. A 1 costs 5% of that founder’s cash reserve; a 6 costs 30%. It cannot be overturned.',
       'Click a property card to place it (valid lots pulse), then click a highlighted lot. You cannot claim a vacant lot with a bare board click alone.',
     ],
   },

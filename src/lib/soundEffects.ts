@@ -2,16 +2,21 @@
  * Founders Square v2 sound design.
  *
  *  - Construction: recorded SFX (public/assets/sfx/construction.m4a) when a structure is built
+ *  - Calamity: recorded SFX (public/assets/sfx/calamity.m4a) after each city-wide calamity roll;
+ *    volume and playback rate scale with the die face (1 quiet → 6 full intensity)
  *  - Cash register, crowd boo/cheer, anchor chain: synthesized with Web Audio
  *    (no binary assets for those, works offline in the Capacitor shell)
  */
 
 /** Bundled build SFX — served from /public so Capacitor sync includes it offline. */
 const CONSTRUCTION_SFX_URL = '/assets/sfx/construction.m4a'
+const CALAMITY_SFX_URL = '/assets/sfx/calamity.m4a'
 
 let audioContext: AudioContext | null = null
 /** Reused HTMLAudioElement so rapid builds don't stack overlapping decoders. */
 let constructionAudio: HTMLAudioElement | null = null
+/** Reused so sequential calamity rolls restart instead of stacking. */
+let calamityAudio: HTMLAudioElement | null = null
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null
@@ -134,6 +139,47 @@ function playTone(
 
 export const playConstructionSound = () => {
   playConstructionSample()
+}
+
+/**
+ * Calamity sting after a founder’s roll. Face 1 is a low rumble; face 6 is full
+ * volume and a slightly faster playback — same clip, rising intensity.
+ */
+export function playCalamitySound(face: number) {
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return
+  const pip = Math.min(6, Math.max(1, Math.round(face)))
+  const t = (pip - 1) / 5
+  const volume = 0.28 + t * 0.72
+  const playbackRate = 0.88 + t * 0.22
+  try {
+    if (!calamityAudio) {
+      calamityAudio = new Audio(CALAMITY_SFX_URL)
+      calamityAudio.preload = 'auto'
+    }
+    calamityAudio.pause()
+    calamityAudio.currentTime = 0
+    calamityAudio.volume = volume
+    calamityAudio.playbackRate = playbackRate
+    const playResult = calamityAudio.play()
+    if (playResult && typeof playResult.catch === 'function') {
+      void playResult.catch((err) => {
+        console.warn('Calamity SFX play failed:', err)
+      })
+    }
+  } catch (err) {
+    console.warn('Calamity SFX unavailable:', err)
+  }
+}
+
+/** Stop a lingering calamity sting so income/coin cues are never buried under it. */
+function stopCalamitySound() {
+  if (!calamityAudio) return
+  try {
+    calamityAudio.pause()
+    calamityAudio.currentTime = 0
+  } catch {
+    /* ignore */
+  }
 }
 
 /* ───────────────────────── Cash register — income earned ───────────────────────── */
@@ -282,7 +328,12 @@ export const playInfluenceDwindleSound = () => {
 
 /* ───────────────────────── Legacy aliases (existing call sites) ───────────────────────── */
 
-export const playIncomeSound = () => playCashRegisterSound()
+/** Cash register + coin clinks — only for receiving income, never for Calamity. */
+export const playIncomeSound = () => {
+  stopCalamitySound()
+  playCashRegisterSound()
+  playCoinSound()
+}
 
 export const playPropertyPlacementSound = () => playConstructionSound()
 

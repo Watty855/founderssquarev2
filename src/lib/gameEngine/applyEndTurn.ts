@@ -13,16 +13,38 @@ import {
   applyFinalRoundCountdown,
   clearCouncilFreezeIfEndingPlayer,
 } from '@/lib/gameEngine/statePatches'
+import { ingestActionDraw } from '@/lib/calamity'
 
 function silentReplenish(state: GameState, playerIndex: number): GameState {
   const { state: nextState } = replenishCurrentPlayerActionHand(state, playerIndex)
   return nextState
 }
 
+export interface ApplyEndTurnOptions {
+  /**
+   * Seat index the caller believes is ending its turn. When it no longer matches
+   * `currentPlayerIndex` the end_turn is stale (seat already advanced) and is
+   * ignored. When it matches, the end turn is a verified, deliberate request —
+   * an over-cap hand goes to the end-turn discard phase at ANY consumed count
+   * instead of being silently swallowed (the swallow deadlocked founders — and
+   * looped Founderbots forever — who held >8 cards with nothing left to play).
+   */
+  expectedSeatIndex?: number
+}
+
 /** Pure end-turn transition (no UI toasts). */
-export function applyEndTurn(state: GameState): ApplyGameActionResult {
+export function applyEndTurn(
+  state: GameState,
+  opts?: ApplyEndTurnOptions
+): ApplyGameActionResult {
   const currentPlayer = state.players[state.currentPlayerIndex]
   if (!currentPlayer) return { ok: false, error: 'No active player.', code: 'no_player' }
+
+  const seatVerified = opts?.expectedSeatIndex != null
+  if (seatVerified && opts.expectedSeatIndex !== state.currentPlayerIndex) {
+    // Stale end_turn — the seat already advanced. Never touch the next founder.
+    return { ok: true, state, events: [] }
+  }
 
   let updatedActionCards = [...(currentPlayer.actionCards || [])]
   let updatedPropertyCards = [...(currentPlayer.propertyCards || [])]
@@ -65,13 +87,16 @@ export function applyEndTurn(state: GameState): ApplyGameActionResult {
 
   // Soft hand cap: excess is allowed for the whole turn — including the start-of-turn
   // draw 2 and mid-turn Draw 2 Action Cards. Discard-to-cap runs only after the
-  // founder has spent all 3 turn actions (or is already in the end-turn discard phase).
+  // founder has spent all 3 turn actions, is already in the end-turn discard phase,
+  // or deliberately ends the turn early (seat-verified caller).
   //
-  // Stale end_turn after the seat already advanced is the classic freeze: the new
-  // founder has just been dealt 2 cards (hand often > 8) with 0 actions used. Never
-  // force discard in that case — no-op so they can play their full turn.
+  // Unverified callers keep the conservative behavior: a stale end_turn after the
+  // seat already advanced is the classic freeze — the new founder has just been
+  // dealt 2 cards (hand often > 8) with 0 actions used, and must not be forced to
+  // discard. Verified callers instead pass into the discard phase, because
+  // swallowing their end_turn deadlocks humans and loops Founderbots forever.
   if (totalActionCards > MAX_ACTION_HAND_SIZE) {
-    if (!budgetSpent && !alreadyAwaitingDiscard) {
+    if (!budgetSpent && !alreadyAwaitingDiscard && !seatVerified) {
       if (consumed === 0) {
         return { ok: true, state, events: [] }
       }
@@ -143,15 +168,9 @@ export function applyEndTurn(state: GameState): ApplyGameActionResult {
   } = drawFromDeckWithDiscardReshuffle(updatedActionDeck, state.actionDiscard, 2)
 
   // Start-of-turn draw 2 may put the next founder over MAX_ACTION_HAND_SIZE — that is
-  // intentional. They keep the excess until *their* turn ends.
-  const nextPlayerUpdated = {
-    ...nextPlayer,
-    actionCards: [...nextPlayer.actionCards, ...newActionCards],
-  }
-
-  const playersWithNewCards = newState.players.map((p, idx) =>
-    idx === nextPlayerIndex ? nextPlayerUpdated : p
-  )
+  // intentional. They keep the excess until *their* turn ends. Calamity cards
+  // never enter the hand; ingestActionDraw plays them city-wide when the 6-round
+  // gap has elapsed, otherwise they are buried and replaced.
 
   const inFinalRound = finalRoundPatch.finalRoundTurnsRemaining !== undefined
   events.push({
@@ -164,17 +183,21 @@ export function applyEndTurn(state: GameState): ApplyGameActionResult {
     ...newState,
     ...clearCouncilFreezeIfEndingPlayer(state, state.currentPlayerIndex),
     ...finalRoundPatch,
-    players: playersWithNewCards,
-    actionDeck: nextActionDeck,
-    actionDiscard: nextActionDiscard,
     currentPlayerIndex: nextPlayerIndex,
     playRoundNumber,
-    newCardsDrawn: newActionCards,
-    showNewCardsAnimation: true,
     lastBuiltProperty: undefined,
   }
 
-  return { ok: true, state: silentReplenish(advanced, nextPlayerIndex), events }
+  const withDraw = ingestActionDraw(
+    advanced,
+    nextPlayerIndex,
+    newActionCards,
+    nextActionDeck,
+    nextActionDiscard,
+    'append'
+  )
+
+  return { ok: true, state: silentReplenish(withDraw, nextPlayerIndex), events }
 }
 
 export function applyAnimationFlagsClear(state: GameState): ApplyGameActionResult {

@@ -127,8 +127,16 @@ export function resolveRebuttalRoll(state: GameState, result: number): RebuttalR
     if (!negated && pending.takeoverContext) {
       next = applyHostileTakeoverOnFail(next, pending.takeoverContext)
     }
-    next = spendActionCard(next, pending.actionInstanceId)
-    next = replenishCurrentPlayerActionHand(next, next.currentPlayerIndex).state
+    // Hostile Takeover is spent when the attacker commits the target and pays the $1M
+    // attempt fee. Older resolution code spent it again after the defender roll, consuming
+    // a second turn action online. Only support legacy pending states where it is still held.
+    const attackerStillHoldsCard = next.players[next.currentPlayerIndex]?.actionCards.some(
+      (card) => card.instanceId === pending.actionInstanceId
+    )
+    if (attackerStillHoldsCard) {
+      next = spendActionCard(next, pending.actionInstanceId)
+      next = replenishCurrentPlayerActionHand(next, next.currentPlayerIndex).state
+    }
   } else if (pending.kind === 'police-raid') {
     const bonus = pending.policeRaidInfluenceBonus ?? 0
     const counterThreshold = bonus > 0 ? 5 : 6
