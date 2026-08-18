@@ -2236,17 +2236,6 @@ function AppInner() {
             }
           >
             <BoardViewport compact={isCompactLayout} landscape={isLandscapeLayout} />
-            {safeGameState.openingNarrationComplete === false ? (
-              <GameOpeningSequence
-                onProceed={() => {
-                  setGameState((s) => ({
-                    ...s,
-                    openingNarrationComplete: true,
-                  }))
-                  setShowOpeningProTip(true)
-                }}
-              />
-            ) : null}
             <CalamityAcceptLayer />
           </div>
           <HandRail />
@@ -2254,6 +2243,17 @@ function AppInner() {
       </div>
 
       <OverlayHost />
+      {safeGameState.openingNarrationComplete === false ? (
+        <GameOpeningSequence
+          onProceed={() => {
+            setGameState((s) => ({
+              ...s,
+              openingNarrationComplete: true,
+            }))
+            setShowOpeningProTip(true)
+          }}
+        />
+      ) : null}
 
 
       <Toaster />

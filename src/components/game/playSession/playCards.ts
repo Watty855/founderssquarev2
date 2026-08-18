@@ -36,6 +36,7 @@ import {
 } from '@/lib/housingEconomics'
 import { getBuildCelebrationNotice, getPlotLotDisplayName } from '@/lib/buildCelebrationMessages'
 import {
+  getParkIncomeBonusForPlayer,
   getChurchIncomeBonusForPlayer,
   getArtsCouncilIncomeBonusForPlayer,
   getFarmCoopIncomeBonusForPlayer,
@@ -1348,6 +1349,10 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
             }
           })
 
+          const { bonus: parkIncomeBonus, sourceLabels: parkBonusSourceLabels } = getParkIncomeBonusForPlayer(
+            currentPlayer.id,
+            current.plots
+          )
           const { bonus: churchIncomeBonus, sourceLabels: churchBonusSourceLabels } = getChurchIncomeBonusForPlayer(
             currentPlayer.id,
             current.plots
@@ -1383,6 +1388,7 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
           const { levyTotal: mafiaLevyTotal } = getMafiaLevyForIncomePlayer(currentPlayer.id, current.plots)
           const grossIncomePool =
             baseIncome +
+            parkIncomeBonus +
             churchIncomeBonus +
             farmCoopIncomeBonus +
             portAuthorityIncomeBonus +
@@ -1443,6 +1449,8 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
             open: true,
             player: currentPlayer,
             totalIncome,
+            parkIncomeBonus,
+            parkBonusSourceLabels,
             churchIncomeBonus,
             churchBonusSourceLabels,
             farmCoopIncomeBonus,

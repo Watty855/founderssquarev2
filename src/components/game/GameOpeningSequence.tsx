@@ -76,7 +76,7 @@ export function GameOpeningSequence({ onProceed }: GameOpeningSequenceProps) {
 
   return (
     <div
-      className="absolute inset-0 z-[36] flex items-center justify-center bg-black/30 p-6 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-6 backdrop-blur-[3px]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="fs-intro-heading"

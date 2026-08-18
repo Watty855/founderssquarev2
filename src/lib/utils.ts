@@ -11,6 +11,7 @@ import {
 } from './investmentTargets'
 import { Plot, COLUMNS } from './types'
 import { getPlotDistricts, type District } from './districts'
+import { getPlotPropertyIncome } from './housingEconomics'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -359,6 +360,49 @@ export function getPlotsEligibleForScandal(plots: Plot[]): Plot[] {
   })
 }
 
+function isParkPropertyId(builtPropertyId: string): boolean {
+  return builtPropertyId.startsWith('park-')
+}
+
+/**
+ * Park income bonus:
+ * +$1M to each of the player's other income-generating lots in the same city
+ * block as at least one built Park (any owner). Park lots themselves are excluded.
+ */
+export function getParkIncomeBonusForPlayer(
+  playerId: number,
+  plots: Plot[]
+): { bonus: number; sourceLabels: string[] } {
+  const parks = plots.filter(
+    (p) => p.type === 'city' && !!p.builtProperty && isParkPropertyId(p.builtProperty)
+  )
+
+  if (parks.length === 0) {
+    return { bonus: 0, sourceLabels: [] }
+  }
+
+  let bonus = 0
+  const covering = new Set<string>()
+
+  for (const p of plots) {
+    if (p.type !== 'city' || p.claimedBy !== playerId || !p.builtProperty) continue
+    if (isParkPropertyId(p.builtProperty)) continue
+    const card = propertyCards.find((c) => c.id === p.builtProperty) as PropertyCard | undefined
+    if (getPlotPropertyIncome(p, card) <= 0) continue
+    const hits = parks.filter((parkPlot) => isPlotInCityBlock(p, parkPlot.row, parkPlot.col))
+    if (hits.length === 0) continue
+    bonus += 1
+    for (const parkPlot of hits) covering.add(`${parkPlot.col}${parkPlot.row}`)
+  }
+
+  return { bonus, sourceLabels: [...covering].sort() }
+}
+
+/**
+ * Church Affiliation income bonus:
+ * +1 income to each of the player's built properties that sits in the same city block
+ * as at least one of that player's built Church Affiliation anchors.
+ */
 export function getChurchIncomeBonusForPlayer(
   playerId: number,
   plots: Plot[]

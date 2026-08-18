@@ -15,7 +15,7 @@ interface AnchorTenetsQuickSheetProps {
 
 /** Bundled PDF + raster page (WebView-safe) of Founders_Square_Anchor_Tenets_Card.pdf */
 const ANCHOR_TENETS_PDF_URL = '/Founders_Square_Anchor_Tenets_Card.pdf'
-const ANCHOR_TENETS_CARD_IMG = '/assets/anchor-tenets-card.png'
+const ANCHOR_TENETS_CARD_IMG = '/assets/anchor-tenets-card.png?v=20260818'
 
 export function AnchorTenetsQuickSheet({ open, onOpenChange }: AnchorTenetsQuickSheetProps) {
   return (
@@ -26,7 +26,7 @@ export function AnchorTenetsQuickSheet({ open, onOpenChange }: AnchorTenetsQuick
             Founders Square — Anchor Tenets
           </DialogTitle>
           <DialogDescription className="text-left text-xs leading-relaxed text-[#9b9bad]">
-            Official Anchor Tenets card. Scroll to read the full sheet.
+            Civic Anchors, Shadow Anchors, influence reach, and endgame value. Scroll to read the full sheet.
           </DialogDescription>
         </DialogHeader>
 
@@ -38,7 +38,7 @@ export function AnchorTenetsQuickSheet({ open, onOpenChange }: AnchorTenetsQuick
           */}
           <img
             src={ANCHOR_TENETS_CARD_IMG}
-            alt="Founders Square Anchor Tenets card — Influence, Income, Endgame Value, Civic and Shadow Anchors"
+            alt="Founders Square Anchor Tenets — Civic Anchors, Shadow Anchors, Influence, Income, Build Cost, Endgame Value"
             className="mx-auto block h-auto w-full max-w-full"
             draggable={false}
           />

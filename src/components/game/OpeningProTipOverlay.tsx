@@ -6,7 +6,7 @@ const TIPS = [
   'Seek to establish influence around the city by building an Anchor Tenet (light blue cards).',
 ] as const
 
-/** Shown on the board grid (F4–P18) after the opening narration. */
+/** Centered on the viewport after the opening narration. */
 export function OpeningProTipOverlay({ onSkip }: { onSkip: () => void }) {
   return (
     <div
@@ -14,10 +14,10 @@ export function OpeningProTipOverlay({ onSkip }: { onSkip: () => void }) {
       aria-modal="true"
       aria-live="polite"
       aria-label="Pro-Tip"
-      className="pointer-events-auto flex h-full w-full min-h-0 items-stretch justify-stretch p-1"
+      className="pointer-events-auto flex max-h-[min(80vh,560px)] w-full max-w-xl flex-col"
     >
       <div
-        className="relative flex h-full w-full min-h-0 flex-col overflow-hidden rounded-lg border-2 border-sky-400/50 shadow-[0_0_48px_rgba(30,174,219,0.35),0_12px_40px_rgba(0,0,0,0.6),inset_0_0_0_1px_rgba(125,211,252,0.25)]"
+        className="relative flex min-h-0 w-full flex-col overflow-hidden rounded-2xl border-2 border-sky-400/50 shadow-[0_0_48px_rgba(30,174,219,0.35),0_12px_40px_rgba(0,0,0,0.6),inset_0_0_0_1px_rgba(125,211,252,0.25)]"
         style={{
           background: 'linear-gradient(165deg, rgba(10,18,32,0.96) 0%, rgba(6,12,24,0.94) 100%)',
           backdropFilter: 'blur(12px)',

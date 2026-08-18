@@ -1,16 +1,14 @@
 'use client'
 
-import { dismissOpeningProTip, useOverlayStore } from '@/lib/gameOverlayStore'
+import { useOverlayStore } from '@/lib/gameOverlayStore'
 import { FinalTurnBanner } from '@/components/game/FinalTurnBanner'
 import { MotivationalRoundBanner } from '@/components/game/MotivationalRoundBanner'
-import { OpeningProTipOverlay } from '@/components/game/OpeningProTipOverlay'
 
 /** Store-subscribed board banners. Isolated so a notice cannot rebuild lots. */
 export function BoardTableChrome() {
   const motivationalFlashRound = useOverlayStore((s) => s.motivationalFlashRound)
   const showFinalTurnBanner = useOverlayStore((s) => s.showFinalTurnBanner)
   const finalTurnBanner = useOverlayStore((s) => s.finalTurnBanner)
-  const showOpeningProTip = useOverlayStore((s) => s.showOpeningProTip)
   const boardNotice = useOverlayStore((s) => s.boardNotice)
 
   return (
@@ -50,24 +48,6 @@ export function BoardTableChrome() {
             currentPlayerColor={finalTurnBanner.currentPlayerColor}
             turnsRemainingThisRound={finalTurnBanner.turnsRemainingThisRound}
           />
-        </div>
-      ) : null}
-      {showOpeningProTip ? (
-        <div
-          aria-label="Opening pro-tip"
-          style={{
-            gridColumn: '6 / 17',
-            gridRow: '4 / 19',
-            display: 'flex',
-            alignItems: 'stretch',
-            justifyContent: 'stretch',
-            padding: '1px',
-            zIndex: 46,
-            overflow: 'hidden',
-            pointerEvents: 'auto',
-          }}
-        >
-          <OpeningProTipOverlay onSkip={dismissOpeningProTip} />
         </div>
       ) : null}
       {boardNotice ? (

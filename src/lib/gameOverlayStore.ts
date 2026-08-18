@@ -29,6 +29,7 @@ export type OverlayState = {
   showFinalTurnBanner: boolean
   finalTurnBanner: FinalTurnBannerPayload | null
   rulesQuickOpen: boolean
+  propertyTypesOpen: boolean
   anchorTenetsOpen: boolean
   actionCardsOpen: boolean
 }
@@ -44,6 +45,7 @@ const initialOverlayState: OverlayState = {
   showFinalTurnBanner: false,
   finalTurnBanner: null,
   rulesQuickOpen: false,
+  propertyTypesOpen: false,
   anchorTenetsOpen: false,
   actionCardsOpen: false,
 }
@@ -217,6 +219,11 @@ export function setFinalTurnBanner(payload: FinalTurnBannerPayload | null) {
 export function setRulesQuickOpen(open: boolean) {
   if (overlayState.rulesQuickOpen === open) return
   setOverlayState({ ...overlayState, rulesQuickOpen: open })
+}
+
+export function setPropertyTypesOpen(open: boolean) {
+  if (overlayState.propertyTypesOpen === open) return
+  setOverlayState({ ...overlayState, propertyTypesOpen: open })
 }
 
 export function setAnchorTenetsOpen(open: boolean) {

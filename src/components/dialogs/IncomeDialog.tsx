@@ -17,6 +17,8 @@ interface IncomeDialogProps {
   open: boolean
   player: Player
   totalIncome: number
+  parkIncomeBonus?: number
+  parkBonusSourceLabels?: string[]
   churchIncomeBonus?: number
   churchBonusSourceLabels?: string[]
   farmCoopIncomeBonus?: number
@@ -96,6 +98,8 @@ export function IncomeDialog({
   open,
   player,
   totalIncome,
+  parkIncomeBonus = 0,
+  parkBonusSourceLabels = [],
   churchIncomeBonus = 0,
   churchBonusSourceLabels = [],
   farmCoopIncomeBonus = 0,
@@ -423,7 +427,8 @@ export function IncomeDialog({
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <span style={{ fontSize: 12, color: '#8888a0' }}>
                         Property Income
-                        {churchIncomeBonus > 0 ||
+                        {parkIncomeBonus > 0 ||
+                        churchIncomeBonus > 0 ||
                         farmCoopIncomeBonus > 0 ||
                         portAuthorityIncomeBonus > 0 ||
                         artsCouncilIncomeBonus > 0 ||
@@ -435,11 +440,28 @@ export function IncomeDialog({
                         regulationBureauIncomePenalty > 0 ||
                         unionIncomeBonus > 0 ||
                         unionIncomePenalty > 0
-                          ? ' (includes anchor modifiers)'
+                          ? ' (includes block and anchor modifiers)'
                           : ''}
                       </span>
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#f0f0f5' }}>${totalIncome}M</span>
                     </div>
+                    {parkIncomeBonus > 0 && (
+                      <div
+                        title={
+                          parkBonusSourceLabels.length > 0
+                            ? `Parks at ${parkBonusSourceLabels.join(', ')}`
+                            : undefined
+                        }
+                        style={{
+                          marginBottom: 6,
+                          fontSize: 11,
+                          color: '#86efac',
+                          lineHeight: 1.35,
+                        }}
+                      >
+                        Park bonus: +${parkIncomeBonus}M across surrounding income-generating lots on the same city block.
+                      </div>
+                    )}
                     {churchIncomeBonus > 0 && (
                       <div
                         title={
@@ -729,6 +751,18 @@ export function IncomeDialog({
                     {incomeResult.event && (
                       <div style={{ fontSize: 12, fontStyle: 'italic', color: '#666680', marginBottom: 8 }}>
                         {incomeResult.event}
+                      </div>
+                    )}
+                    {parkIncomeBonus > 0 && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: '#86efac',
+                          marginBottom: 8,
+                        }}
+                      >
+                        Park bonus included: +${parkIncomeBonus}M
                       </div>
                     )}
                     {churchIncomeBonus > 0 && (

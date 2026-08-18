@@ -1,15 +1,16 @@
 'use client'
 
 import type { CSSProperties } from 'react'
-import { Anchor, ArrowCounterClockwise, BookOpen, Gavel } from '@phosphor-icons/react'
+import { Anchor, ArrowCounterClockwise, BookOpen, Gavel, House } from '@phosphor-icons/react'
 import { ChromeDimmer } from '@/components/game/ChromeDimmer'
 import { SidebarHandFlightAnchors } from '@/components/game/SidebarHandFlightAnchors'
 import { canUndoLastAction } from '@/lib/undoLastAction'
 import { propertyCards } from '@/lib/cardData'
 import { getPlotPropertyEndValue, getPlotPropertyIncome } from '@/lib/housingEconomics'
+import { getParkIncomeBonusForPlayer } from '@/lib/utils'
 import { useGameTableStore } from '@/lib/gameTableStore'
 import { usePlayUiStore, setUndoActionDialogOpen } from '@/lib/playUiStore'
-import { setActionCardsOpen, setAnchorTenetsOpen, setRulesQuickOpen } from '@/lib/gameOverlayStore'
+import { setActionCardsOpen, setAnchorTenetsOpen, setPropertyTypesOpen, setRulesQuickOpen } from '@/lib/gameOverlayStore'
 import type { Player, Plot } from '@/lib/types'
 
 function sumInvestmentBookForPlayer(plots: Plot[], investorId: number): number {
@@ -33,9 +34,10 @@ function playerStats(plots: Plot[], player: Player) {
       totalIncome += getPlotPropertyIncome(plot, propertyCard)
     }
   })
+  const { bonus: parkIncomeBonus } = getParkIncomeBonusForPlayer(player.id, plots)
   return {
     propertyValue: totalPropertyValue,
-    income: totalIncome,
+    income: totalIncome + parkIncomeBonus,
   }
 }
 
@@ -63,8 +65,11 @@ export function PlayerSidebar() {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: compactBtns ? 4 : 6,
+        justifyContent: compactBtns ? 'flex-start' : 'space-between',
+        gap: compactBtns ? 4 : 3,
         flexShrink: 0,
+        minWidth: 0,
+        width: compactBtns ? undefined : '100%',
         ...(isSpectator ? { pointerEvents: 'auto' } : undefined),
       }}
     >
@@ -79,7 +84,7 @@ export function PlayerSidebar() {
         disabled={!undoLastActionAvailable}
         onClick={() => setUndoActionDialogOpen(true)}
         className={boardHudIconButtonClass}
-        style={compactBtns ? { height: 32, width: 32 } : undefined}
+        style={{ height: 32, width: 32 }}
       >
         <ArrowCounterClockwise size={size} weight="duotone" />
       </button>
@@ -91,10 +96,23 @@ export function PlayerSidebar() {
         className={
           compactBtns
             ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#a8b0c8]'
-            : 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#a8b0c8] transition-colors hover:border-[#5ac8fa]/40 hover:bg-[#1a1a24] hover:text-[#e0e8ff]'
+            : 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#a8b0c8] transition-colors hover:border-[#5ac8fa]/40 hover:bg-[#1a1a24] hover:text-[#e0e8ff]'
         }
       >
         <BookOpen size={size} weight="duotone" />
+      </button>
+      <button
+        type="button"
+        aria-label="Open Property Types summary"
+        title="Property Types"
+        onClick={() => setPropertyTypesOpen(true)}
+        className={
+          compactBtns
+            ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#7eb8e8]'
+            : 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#7eb8e8]/25 bg-[#7eb8e8]/[0.06] text-[#7eb8e8] transition-colors hover:border-[#7eb8e8]/55 hover:bg-[#7eb8e8]/[0.12] hover:text-[#c5e4f8]'
+        }
+      >
+        <House size={size} weight="duotone" />
       </button>
       <button
         type="button"
@@ -104,7 +122,7 @@ export function PlayerSidebar() {
         className={
           compactBtns
             ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#d8b75a]'
-            : 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#d8b75a]/25 bg-[#d8b75a]/[0.06] text-[#d8b75a] transition-colors hover:border-[#d8b75a]/55 hover:bg-[#d8b75a]/[0.12] hover:text-[#f1df9d]'
+            : 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#d8b75a]/25 bg-[#d8b75a]/[0.06] text-[#d8b75a] transition-colors hover:border-[#d8b75a]/55 hover:bg-[#d8b75a]/[0.12] hover:text-[#f1df9d]'
         }
       >
         <Anchor size={size} weight="duotone" />
@@ -117,7 +135,7 @@ export function PlayerSidebar() {
         className={
           compactBtns
             ? 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#c4b5fd]'
-            : 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#c4b5fd]/25 bg-[#c4b5fd]/[0.06] text-[#c4b5fd] transition-colors hover:border-[#c4b5fd]/55 hover:bg-[#c4b5fd]/[0.12] hover:text-[#ddd6fe]'
+            : 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#c4b5fd]/25 bg-[#c4b5fd]/[0.06] text-[#c4b5fd] transition-colors hover:border-[#c4b5fd]/55 hover:bg-[#c4b5fd]/[0.12] hover:text-[#ddd6fe]'
         }
       >
         <Gavel size={size} weight="duotone" />
@@ -193,27 +211,14 @@ export function PlayerSidebar() {
       style={{
         width: 188,
         flexShrink: 0,
-        padding: '14px 12px',
+        padding: '14px 8px',
         overflowY: 'auto',
         borderRight: '1px solid rgba(255, 255, 255, 0.08)',
         background: 'linear-gradient(180deg, #0a0a0a 0%, #121212 52%, #080808 100%)',
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
-          <span
-            style={{
-              fontSize: 10,
-              fontWeight: 600,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase' as const,
-              color: 'rgba(226, 232, 240, 0.55)',
-            }}
-          >
-            Players
-          </span>
-          {hudButtons(20, false)}
-        </div>
+        {hudButtons(18, false)}
         {players.map((player, index) => {
           const isActive = index === currentPlayerIndex
           const stats = playerStats(plots, player)

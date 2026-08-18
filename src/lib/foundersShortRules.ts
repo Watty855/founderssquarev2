@@ -1,6 +1,6 @@
 /**
- * Ultra-short rules for in-game “quick rules” sheet. Card play UIs and board highlights
- * carry detail; this is a reminder only — edit here to tune brevity.
+ * Ultra-short rules for the in-game book-icon sheet (mirrors public/assets/quick-rules-sheet.png).
+ * Cards and board highlights carry detail; this is a reminder only.
  */
 export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
   title: string
@@ -9,54 +9,54 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
   {
     title: 'Goal',
     lines: [
-      'Build on lots, play actions, collect income. Win by timing the end game and scoring.',
+      'Build properties, play action cards, and collect income. Win by timing the Final Round and out-scoring rivals.',
     ],
   },
   {
-    title: 'Lots & districts',
+    title: 'Your turn',
     lines: [
-      'Every property card names its district; each lot shows its district under the building name.',
-      'The central lot on each block is called the "anchor tenet." Each anchor philosophy allows different influence modifiers that affect income and strategic actions.',
-      'Anchor influence follows its printed reach: G is citywide, B is one city block, and named districts apply only when the selected lot lies there. Applicable Anchors stack — each built copy adds strength (accumulative influence).',
-      'Every active Anchor adds +$1M to each of your other properties in its block during Income. Regulation Bureau and Union also subtract $1M from each rival property in that block; Mafia additionally collects $1M from each rival business there. Union action-roll influence is district-only.',
-      'Community pressure: +1 influence when you own 5+ properties in the target city block; +1 when targeting a lot directly opposite your six sequential lots along a street.',
-      'Action scopes: Anchor Tenets modify Hostile Takeover, Rezoning, and Remove Investors as printed. City Hall, Courthouse, or Police gives +1 max on City Council Freeze and Police Raid. Influencer and/or News Outlet gives +1 max on Scandal. Successful Scandal (or Police Raid if the Mafia fails to counter) overthrows that Anchor Tenet — the lot returns to vacant Anchor Tenet and can be rebuilt.',
-      'Valid build targets highlight when you start placement. Crossing the Line (action) can bypass district lock for one build.',
+      '3 actions per turn: 1 build + 2 others, or 0 builds + 3 actions.',
+      'A successful Rezoning counts as 2 actions (build included); a failed one costs 1.',
+      'Only one Income action per turn.',
+      'Hand may exceed 8 mid-turn — discard down to 8 only after your 3 actions are used.',
     ],
   },
   {
-    title: 'Actions & property cards',
+    title: 'Anchor Tenets',
     lines: [
-      'When you play an action, follow the on-screen copy and prompts — that text is the rule for that play.',
-      'Calamity (red) is played the instant it is drawn, but never more than once every 6 rounds of play: every founder rolls in order, starting with the drawer. A 1 costs 5% of that founder’s cash reserve; a 6 costs 30%. It cannot be overturned.',
-      'Click a property card to place it (valid lots pulse), then click a highlighted lot. You cannot claim a vacant lot with a bare board click alone.',
+      'Center lot of every block. Reach is citywide (G) or block-only (B) per its printed rules; multiple built copies stack.',
+      '+$1M to your other properties in its block during Income; Regulation Bureau/Union also −$1M to rivals there; Mafia takes $1M from rival businesses there.',
+      '+1 influence for owning 5+ properties in a block, or targeting the lot across from your 6 sequential street lots.',
+      'Scandal or a successful Police Raid overthrows an Anchor Tenet — the lot vacates and can be reclaimed.',
     ],
   },
   {
-    title: 'Turn & income',
+    title: 'Against opponents',
     lines: [
-      'Each turn you get 3 actions: either 1 build + 2 other actions, or 0 builds + 3 actions. The turn ends as soon as all 3 are used.',
-      'Successful Rezoning includes a build and costs 2 actions; a failed Rezoning costs 1. Only one Income action can be played per turn.',
-      'You may hold more than 8 action cards during your turn (start-of-turn draw 2, or Draw 2 Action Cards). Discard down to 8 only after all 3 turn actions are used — never when the 2 cards are dealt at the start of your turn.',
+      'Hostile Takeover, Rezoning, and Remove Investors are modified by the relevant Anchor Tenets.',
+      'City Hall, Courthouse, or Police: +1 max on Freeze and Police Raid rolls.',
+      'Influencer and/or News Outlet: +1 max on Scandal rolls.',
     ],
   },
   {
-    title: 'Strategy',
+    title: 'Calamity',
     lines: [
-      'Strategically build properties to control the board and gain influence with anchor philosophies. Use action cards to disrupt or defend against other founders. Bank income to save for future builds. Aim for the Final Round by completing nine properties in a row or a full city block.',
+      'Plays itself the instant it’s drawn — at most once every 6 rounds.',
+      'Every founder rolls in turn order starting with the drawer: lose 5–30% of cash (5% per pip). Cannot be overturned.',
     ],
   },
   {
     title: 'Bonuses',
     lines: [
-      '$50M + naming bonus for every fully-owned 3×3 city block, allowing the square to be named in your honor.',
-      '$30M + naming bonus for every 6-lot 3+3 run along a street; allowing the street to be named in your honor',
+      '$50M + naming rights for a fully-owned 3×3 city block.',
+      '$30M + naming rights for a 6-lot straight run (3+3) along a street.',
     ],
   },
   {
     title: 'End game',
     lines: [
-      'Nine built properties in a straight row/column, or all nine lots in a city block, triggers the Final Round — then every player gets one additional turn before final scoring (Squares and Streets).',
+      '9 built properties in a row/column, or a full 3×3 block, triggers the Final Round.',
+      'Every player gets one more turn, then final scoring (Squares & Streets) decides the winner.',
     ],
   },
 ]

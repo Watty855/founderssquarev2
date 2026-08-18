@@ -287,39 +287,7 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
       Object.values(rawInvestorPayout).reduce((a, b) => a + b, 0)
     const investorsProRated = isPropertyRoll && totalInvestorOwed > 0 && totalInvestorPayout < totalInvestorOwed
 
-    const resetIncomeDialog = () =>
-      setIncomeDialogState({
-        open: false,
-        player: null,
-        totalIncome: 0,
-        churchIncomeBonus: 0,
-        churchBonusSourceLabels: [],
-        farmCoopIncomeBonus: 0,
-        farmCoopBonusSourceLabels: [],
-        portAuthorityIncomeBonus: 0,
-        portAuthorityBonusSourceLabels: [],
-        artsCouncilIncomeBonus: 0,
-        artsCouncilBonusSourceLabels: [],
-        tourismOfficeIncomeBonus: 0,
-        tourismOfficeBonusSourceLabels: [],
-        influencersIncomeBonus: 0,
-        influencersBonusSourceLabels: [],
-        newsOutletIncomeBonus: 0,
-        newsOutletBonusSourceLabels: [],
-        mafiaIncomeBonus: 0,
-        mafiaBonusSourceLabels: [],
-        mafiaLevyTotal: 0,
-        regulationBureauIncomeBonus: 0,
-        regulationBureauBonusSourceLabels: [],
-        regulationBureauIncomePenalty: 0,
-        rivalRegulationBureauPlotLabels: [],
-        unionIncomeBonus: 0,
-        unionBonusSourceLabels: [],
-        unionIncomePenalty: 0,
-        rivalUnionPlotLabels: [],
-        hasBuiltPropertiesForIncomeRoll: false,
-        actionInstanceId: null,
-      })
+    const resetIncomeDialog = () => setIncomeDialogState({ ...closedIncomeDialog })
 
     // Founderbots (host-driven, including Play Online) resolve locally then
     // commit_actor_state — the same path as their other card plays. Typed
@@ -524,37 +492,6 @@ export function incomeCancel(s: PlaySession)
   } = s
   const gameState = safeGameState
 
-    setIncomeDialogState({
-      open: false,
-      player: null,
-      totalIncome: 0,
-      churchIncomeBonus: 0,
-      churchBonusSourceLabels: [],
-      farmCoopIncomeBonus: 0,
-      farmCoopBonusSourceLabels: [],
-      portAuthorityIncomeBonus: 0,
-      portAuthorityBonusSourceLabels: [],
-      artsCouncilIncomeBonus: 0,
-      artsCouncilBonusSourceLabels: [],
-      tourismOfficeIncomeBonus: 0,
-      tourismOfficeBonusSourceLabels: [],
-      influencersIncomeBonus: 0,
-      influencersBonusSourceLabels: [],
-      newsOutletIncomeBonus: 0,
-      newsOutletBonusSourceLabels: [],
-      mafiaIncomeBonus: 0,
-      mafiaBonusSourceLabels: [],
-      mafiaLevyTotal: 0,
-      regulationBureauIncomeBonus: 0,
-      regulationBureauBonusSourceLabels: [],
-      regulationBureauIncomePenalty: 0,
-      rivalRegulationBureauPlotLabels: [],
-      unionIncomeBonus: 0,
-      unionBonusSourceLabels: [],
-      unionIncomePenalty: 0,
-      rivalUnionPlotLabels: [],
-      hasBuiltPropertiesForIncomeRoll: false,
-      actionInstanceId: null,
-    })
+    setIncomeDialogState({ ...closedIncomeDialog })
     toast.info('Income card not played')
   }

@@ -15,7 +15,7 @@ interface ActionCardsQuickSheetProps {
 
 /** Bundled PDF + raster page (WebView-safe) of Founders_Square_Action_Cards.pdf */
 const ACTION_CARDS_PDF_URL = '/Founders_Square_Action_Cards.pdf'
-const ACTION_CARDS_SHEET_IMG = '/assets/action-cards-sheet.png'
+const ACTION_CARDS_SHEET_IMG = '/assets/action-cards-sheet.png?v=20260818'
 
 export function ActionCardsQuickSheet({ open, onOpenChange }: ActionCardsQuickSheetProps) {
   return (
@@ -26,7 +26,7 @@ export function ActionCardsQuickSheet({ open, onOpenChange }: ActionCardsQuickSh
             Founders Square — Action Cards
           </DialogTitle>
           <DialogDescription className="text-left text-xs leading-relaxed text-[#9b9bad]">
-            Earn Income, Improve Building, and Against Opponents. Scroll to read the full sheet.
+            Action Wild Card, Earn Income, Improve Building, Against Opponents, and Citywide Crisis. Scroll to read the full sheet.
           </DialogDescription>
         </DialogHeader>
 
@@ -38,7 +38,7 @@ export function ActionCardsQuickSheet({ open, onOpenChange }: ActionCardsQuickSh
           */}
           <img
             src={ACTION_CARDS_SHEET_IMG}
-            alt="Founders Square Action Cards — Earn Income, Improve Building, Against Opponents"
+            alt="Founders Square Action Cards — Action Wild Card, Earn Income, Improve Building, Against Opponents, Citywide Crisis"
             className="mx-auto block h-auto w-full max-w-full"
             draggable={false}
           />

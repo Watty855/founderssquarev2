@@ -239,6 +239,8 @@ export function DialogHost() {
           open={income.open}
           player={income.player}
           totalIncome={income.totalIncome}
+          parkIncomeBonus={income.parkIncomeBonus}
+          parkBonusSourceLabels={income.parkBonusSourceLabels}
           churchIncomeBonus={income.churchIncomeBonus}
           churchBonusSourceLabels={income.churchBonusSourceLabels}
           farmCoopIncomeBonus={income.farmCoopIncomeBonus}

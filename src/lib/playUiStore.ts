@@ -33,6 +33,8 @@ export type IncomeDialogState = {
   open: boolean
   player: Player | null
   totalIncome: number
+  parkIncomeBonus: number
+  parkBonusSourceLabels: string[]
   churchIncomeBonus: number
   churchBonusSourceLabels: string[]
   farmCoopIncomeBonus: number
@@ -66,6 +68,8 @@ export const closedIncomeDialog: IncomeDialogState = {
   open: false,
   player: null,
   totalIncome: 0,
+  parkIncomeBonus: 0,
+  parkBonusSourceLabels: [],
   churchIncomeBonus: 0,
   churchBonusSourceLabels: [],
   farmCoopIncomeBonus: 0,
