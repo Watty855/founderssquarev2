@@ -68,4 +68,22 @@ describe('applyIncomeComplete', () => {
     expect(second.ok).toBe(false)
     expect(first.state.players[1].money).toBe(18)
   })
+
+  it('accepts Action Wild Card as the Income spend', () => {
+    const start = baseState()
+    start.players[1] = {
+      ...start.players[1],
+      actionCards: [{ instanceId: 'wild-1', cardId: 'action-wild-card', cardNumber: 1 }],
+    }
+    const result = applyIncomeComplete(start, {
+      incomeInstanceId: 'wild-1',
+      earnedIncome: 5,
+      totalPropertyIncomeBase: 5,
+      incomeResolution: 'property-roll',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.incomeResolvedThisTurn).toBe(true)
+    expect(result.state.players[1].money).toBeGreaterThanOrEqual(15)
+  })
 })

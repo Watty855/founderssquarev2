@@ -2,7 +2,8 @@
 
 import { Player, Plot } from '@/lib/types'
 import { PropertyCard, ActionCard, CardInstance } from '@/lib/cardTypes'
-import { propertyCards, actionCards, ANCHOR_WILD_CARD_EMULATE_IDS } from '@/lib/cardData'
+import { propertyCards, actionCards, ANCHOR_WILD_CARD_EMULATE_IDS, ACTION_WILD_CARD_ID } from '@/lib/cardData'
+import { getActionWildEmulateCards } from '@/lib/actionWildCard'
 import {
   getCivicVariantShortRule,
   getPropertyHandDisplayName,
@@ -38,6 +39,8 @@ export type PlayCardsOptions = {
   skipTaxBuildPrompt?: boolean
   /** Anchor Wild Card or Civic flex: property id to emulate when starting placement. */
   wildCardEmulatePropertyId?: string
+  /** Action Wild Card: action id this play copies. */
+  wildCardEmulateActionId?: string
   /** Omit info toasts when starting placement early (card click highlights valid lots before Build). */
   suppressPlacementToast?: boolean
 }
@@ -90,7 +93,7 @@ interface PlayerHandProps {
   showNewCardsAnimation?: boolean
   newCardsDrawn?: CardInstance[]
   /** Card-flight system: instances currently mid-flight render at opacity 0 so the fan layout stays stable but the flying overlay is the only thing the player sees moving. */
-  hiddenInstanceIds?: Set<string>
+  hiddenInstanceIds?: ReadonlySet<string>
   /** Whether the underlying decks still have cards. Drives the empty placeholder on each pile. */
   propertyDeckHasCards?: boolean
   actionDeckHasCards?: boolean
@@ -222,6 +225,7 @@ export function PlayerHand({
   const [councilFreezeTargetId, setCouncilFreezeTargetId] = useState<number | null>(null)
   const [wildCardTab, setWildCardTab] = useState<'build' | 'bank'>('build')
   const [wildCardEmulateId, setWildCardEmulateId] = useState<string | null>(null)
+  const [actionWildEmulateId, setActionWildEmulateId] = useState<string | null>(null)
   const [civicVariantId, setCivicVariantId] = useState<string | null>(null)
   const [civicTargetLotKey, setCivicTargetLotKey] = useState<string | null>(null)
 
@@ -243,6 +247,10 @@ export function PlayerHand({
   const actionHandCards = actionCardsList.map((c) => ({ ...c, cardType: 'action' as const }))
 
   const vacantCivicLots = useMemo(() => getVacantCivicLots(plots), [plots])
+  const actionWildChoices = useMemo(
+    () => [...getActionWildEmulateCards()].sort((a, b) => a.name.localeCompare(b.name)),
+    []
+  )
 
   useEffect(() => {
     if (!cardDialog?.open || cardDialog.type !== 'property') return
@@ -264,6 +272,11 @@ export function PlayerHand({
       }
     }
   }, [cardDialog?.open, cardDialog?.instanceId, cardDialog?.type, player?.propertyCards, plots, crossingTheLineActive])
+
+  useEffect(() => {
+    if (!cardDialog?.open || cardDialog.type !== 'action') return
+    setActionWildEmulateId(null)
+  }, [cardDialog?.open, cardDialog?.instanceId, cardDialog?.type])
 
   const handleCardClick = (instanceId: string, type: 'property' | 'action') => {
     if (!handInteractionsActive) return
@@ -349,22 +362,36 @@ export function PlayerHand({
   const handlePlayAction = () => {
     if (!cardDialog) return
     const actionMeta = actionCardsList.find((c) => c.instance.instanceId === cardDialog.instanceId)
-    if (actionMeta?.id === 'city-council-freeze') {
+    const playAs =
+      actionMeta?.id === ACTION_WILD_CARD_ID ? actionWildEmulateId : actionMeta?.id
+    const wildOpts =
+      actionMeta?.id === ACTION_WILD_CARD_ID && actionWildEmulateId
+        ? { wildCardEmulateActionId: actionWildEmulateId }
+        : {}
+    if (playAs === 'city-council-freeze') {
       if (councilFreezeTargetId === null) return
-      onPlayCards(null, [cardDialog.instanceId], [], { councilFreezeTargetId })
+      onPlayCards(null, [cardDialog.instanceId], [], { councilFreezeTargetId, ...wildOpts })
     } else {
-      onPlayCards(null, [cardDialog.instanceId], [])
+      if (actionMeta?.id === ACTION_WILD_CARD_ID && !actionWildEmulateId) return
+      onPlayCards(null, [cardDialog.instanceId], [], Object.keys(wildOpts).length ? wildOpts : undefined)
     }
     setCardDialog(null)
     setCouncilFreezeTargetId(null)
+    setActionWildEmulateId(null)
   }
 
   const handleCouncilFreezeTargetSelect = (targetPlayerId: number) => {
     if (!cardDialog) return
+    const actionMeta = actionCardsList.find((c) => c.instance.instanceId === cardDialog.instanceId)
+    const wildOpts =
+      actionMeta?.id === ACTION_WILD_CARD_ID && actionWildEmulateId
+        ? { wildCardEmulateActionId: actionWildEmulateId }
+        : {}
     setCouncilFreezeTargetId(targetPlayerId)
-    onPlayCards(null, [cardDialog.instanceId], [], { councilFreezeTargetId: targetPlayerId })
+    onPlayCards(null, [cardDialog.instanceId], [], { councilFreezeTargetId: targetPlayerId, ...wildOpts })
     setCardDialog(null)
     setCouncilFreezeTargetId(null)
+    setActionWildEmulateId(null)
   }
 
 
@@ -918,6 +945,7 @@ export function PlayerHand({
           if (!open) {
             setCardDialog(null)
             setCouncilFreezeTargetId(null)
+            setActionWildEmulateId(null)
           }
         }}
       >
@@ -1014,7 +1042,14 @@ export function PlayerHand({
                 )
               )}
               {cardDialog?.type === 'action' && currentCard && (
-                <>Play this action or cash for ${currentCard.bankValue}M</>
+                currentCard.id === ACTION_WILD_CARD_ID ? (
+                  <>
+                    Choose any other action (not Calamity). This card uses that action’s rules, dice, costs, and
+                    timing, then is discarded. Or bank it for ${currentCard.bankValue}M.
+                  </>
+                ) : (
+                  <>Play this action or cash for ${currentCard.bankValue}M</>
+                )
               )}
             </DialogDescription>
           </DialogHeader>
@@ -1350,7 +1385,120 @@ export function PlayerHand({
                 </button>
               </>
             )}
-            {cardDialog?.type === 'action' && currentCard && (
+            {cardDialog?.type === 'action' && currentCard && currentCard.id === ACTION_WILD_CARD_ID && (
+              <>
+                <p style={{ fontSize: 12, color: '#8888a0', marginBottom: 8, lineHeight: 1.45 }}>
+                  Select the action this wild card copies.
+                </p>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: 6,
+                    maxHeight: 220,
+                    overflowY: 'auto',
+                    marginBottom: 8,
+                  }}
+                >
+                  {actionWildChoices.map((ac) => {
+                    const sel = actionWildEmulateId === ac.id
+                    return (
+                      <button
+                        key={ac.id}
+                        type="button"
+                        onClick={() => {
+                          setActionWildEmulateId(ac.id)
+                          setCouncilFreezeTargetId(null)
+                        }}
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          border: sel ? '2px solid #0070cc' : '1px solid rgba(255,255,255,0.12)',
+                          backgroundColor: sel ? 'rgba(0,112,204,0.12)' : 'transparent',
+                          color: '#e8e8f0',
+                          fontSize: 11,
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        {ac.name}
+                      </button>
+                    )
+                  })}
+                </div>
+                {actionWildEmulateId === 'city-council-freeze' && (
+                  <div style={{ marginBottom: 12 }}>
+                    <p style={{ fontSize: 12, color: '#8888a0', marginBottom: 8 }}>Choose a player to target</p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {opponents.map((opp) => (
+                        <button
+                          key={opp.id}
+                          type="button"
+                          onClick={() => handleCouncilFreezeTargetSelect(opp.id)}
+                          style={{
+                            height: 36,
+                            borderRadius: 8,
+                            border:
+                              councilFreezeTargetId === opp.id
+                                ? '2px solid #0070cc'
+                                : '1px solid rgba(255,255,255,0.15)',
+                            backgroundColor: councilFreezeTargetId === opp.id ? 'rgba(0,112,204,0.15)' : 'transparent',
+                            color: '#f0f0f5',
+                            fontSize: 13,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            paddingLeft: 12,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                          }}
+                        >
+                          <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: opp.color }} />
+                          {opp.name}
+                        </button>
+                      ))}
+                    </div>
+                    <p style={{ fontSize: 11, color: '#666680', marginTop: 8, marginBottom: 0 }}>
+                      Selecting a player immediately starts the required die roll.
+                    </p>
+                  </div>
+                )}
+                <button
+                  onClick={handlePlayAction}
+                  disabled={!actionWildEmulateId || actionWildEmulateId === 'city-council-freeze'}
+                  className="btn-ps"
+                  style={{
+                    height: 42,
+                    borderRadius: 10,
+                    backgroundColor:
+                      actionWildEmulateId && actionWildEmulateId !== 'city-council-freeze' ? '#0070cc' : '#333348',
+                    color: '#fff',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    border: '2px solid transparent',
+                    cursor:
+                      !actionWildEmulateId || actionWildEmulateId === 'city-council-freeze'
+                        ? 'not-allowed'
+                        : 'pointer',
+                    opacity: !actionWildEmulateId || actionWildEmulateId === 'city-council-freeze' ? 0.6 : 1,
+                  }}
+                >
+                  {!actionWildEmulateId
+                    ? 'Choose an action to copy'
+                    : actionWildEmulateId === 'city-council-freeze'
+                      ? 'Select target above'
+                      : `Play as ${actionCards.find((c) => c.id === actionWildEmulateId)?.name ?? 'action'}`}
+                </button>
+                <button
+                  onClick={handleCashCard}
+                  style={{ height: 42, borderRadius: 10, backgroundColor: 'transparent', color: '#f0f0f5', fontSize: 14, fontWeight: 500, border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}
+                >
+                  Bank Action Wild Card — ${currentCard.bankValue}M
+                </button>
+              </>
+            )}
+            {cardDialog?.type === 'action' && currentCard && currentCard.id !== ACTION_WILD_CARD_ID && (
               <>
                 {currentCard.id === 'city-council-freeze' && (
                   <div style={{ marginBottom: 12 }}>

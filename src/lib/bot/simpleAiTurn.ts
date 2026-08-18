@@ -1,6 +1,7 @@
 import type { ActionCard, CardInstance, PropertyCard } from '@/lib/cardTypes'
 import type { Player, GameState, Plot } from '@/lib/types'
-import { actionCards, propertyCards, ANCHOR_WILD_CARD_EMULATE_IDS } from '@/lib/cardData'
+import { actionCards, propertyCards, ANCHOR_WILD_CARD_EMULATE_IDS, ACTION_WILD_CARD_ID } from '@/lib/cardData'
+import { isActionWildCard, isValidActionWildEmulateId } from '@/lib/actionWildCard'
 import { isCivicFlexHandCard } from '@/lib/civicFlexProperty'
 import { getAvailableCivicVariantIds } from '@/lib/lotCategory'
 import { resolvePropertyPlacementTemplate } from '@/lib/placementTemplate'
@@ -34,6 +35,7 @@ export type AiPlayOptions = {
   useTaxBuild?: boolean
   housingHighDensity?: boolean
   wildCardEmulatePropertyId?: string
+  wildCardEmulateActionId?: string
   taxBuildActionInstanceId?: string
   councilFreezeTargetId?: number
 }
@@ -150,6 +152,8 @@ export function actionCardKeepScore(cardId: string): number {
   switch (cardId) {
     case 'income':
       return 100
+    case ACTION_WILD_CARD_ID:
+      return 92
     case 'double-income':
       return 95
     case 'investment':
@@ -184,6 +188,20 @@ export function actionCardKeepScore(cardId: string): number {
 function actionCardBankValue(cardId: string): number {
   const card = actionCards.find((c) => c.id === cardId) as ActionCard | undefined
   return card?.bankValue ?? 0
+}
+
+/** Exact card, or Action Wild Card copied as `cardId`. */
+function findHandAction(
+  cp: Player,
+  cardId: string
+): { instanceId: string; options?: AiPlayOptions } | null {
+  const exact = cp.actionCards.find((a) => a.cardId === cardId)
+  if (exact) return { instanceId: exact.instanceId }
+  const wild = cp.actionCards.find((a) => isActionWildCard(a.cardId))
+  if (wild && isValidActionWildEmulateId(cardId)) {
+    return { instanceId: wild.instanceId, options: { wildCardEmulateActionId: cardId } }
+  }
+  return null
 }
 
 /**
@@ -302,10 +320,7 @@ function tryPlayConfrontation(
   const slotsLeft = MAX_TURN_ACTIONS - (gs.turnActionsConsumed ?? 0)
   if (slotsLeft <= 0) return false
 
-  const has = (id: string) => cp.actionCards.find((a) => a.cardId === id)
-
-  // City Council Freeze — freeze whoever is closest to ending the game (must pass a target).
-  const freeze = has('city-council-freeze')
+  const freeze = findHandAction(cp, 'city-council-freeze')
   if (freeze && slotsLeft >= 1) {
     const rivals = gs.players.filter((p) => p.id !== cp.id)
     const threat = [...rivals].sort(
@@ -313,6 +328,7 @@ function tryPlayConfrontation(
     )[0]
     if (threat && endGameProximityScore(gs.plots, threat.id) >= 5) {
       h.handlePlayCards(null, [freeze.instanceId], [], {
+        ...freeze.options,
         councilFreezeTargetId: threat.id,
       })
       return true
@@ -320,7 +336,7 @@ function tryPlayConfrontation(
   }
 
   // Hostile Takeover — only when at least one adjacent target is affordable.
-  const takeover = has('hostile-takeover')
+  const takeover = findHandAction(cp, 'hostile-takeover')
   if (takeover && slotsLeft >= 1) {
     const targets = getTakeoverTargetPlots(gs.plots, cp.id).filter(
       (plot) => cp.money >= hostileTakeoverCashNeeded(plot)
@@ -335,13 +351,13 @@ function tryPlayConfrontation(
       .filter((t) => t.score >= 4)
       .sort((a, b) => b.score - a.score)
     if (scored.length > 0) {
-      h.handlePlayCards(null, [takeover.instanceId], [], undefined)
+      h.handlePlayCards(null, [takeover.instanceId], [], takeover.options)
       return true
     }
   }
 
   // Scandal — hit the strongest active opponent anchor.
-  const scandal = has('scandal')
+  const scandal = findHandAction(cp, 'scandal')
   if (scandal && slotsLeft >= 1) {
     const eligible = getPlotsEligibleForScandal(gs.plots).filter((p) => p.claimedBy !== cp.id)
     if (eligible.length > 0) {
@@ -350,14 +366,14 @@ function tryPlayConfrontation(
         ? eligible.filter((p) => p.claimedBy === human.id)
         : []
       if (preferHuman.length > 0 || eligible.length > 0) {
-        h.handlePlayCards(null, [scandal.instanceId], [], undefined)
+        h.handlePlayCards(null, [scandal.instanceId], [], scandal.options)
         return true
       }
     }
   }
 
   // Police Raid — if any rival owns active Mafia.
-  const raid = has('police-raid-on-mafia')
+  const raid = findHandAction(cp, 'police-raid-on-mafia')
   if (raid && slotsLeft >= 1) {
     const rivalMafia = gs.plots.some(
       (p) =>
@@ -367,13 +383,13 @@ function tryPlayConfrontation(
         p.anchorInfluenceSuppressed !== true
     )
     if (rivalMafia) {
-      h.handlePlayCards(null, [raid.instanceId], [], undefined)
+      h.handlePlayCards(null, [raid.instanceId], [], raid.options)
       return true
     }
   }
 
   // Rezoning — when we can afford success (2 slots) and have a vacant lot + template.
-  const rezoning = has('rezoning')
+  const rezoning = findHandAction(cp, 'rezoning')
   if (
     rezoning &&
     canAttemptRezoning(gs.turnActionsConsumed) &&
@@ -388,27 +404,31 @@ function tryPlayConfrontation(
       const card = propertyCards.find((c) => c.id === template.cardId) as PropertyCard
       const cost = getHousingBuildCost(card, false)
       if (cp.money >= cost) {
-        h.handlePlayCards(null, [rezoning.instanceId], [], undefined)
+        h.handlePlayCards(null, [rezoning.instanceId], [], rezoning.options)
         return true
       }
     }
   }
 
   // Investment / Double Investment — only when we can afford the contribution and have targets.
-  const doubleInvest = has('double-investment')
-  const singleInvest = has('investment')
-  const invest = doubleInvest && cp.money >= 8 ? doubleInvest : singleInvest && cp.money >= 4 ? singleInvest : null
+  const doubleInvest = findHandAction(cp, 'double-investment')
+  const singleInvest = findHandAction(cp, 'investment')
+  const invest =
+    doubleInvest && cp.money >= 8
+      ? { ...doubleInvest, need: 8 }
+      : singleInvest && cp.money >= 4
+        ? { ...singleInvest, need: 4 }
+        : null
   if (invest && slotsLeft >= 1) {
-    const need = invest.cardId === 'double-investment' ? 8 : 4
     const targets = getInvestablePlots(gs.plots, cp.id)
-    if (targets.length > 0 && cp.money >= need && pickInvestmentTarget(gs, cp.id, targets)) {
-      h.handlePlayCards(null, [invest.instanceId], [], undefined)
+    if (targets.length > 0 && cp.money >= invest.need && pickInvestmentTarget(gs, cp.id, targets)) {
+      h.handlePlayCards(null, [invest.instanceId], [], invest.options)
       return true
     }
   }
 
   // Remove Investors — only when at least one own lot's buyouts are affordable.
-  const removeInv = has('remove-investors')
+  const removeInv = findHandAction(cp, 'remove-investors')
   if (removeInv && slotsLeft >= 1) {
     const invested = gs.plots.filter(
       (p) => p.claimedBy === cp.id && (p.investmentStripes?.length ?? 0) > 0
@@ -417,15 +437,15 @@ function tryPlayConfrontation(
       (p) => cp.money >= totalRemoveInvestorsBuyoutMillion(p.investmentStripes)
     )
     if (affordable.length > 0) {
-      h.handlePlayCards(null, [removeInv.instanceId], [], undefined)
+      h.handlePlayCards(null, [removeInv.instanceId], [], removeInv.options)
       return true
     }
   }
 
   // Discard Property Cards — trim junk when hand is bloated.
-  const discardProp = has('discard-property-cards')
+  const discardProp = findHandAction(cp, 'discard-property-cards')
   if (discardProp && slotsLeft >= 1 && cp.propertyCards.length >= 5) {
-    h.handlePlayCards(null, [discardProp.instanceId], [], undefined)
+    h.handlePlayCards(null, [discardProp.instanceId], [], discardProp.options)
     return true
   }
 
@@ -582,18 +602,13 @@ export function playerHasBuiltIncomeProperty(
 function tryPlayIncomeFirst(gs: GameState, cp: Player, h: SimpleAiTurnHandlers): boolean {
   if (gs.incomeResolvedThisTurn === true) return false
   if (!playerHasBuiltIncomeProperty(gs.plots, cp.id)) return false
-  const income = cp.actionCards.find((a) => a.cardId === 'income')
+  const income = findHandAction(cp, 'income')
   if (!income) return false
   const consumed = gs.turnActionsConsumed ?? 0
   const slotsLeft = MAX_TURN_ACTIONS - consumed
   if (slotsLeft <= 0 || turnLimitReached(consumed)) return false
 
-  const doubleInc = cp.actionCards.find((a) => a.cardId === 'double-income')
-  const playDouble = doubleInc != null && consumed + 2 <= MAX_TURN_ACTIONS
-  const actions = playDouble
-    ? [income.instanceId, doubleInc.instanceId]
-    : [income.instanceId]
-  h.handlePlayCards(null, actions, [], undefined)
+  h.handlePlayCards(null, [income.instanceId], [], income.options)
   return true
 }
 
@@ -632,6 +647,15 @@ function tryPlaySafeActionsOrEnd(gs: GameState, cp: Player, h: SimpleAiTurnHandl
     if ((gs.turnActionsConsumed ?? 0) + 1 > MAX_TURN_ACTIONS) continue
     h.handlePlayCards(null, [inst.instanceId], [], undefined)
     return
+  }
+
+  const wild = cp.actionCards.find((a) => isActionWildCard(a.cardId))
+  if (wild && (gs.turnActionsConsumed ?? 0) + 1 <= MAX_TURN_ACTIONS) {
+    const emu = nearOrOverCap ? 'crossing-the-line' : 'draw-2-action-cards'
+    if (isValidActionWildEmulateId(emu)) {
+      h.handlePlayCards(null, [wild.instanceId], [], { wildCardEmulateActionId: emu })
+      return
+    }
   }
 
   // Last resort: bank something rather than ending with a bloated hand and $0 from it.

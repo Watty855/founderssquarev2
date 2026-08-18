@@ -1,4 +1,5 @@
 import type { GameState } from '@/lib/types'
+import { isActionWildCard } from '@/lib/actionWildCard'
 import { MAX_TURN_ACTIONS, replenishCurrentPlayerActionHand } from '@/lib/turnActions'
 import {
   allocateInvestorPayoutsFromOwner,
@@ -21,7 +22,7 @@ export function applyIncomeComplete(state: GameState, params: IncomeCompletePara
   if (!currentPlayer) return { ok: false, error: 'No active player.', code: 'no_player' }
 
   const incomeInst = currentPlayer.actionCards.find((c) => c.instanceId === params.incomeInstanceId)
-  if (!incomeInst || incomeInst.cardId !== 'income') {
+  if (!incomeInst || (incomeInst.cardId !== 'income' && !isActionWildCard(incomeInst.cardId))) {
     return { ok: false, error: 'Income card not in hand.', code: 'missing_income' }
   }
 

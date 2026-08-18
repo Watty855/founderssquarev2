@@ -1,6 +1,7 @@
 'use client'
 
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -10,7 +11,12 @@ import {
   type DragEvent,
   type ReactNode,
 } from 'react'
-import { Plot, Player, COLUMNS } from '@/lib/types'
+import { BoardTableChrome } from '@/components/game/BoardTableChrome'
+import { BoardActionStripHost } from '@/components/game/BoardActionStripHost'
+import { Toaster as BoardDockToaster } from 'sonner'
+import { FS_BOARD_TOASTER_ID } from '@/lib/fsGameToast'
+import type { BoardPlayerColor } from '@/lib/boardSelectors'
+import { Plot, COLUMNS } from '@/lib/types'
 import { propertyCards } from '@/lib/cardData'
 import { coordKeySet, plotCoordKey } from '@/lib/boardIndex'
 import {
@@ -46,7 +52,7 @@ export interface NamedStreet {
 
 interface GameBoardProps {
   plots: Plot[]
-  players: Player[]
+  players: BoardPlayerColor[]
   onPlotClaim: (row: number, col: string) => void
   placementMode?: {
     active: boolean
@@ -63,16 +69,6 @@ interface GameBoardProps {
   namedStreets?: NamedStreet[]
   /** When true, draws the named-region overlays + labels on top of the grid. */
   showNamedRegions?: boolean
-  /** Shown on even rounds; laid out on board rows 1–2 (Mountain border strip + first city row). */
-  evenRoundBanner?: ReactNode
-  /** Final-round turn strip; laid out around board rows 16–18 (mid–lower board, near horizontal ave. 17). */
-  finalRoundBanner?: ReactNode
-  /** Toast dock — top of board (does not cover city lots). */
-  boardDockHud?: ReactNode
-  /** “Action required” strip below row 21, columns C–S. */
-  boardActionStrip?: ReactNode
-  /** Opening pro-tip panel (grid region F4–P18). */
-  openingProTip?: ReactNode
   /** When the player taps a vacant lot without property placement active (claiming is only via card build). */
   onVacantLotHint?: () => void
   /** Phone / compact chrome — smaller terrain strips, hide masthead, pixel-scaled lot labels. */
@@ -157,7 +153,7 @@ function fitBoardDimensions(containerW: number, containerH: number): { w: number
   return { w: heightLed * BOARD_ASPECT, h: heightLed }
 }
 
-export function GameBoard({
+function GameBoardImpl({
   plots,
   players,
   onPlotClaim,
@@ -168,11 +164,6 @@ export function GameBoard({
   namedSquares,
   namedStreets,
   showNamedRegions,
-  evenRoundBanner,
-  finalRoundBanner,
-  boardDockHud,
-  boardActionStrip,
-  openingProTip,
   onVacantLotHint,
   compact = false,
 }: GameBoardProps) {
@@ -289,7 +280,7 @@ export function GameBoard({
   )
   const winningPlotKeys = useMemo(() => coordKeySet(winningSequence), [winningSequence])
   const playerById = useMemo(() => {
-    const m = new Map<number, Player>()
+    const m = new Map<number, BoardPlayerColor>()
     for (const p of players) m.set(p.id, p)
     return m
   }, [players])
@@ -493,9 +484,7 @@ export function GameBoard({
           alignItems: 'center',
           justifyContent: 'center',
           minHeight: 0,
-          ...(boardDockHud != null || boardActionStrip != null
-            ? { paddingBottom: boardActionStrip != null ? 44 : 8 }
-            : {}),
+          paddingBottom: 44,
         }}
       >
         <div
@@ -693,120 +682,101 @@ export function GameBoard({
             : null}
         </div>
 
-        {evenRoundBanner != null ||
-        finalRoundBanner != null ||
-        boardDockHud != null ||
-        boardActionStrip != null ||
-        openingProTip != null ? (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'grid',
+            gridTemplateColumns: colTemplate,
+            gridTemplateRows: rowTemplate,
+            pointerEvents: 'none',
+            zIndex: 38,
+            borderRadius: 16,
+            overflow: 'visible',
+          }}
+        >
+          <BoardTableChrome />
           <div
+            aria-label="Game activity toasts"
             style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'grid',
-              gridTemplateColumns: colTemplate,
-              gridTemplateRows: rowTemplate,
+              gridColumn: `${COLUMNS.indexOf('C') + 1} / ${COLUMNS.indexOf('S') + 2}`,
+              gridRow: '2 / 4',
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'center',
+              padding: '2px 4px 0',
+              zIndex: 94,
+              overflow: 'visible',
               pointerEvents: 'none',
-              zIndex: 38,
-              borderRadius: 16,
+            }}
+          >
+            <div style={{ pointerEvents: 'auto', width: '100%', maxWidth: '100%' }}>
+              <div className="fs-board-toast-anchor" aria-label="Game activity">
+                <BoardDockToaster
+                  id={FS_BOARD_TOASTER_ID}
+                  theme="dark"
+                  position="top-center"
+                  offset={8}
+                  visibleToasts={4}
+                  expand
+                  richColors
+                  toastOptions={{
+                    classNames: { toast: 'fs-board-dock-toast' },
+                    style: {
+                      fontSize: 13,
+                      lineHeight: 1.35,
+                      padding: '11px 14px',
+                      minHeight: 46,
+                      background: 'rgba(10, 14, 24, 0.94)',
+                      border: '1px solid rgba(255,255,255,0.12)',
+                      color: 'rgba(248,250,252,0.95)',
+                    },
+                  }}
+                  style={
+                    {
+                      '--normal-bg': 'rgba(14, 18, 30, 0.96)',
+                      '--normal-border': 'rgba(255,255,255,0.14)',
+                      '--success-bg': 'rgba(12, 40, 28, 0.95)',
+                      '--success-border': 'rgba(74, 222, 128, 0.35)',
+                      '--error-bg': 'rgba(60, 15, 20, 0.94)',
+                      '--error-border': 'rgba(248, 113, 113, 0.45)',
+                      '--info-bg': 'rgba(12, 26, 48, 0.95)',
+                      '--info-border': 'rgba(96, 165, 250, 0.4)',
+                      '--warning-bg': 'rgba(55, 40, 8, 0.94)',
+                      '--warning-border': 'rgba(251, 191, 36, 0.45)',
+                    } as CSSProperties
+                  }
+                />
+              </div>
+            </div>
+          </div>
+          <div
+            aria-label="Turn and card-play status"
+            style={{
+              gridColumn: `${COLUMNS.indexOf('C') + 1} / ${COLUMNS.indexOf('S') + 2}`,
+              gridRow: '21 / 22',
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'stretch',
+              padding: 0,
+              zIndex: 95,
               overflow: 'visible',
             }}
           >
-            {evenRoundBanner != null ? (
-              <div
-                style={{
-                  gridColumn: '1 / -1',
-                  gridRow: '18 / 19',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '0 8px',
-                  zIndex: 41,
-                }}
-              >
-                {evenRoundBanner}
-              </div>
-            ) : null}
-            {finalRoundBanner != null ? (
-              <div
-                style={{
-                  gridColumn: '1 / -1',
-                  gridRow: '16 / 19',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '0 6px',
-                  zIndex: 39,
-                }}
-              >
-                {finalRoundBanner}
-              </div>
-            ) : null}
-            {boardDockHud != null ? (
-              <div
-                aria-label="Game activity toasts"
-                style={{
-                  gridColumn: `${COLUMNS.indexOf('C') + 1} / ${COLUMNS.indexOf('S') + 2}`,
-                  gridRow: '2 / 4',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  justifyContent: 'center',
-                  padding: '2px 4px 0',
-                  zIndex: 94,
-                  overflow: 'visible',
-                  pointerEvents: 'none',
-                }}
-              >
-                <div style={{ pointerEvents: 'auto', width: '100%', maxWidth: '100%' }}>
-                  {boardDockHud}
-                </div>
-              </div>
-            ) : null}
-            {openingProTip != null ? (
-              <div
-                aria-label="Opening pro-tip"
-                style={{
-                  gridColumn: `${COLUMNS.indexOf('F') + 1} / ${COLUMNS.indexOf('P') + 2}`,
-                  gridRow: '4 / 19',
-                  display: 'flex',
-                  alignItems: 'stretch',
-                  justifyContent: 'stretch',
-                  padding: '1px',
-                  zIndex: 46,
-                  overflow: 'hidden',
-                  pointerEvents: 'auto',
-                }}
-              >
-                {openingProTip}
-              </div>
-            ) : null}
-            {boardActionStrip != null ? (
-              <div
-                aria-label="Turn and card-play status"
-                style={{
-                  gridColumn: `${COLUMNS.indexOf('C') + 1} / ${COLUMNS.indexOf('S') + 2}`,
-                  gridRow: '21 / 22',
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  justifyContent: 'stretch',
-                  padding: 0,
-                  zIndex: 95,
-                  overflow: 'visible',
-                }}
-              >
-                <div
-                  style={{
-                    pointerEvents: 'auto',
-                    width: '100%',
-                    transform: 'translateY(100%)',
-                  }}
-                >
-                  {boardActionStrip}
-                </div>
-              </div>
-            ) : null}
+            <div
+              style={{
+                pointerEvents: 'auto',
+                width: '100%',
+                transform: 'translateY(100%)',
+              }}
+            >
+              <BoardActionStripHost />
+            </div>
           </div>
-        ) : null}
+        </div>
       </div>
     </div>
   )
 }
+
+export const GameBoard = memo(GameBoardImpl)

@@ -8,6 +8,7 @@ export type PlayCardsOptionsPayload = {
   taxBuildActionInstanceId?: string
   skipTaxBuildPrompt?: boolean
   wildCardEmulatePropertyId?: string
+  wildCardEmulateActionId?: string
   suppressPlacementToast?: boolean
 }
 

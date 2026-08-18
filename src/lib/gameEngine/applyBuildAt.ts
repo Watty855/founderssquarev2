@@ -1,5 +1,6 @@
 import type { GameState } from '@/lib/types'
 import { propertyCards } from '@/lib/cardData'
+import { isActionWildCard } from '@/lib/actionWildCard'
 import type { PropertyCard } from '@/lib/cardTypes'
 import { isCivicFlexHandCard } from '@/lib/civicFlexProperty'
 import { resolvePropertyPlacementTemplate } from '@/lib/placementTemplate'
@@ -73,7 +74,8 @@ export function applyBuildAt(state: GameState, params: BuildAtParams): ApplyGame
     ? currentPlayer.actionCards.find((c) => c.instanceId === taxBuildActionInstanceId)
     : undefined
   const usingTaxBuild =
-    taxBuildActionInstanceId != null && taxBuildCardInstance?.cardId === 'build-with-tax-dollars'
+    taxBuildActionInstanceId != null &&
+    (taxBuildCardInstance?.cardId === 'build-with-tax-dollars' || isActionWildCard(taxBuildCardInstance?.cardId))
   const buildCost = usingTaxBuild ? Math.ceil(fullBuildCost / 2) : fullBuildCost
 
   if (currentPlayer.money < buildCost) {

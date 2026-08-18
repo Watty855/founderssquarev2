@@ -29,7 +29,7 @@ describe('AI action-hand discard / bank', () => {
       { instanceId: 'a2', cardId: 'draw-2-action-cards' },
       { instanceId: 'a3', cardId: 'investment' },
       { instanceId: 'a4', cardId: 'draw-2-action-cards' },
-      { instanceId: 'a5', cardId: 'double-income' },
+      { instanceId: 'a5', cardId: 'action-wild-card' },
       { instanceId: 'a6', cardId: 'taxation' },
       { instanceId: 'a7', cardId: 'rezoning' },
       { instanceId: 'a8', cardId: 'crossing-the-line' },
@@ -39,6 +39,7 @@ describe('AI action-hand discard / bank', () => {
     expect(ids).toHaveLength(1)
     expect(ids[0]).toMatch(/^a[24]$/) // one of the Draw 2s preferred over Income/Investment
     expect(actionCardKeepScore('draw-2-action-cards')).toBeLessThan(actionCardKeepScore('income'))
+    expect(actionCardKeepScore('action-wild-card')).toBeGreaterThan(actionCardKeepScore('draw-2-action-cards'))
   })
 
   it('returns exactly discardCount ids and never more than the hand', () => {

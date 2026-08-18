@@ -16,6 +16,9 @@ export const ANCHOR_WILD_CARD_EMULATE_IDS = [
 ] as const
 
 /** Civic flex cards may assume these identities on the board (`plot.builtProperty` becomes this id). */
+/** Hand action that copies any other playable action card. */
+export const ACTION_WILD_CARD_ID = 'action-wild-card'
+
 export const CIVIC_VARIANT_PROPERTY_IDS = [
   'city-hall',
   'courthouse',
@@ -1158,18 +1161,18 @@ export const actionCards: ActionCard[] = [
       'Pick a property card in your hand (not an anchor), then a vacant city lot. Roll the die: 5–6 approves; +1 influence makes 4–6 approve; +2 makes 3–6 approve. On success, build that property there for its build cost (counts as 2 actions: the Rezoning play + the build). A lower total discards Rezoning for 1 action and the build fails on that lot.',
   },
   {
-    id: 'double-income',
+    id: ACTION_WILD_CARD_ID,
     type: 'action',
-    category: 'financial',
-    name: 'Double Income',
-    description: 'Double the payout from Income when played together — bank only if played alone',
+    category: 'social',
+    name: 'Action Wild Card',
+    description: 'Play as any action card',
     buildCost: 0,
     buildIncome: 0,
-    bankValue: 5,
-    copies: 8,
+    bankValue: 6,
+    copies: 4,
     diceRequired: false,
     actions:
-      'Play together with Income in the same play (before the die roll); it doubles the final Income payout after the roll. Playing Double Income alone does not run Income — you may bank it for its printed cash value only or cancel.',
+      'Choose any other action card (not Calamity) when you play this. It uses that action’s rules, dice, costs, and timing, then this card is discarded. You may bank it for $6M instead.',
   },
   {
     id: 'hostile-takeover',
