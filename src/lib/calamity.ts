@@ -17,7 +17,7 @@ export const CALAMITY_LOSS_PERCENT: Record<CalamityFace, number> = {
 }
 
 /** Minimum full table rounds between Calamity events (inclusive gap from last fire). */
-export const CALAMITY_MIN_ROUNDS_BETWEEN = 6
+export const CALAMITY_MIN_ROUNDS_BETWEEN = 7
 
 export const CALAMITY_PRE_ROLL_INSTRUCTION =
   'Roll the dice to assess the severity of your calamity. 1 is less severe and 6 is more severe.'
@@ -175,7 +175,7 @@ function drawNonCalamityReplacements(
 
 /**
  * Split a just-drawn action batch: at most one Calamity fires (and only when the
- * 6-round gap has elapsed). Extra or too-soon copies are buried back into the
+ * 7-round gap has elapsed). Extra or too-soon copies are buried back into the
  * deck and replaced with non-Calamity cards so the founder still gets their draw.
  */
 export function resolveCalamityDraw(

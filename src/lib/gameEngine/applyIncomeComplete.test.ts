@@ -86,4 +86,19 @@ describe('applyIncomeComplete', () => {
     expect(result.state.incomeResolvedThisTurn).toBe(true)
     expect(result.state.players[1].money).toBeGreaterThanOrEqual(15)
   })
+
+  it('applies one stacked income tax per Income and leaves remaining assessments', () => {
+    const start = baseState()
+    start.pendingIncomeTaxPlayerIds = [1, 1]
+    const result = applyIncomeComplete(start, {
+      incomeInstanceId: 'inc-1',
+      earnedIncome: 8,
+      totalPropertyIncomeBase: 8,
+      incomeResolution: 'property-roll',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.state.players[1].money).toBe(14)
+    expect(result.state.pendingIncomeTaxPlayerIds).toEqual([1])
+  })
 })

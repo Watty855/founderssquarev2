@@ -7,6 +7,8 @@ import {
 } from '@/lib/partyBoardView'
 import { parsePartyGameState } from '@/lib/partyBoardSync'
 import { applyEndTurn, applyAnimationFlagsClear } from '@/lib/gameEngine/applyEndTurn'
+import { applyEndGameDecision } from '@/lib/gameEngine/applyEndGameDecision'
+import { endGameOfferEvents } from '@/lib/gameEngine/statePatches'
 import { attachUndoSnapshotIfTurnAction } from '@/lib/undoLastAction'
 import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
@@ -99,6 +101,18 @@ export function applyGameAction(
 ): ApplyGameActionResult {
   if (!state.isSetupComplete) {
     return { ok: false, error: 'Game not started.', code: 'not_started' }
+  }
+
+  if (
+    state.pendingEndGameDeclaration &&
+    action.type !== 'end_game_decision' &&
+    action.type !== 'animation_flags_clear'
+  ) {
+    return {
+      ok: false,
+      error: 'Declare the endgame or continue play first.',
+      code: 'endgame_pending',
+    }
   }
 
   switch (action.type) {
@@ -262,6 +276,7 @@ export function applyGameAction(
             negated: resolved.negated,
             plotLabel: resolved.plotLabel,
           },
+          ...endGameOfferEvents(state, resolved.state),
         ],
       })
     }
@@ -306,6 +321,12 @@ export function applyGameAction(
           },
         ],
       })
+    }
+
+    case 'end_game_decision': {
+      const turnErr = assertActorTurn(state, ctx)
+      if (turnErr) return turnErr
+      return applyEndGameDecision(state, action.declare)
     }
 
     case 'play_cards':

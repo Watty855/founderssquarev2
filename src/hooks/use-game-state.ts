@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 
+/** Trailing write so play clicks are not blocked by JSON.stringify + localStorage. */
+const PERSIST_DEBOUNCE_MS = 400
+
 export function useGameState<T>(
   key: string,
   initialValue: T,
@@ -19,6 +22,29 @@ export function useGameState<T>(
   })
 
   const isInitialMount = useRef(true)
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const writePersist = useCallback(
+    (value: T) => {
+      if (!persist) return
+      try {
+        localStorage.setItem(key, JSON.stringify(value))
+      } catch (e) {
+        console.warn('Failed to persist game state:', e)
+      }
+    },
+    [key, persist]
+  )
+
+  const flushPersist = useCallback(() => {
+    if (persistTimerRef.current != null) {
+      clearTimeout(persistTimerRef.current)
+      persistTimerRef.current = null
+    }
+    writePersist(stateRef.current)
+  }, [writePersist])
 
   useEffect(() => {
     if (!persist) return
@@ -26,16 +52,30 @@ export function useGameState<T>(
       isInitialMount.current = false
       return
     }
-    try {
-      localStorage.setItem(key, JSON.stringify(state))
-    } catch (e) {
-      console.warn('Failed to persist game state:', e)
+    if (persistTimerRef.current != null) clearTimeout(persistTimerRef.current)
+    persistTimerRef.current = setTimeout(() => {
+      persistTimerRef.current = null
+      writePersist(stateRef.current)
+    }, PERSIST_DEBOUNCE_MS)
+  }, [key, state, persist, writePersist])
+
+  useEffect(() => {
+    if (!persist) return
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') flushPersist()
     }
-  }, [key, state, persist])
+    window.addEventListener('pagehide', flushPersist)
+    document.addEventListener('visibilitychange', onHide)
+    return () => {
+      flushPersist()
+      window.removeEventListener('pagehide', flushPersist)
+      document.removeEventListener('visibilitychange', onHide)
+    }
+  }, [persist, flushPersist])
 
   const setState = useCallback((valueOrUpdater: T | ((current: T) => T)) => {
     if (typeof valueOrUpdater === 'function') {
-      setStateInternal(prev => {
+      setStateInternal((prev) => {
         const updater = valueOrUpdater as (current: T) => T
         return updater(prev)
       })

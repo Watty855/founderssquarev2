@@ -52,6 +52,7 @@ export type GameHandlerBag = {
   handleUndoLastActionCancel: () => void
   abortTaxBuildPrompt: () => void
   setUndoActionDialogOpen: (open: boolean) => void
+  handleEndGameDecision: (declare: boolean) => void
 }
 
 const noop = () => {}
@@ -90,6 +91,7 @@ const bag: GameHandlerBag = {
   handleUndoLastActionCancel: noop,
   abortTaxBuildPrompt: noop,
   setUndoActionDialogOpen: noop,
+  handleEndGameDecision: noop,
 }
 
 export function setGameHandlerBag(next: Partial<GameHandlerBag>) {

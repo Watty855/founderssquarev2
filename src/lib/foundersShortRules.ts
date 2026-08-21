@@ -9,7 +9,7 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
   {
     title: 'Goal',
     lines: [
-      'Build properties, play action cards, and collect income. Win by timing the Final Round and out-scoring rivals.',
+      'Build properties, play action cards, and collect income. Win by timing the endgame and out-scoring rivals.',
     ],
   },
   {
@@ -41,7 +41,7 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
   {
     title: 'Calamity',
     lines: [
-      'Plays itself the instant it’s drawn — at most once every 6 rounds.',
+      'Plays itself the instant it’s drawn — at most once every 7 rounds.',
       'Every founder rolls in turn order starting with the drawer: lose 5–30% of cash (5% per pip). Cannot be overturned.',
     ],
   },
@@ -55,8 +55,9 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
   {
     title: 'End game',
     lines: [
-      '9 built properties in a row/column, or a full 3×3 block, triggers the Final Round.',
-      'Every player gets one more turn, then final scoring (Squares & Streets) decides the winner.',
+      '12 adjacent built properties (including across a street) lets that founder declare the endgame.',
+      'Declaring gives every player — including the declarer — one more turn, then scoring.',
+      'They may defer up to 4 extra turns; if they never declare, the game ends at the close of the 4th.',
     ],
   },
 ]

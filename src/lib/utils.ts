@@ -2,7 +2,7 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { propertyCards } from './cardData'
 import type { PropertyCard } from './cardTypes'
-import { isCityBuildingCell } from './boardAdjacency'
+import { getOrthogonalCityNeighborsIncludingStreetSpan, isCityBuildingCell } from './boardAdjacency'
 import { buildPlotIndex, getPlotAt } from './boardIndex'
 import {
   getCityBlockBounds,
@@ -40,108 +40,96 @@ const STREET_PATTERN_ROWS: readonly number[] = [2, 4, 6, 8, 10, 12, 14, 16, 18, 
 /** Non-anchor cols that a 6-lot vertical Street pattern may run along. */
 const STREET_PATTERN_COLS: readonly string[] = ['B', 'D', 'F', 'H', 'J', 'L', 'N', 'P', 'R', 'T']
 
+export const END_GAME_ADJACENT_THRESHOLD = 12
+export const END_GAME_MAX_DEFER_TURNS = 4
+
 export interface WinningSequence {
-  /** The 9 lots that triggered the Final Round (city block or straight-line run). */
+  /** The connected cluster that unlocked (or declared) the endgame. */
   plots: Array<{ row: number; col: string }>
-  /** Founder id of the player who triggered the end of the game. */
+  /** Founder id of the player who holds the cluster. */
   triggeredByPlayerId: number
-  /** How the Final Round was triggered. */
-  kind?: 'city-block' | 'straight-line'
+  kind?: 'adjacent-cluster'
 }
 
-function ownedBuiltPlot(
-  plots: Plot[],
-  row: number,
-  col: string,
-  index?: Map<string, number>
-): { ownerId: number } | null {
-  const p = getPlotAt(plots, col, row, index)
-  if (!p || p.type !== 'city' || !p.builtProperty || p.claimedBy === undefined) return null
-  return { ownerId: p.claimedBy }
+export interface AdjacentCluster {
+  ownerPlayerId: number
+  plots: Array<{ row: number; col: string }>
 }
 
-/** Fully built+owned 3×3 city block — one of the two Final Round triggers. */
-function checkForCompleteCityBlockTrigger(plots: Plot[]): WinningSequence | null {
-  const squares = findCompleteSquares(plots)
-  if (squares.length === 0) return null
-  const first = squares[0]
-  return {
-    plots: first.lots,
-    triggeredByPlayerId: first.ownerPlayerId,
-    kind: 'city-block',
-  }
+function lotKey(row: number, col: string): string {
+  return `${col}${row}`
 }
 
-/**
- * Nine built lots in a straight line (same row or same column), treating street cells as gaps
- * that still keep the line continuous (3+3+3 across two streets qualifies).
- */
-function checkForNineInAStraightLine(plots: Plot[]): WinningSequence | null {
+/** Largest orthogonally connected group of built lots owned by `playerId` (streets do not break adjacency). */
+export function largestOwnedAdjacentCluster(plots: Plot[], playerId: number): AdjacentCluster | null {
   const index = buildPlotIndex(plots)
-  const cityRows: number[] = []
-  for (let r = 2; r <= 20; r++) {
-    if (!STREET_ROWS.has(r)) cityRows.push(r)
+  const ownedKeys = new Set<string>()
+  const owned: Array<{ row: number; col: string }> = []
+  for (const p of plots) {
+    if (p.type !== 'city' || !p.builtProperty || p.claimedBy !== playerId) continue
+    if (!isCityBuildingCell(p.row, p.col)) continue
+    const key = lotKey(p.row, p.col)
+    ownedKeys.add(key)
+    owned.push({ row: p.row, col: p.col })
   }
-  const cityCols = COLUMNS.filter((c) => !STREET_COL_INDICES.has(COLUMNS.indexOf(c)) && c !== 'A' && c !== 'U')
+  if (owned.length === 0) return null
 
-  for (const row of cityRows) {
-    const line = cityCols
-      .filter((col) => isCityBuildingCell(row, col))
-      .map((col) => ({ row, col, owner: ownedBuiltPlot(plots, row, col, index)?.ownerId }))
-    let runStart = 0
-    while (runStart < line.length) {
-      const owner = line[runStart].owner
-      if (owner === undefined) {
-        runStart += 1
-        continue
+  const visited = new Set<string>()
+  let best: Array<{ row: number; col: string }> = []
+
+  for (const start of owned) {
+    const startKey = lotKey(start.row, start.col)
+    if (visited.has(startKey)) continue
+    const stack = [start]
+    const component: Array<{ row: number; col: string }> = []
+    visited.add(startKey)
+    while (stack.length > 0) {
+      const cur = stack.pop()!
+      component.push(cur)
+      for (const n of getOrthogonalCityNeighborsIncludingStreetSpan(cur.row, cur.col)) {
+        const nk = lotKey(n.row, n.col)
+        if (visited.has(nk) || !ownedKeys.has(nk)) continue
+        visited.add(nk)
+        if (getPlotAt(plots, n.col, n.row, index)) stack.push({ row: n.row, col: n.col })
       }
-      let runEnd = runStart + 1
-      while (runEnd < line.length && line[runEnd].owner === owner) runEnd += 1
-      if (runEnd - runStart >= 9) {
-        return {
-          plots: line.slice(runStart, runStart + 9).map(({ row: r, col }) => ({ row: r, col })),
-          triggeredByPlayerId: owner,
-          kind: 'straight-line',
-        }
-      }
-      runStart = runEnd
     }
+    if (component.length > best.length) best = component
   }
 
-  for (const col of cityCols) {
-    const line = cityRows
-      .filter((row) => isCityBuildingCell(row, col))
-      .map((row) => ({ row, col, owner: ownedBuiltPlot(plots, row, col, index)?.ownerId }))
-    let runStart = 0
-    while (runStart < line.length) {
-      const owner = line[runStart].owner
-      if (owner === undefined) {
-        runStart += 1
-        continue
-      }
-      let runEnd = runStart + 1
-      while (runEnd < line.length && line[runEnd].owner === owner) runEnd += 1
-      if (runEnd - runStart >= 9) {
-        return {
-          plots: line.slice(runStart, runStart + 9).map(({ row, col: c }) => ({ row, col: c })),
-          triggeredByPlayerId: owner,
-          kind: 'straight-line',
-        }
-      }
-      runStart = runEnd
-    }
-  }
-
-  return null
+  return { ownerPlayerId: playerId, plots: best }
 }
 
 /**
- * Final Round trigger: a founder completes nine built properties in a straight line (row/column,
- * streets do not break the line) OR fully owns a 3×3 city block. Same aftermath either way —
- * every player then gets one additional turn.
+ * Endgame unlock: a founder owns 12+ built lots in one orthogonally adjacent cluster
+ * (including across a single street). Does not start the Final Round by itself.
  */
-export function checkForNineSequentialProperties(plots: Plot[]): WinningSequence | null {
-  return checkForCompleteCityBlockTrigger(plots) ?? checkForNineInAStraightLine(plots)
+export function checkForTwelveAdjacentProperties(
+  plots: Plot[],
+  preferPlayerId?: number
+): WinningSequence | null {
+  const ownerIds = new Set<number>()
+  for (const p of plots) {
+    if (p.claimedBy != null && p.builtProperty) ownerIds.add(p.claimedBy)
+  }
+  let best: AdjacentCluster | null = null
+  for (const id of ownerIds) {
+    const cluster = largestOwnedAdjacentCluster(plots, id)
+    if (!cluster || cluster.plots.length < END_GAME_ADJACENT_THRESHOLD) continue
+    if (preferPlayerId != null && id === preferPlayerId) {
+      return {
+        plots: cluster.plots,
+        triggeredByPlayerId: id,
+        kind: 'adjacent-cluster',
+      }
+    }
+    if (!best || cluster.plots.length > best.plots.length) best = cluster
+  }
+  if (!best) return null
+  return {
+    plots: best.plots,
+    triggeredByPlayerId: best.ownerPlayerId,
+    kind: 'adjacent-cluster',
+  }
 }
 
 // ----- End-game bonus detection: Squares (entire 3×3 city blocks) and Streets (3+3 lines) -----

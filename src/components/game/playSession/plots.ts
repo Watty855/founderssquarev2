@@ -231,16 +231,15 @@ export function plotSelect(s: PlaySession, row: number, col: string)
         taxBuildActionInstanceId: undefined,
         wildCardEmulatePropertyId: undefined,
       })
-      if (result.state.endGameTriggered && !current.endGameTriggered) {
+      if (result.state.pendingEndGameDeclaration && !current.pendingEndGameDeclaration) {
         const triggererName =
-          current.players.find((p) => p.id === result.state.endGameTriggerPlayerId)?.name ?? 'A founder'
+          current.players.find((p) => p.id === result.state.pendingEndGameDeclaration?.playerId)?.name ??
+          'A founder'
         setTimeout(() => {
-          toast.success(
-            `${triggererName} completed nine properties in a row or a city block — Final Round! Each founder gets one more turn.`
-          )
+          toast.info(`${triggererName} has 12 adjacent properties and may declare the endgame.`)
         }, 600)
       }
-      if (turnLimitReached(result.state.turnActionsConsumed)) {
+      if (turnLimitReached(result.state.turnActionsConsumed) && !result.state.pendingEndGameDeclaration) {
         setTimeout(() => {
           getGameHandlers().handleEndTurn()
         }, 0)

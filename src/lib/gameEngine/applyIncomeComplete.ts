@@ -8,6 +8,11 @@ import {
   getMafiaLevyForIncomePlayer,
 } from '@/lib/utils'
 import type { ApplyGameActionResult } from '@/lib/onlineGameActions'
+import {
+  consumeOnePendingIncomeTax,
+  incomeTaxLevyMillion,
+  pendingIncomeTaxCount,
+} from '@/lib/cityTax'
 
 export type IncomeCompleteParams = {
   incomeInstanceId: string
@@ -37,8 +42,8 @@ export function applyIncomeComplete(state: GameState, params: IncomeCompletePara
   }
 
   const ownerId = currentPlayer.id
-  const pendingTax = (state.pendingIncomeTaxPlayerIds ?? []).includes(ownerId)
-  const levy = pendingTax ? Math.floor(params.totalPropertyIncomeBase * 0.5) : 0
+  const pendingTax = pendingIncomeTaxCount(state.pendingIncomeTaxPlayerIds, ownerId) > 0
+  const levy = pendingTax ? incomeTaxLevyMillion(params.totalPropertyIncomeBase) : 0
   const isPropertyRoll = params.incomeResolution === 'property-roll'
 
   const { payoutByPlayerId } = isPropertyRoll
@@ -86,7 +91,7 @@ export function applyIncomeComplete(state: GameState, params: IncomeCompletePara
   const newTurnActionsConsumed = (state.turnActionsConsumed ?? 0) + actionsPlayed
 
   const nextPendingTax = pendingTax
-    ? (state.pendingIncomeTaxPlayerIds ?? []).filter((id) => id !== ownerId)
+    ? consumeOnePendingIncomeTax(state.pendingIncomeTaxPlayerIds, ownerId)
     : (state.pendingIncomeTaxPlayerIds ?? [])
 
   let newState: GameState = {

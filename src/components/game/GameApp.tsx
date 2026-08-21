@@ -11,16 +11,6 @@ import {
 import { useGameState } from '@/hooks/use-game-state'
 import { Player, Plot, GameState, PlayerScore } from '@/lib/types'
 import { attachUndoSnapshotIfTurnAction, canUndoLastAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
-import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
-import { applyEndTurn } from '@/lib/gameEngine/applyEndTurn'
-import { applyBankActionCards } from '@/lib/gameEngine/applyBankAction'
-import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
-import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
-import {
-  buildEndGameTriggerPatch,
-  applyFinalRoundCountdown,
-  clearCouncilFreezeIfEndingPlayer,
-} from '@/lib/gameEngine/statePatches'
 import { createInitialBoard } from '@/lib/boardData'
 import { createActionDeck, createPropertyDeck, drawCards, drawFromDeckWithDiscardReshuffle, shuffleDeck } from '@/lib/deckUtils'
 import { GameSetupWizard } from '@/components/game/GameSetupWizard'
@@ -446,6 +436,7 @@ function AppInner() {
     handleBoardPlotSelect: () => {},
     handleRezoningPropertySelect: () => {},
     handleRezoningHousingDensity: () => {},
+    handleEndGameDecision: () => {},
   })
   const aiUiRef = useRef<SimpleAiTurnUi | null>(null)
   const sessionRef = useRef<PlaySession>(null as unknown as PlaySession)
@@ -511,18 +502,29 @@ function AppInner() {
   const calamityCommitInFlightRef = useRef(false)
 
   onBoardFxRef.current = (fx: BoardFx) => {
-    if (fx.sound === 'construction') playConstructionSound()
-    else if (fx.sound === 'anchor') playAnchorDropSound()
-    else if (fx.sound === 'income') playIncomeSound()
-    else if (fx.sound === 'boo') playCrowdBooSound()
-    else if (fx.sound === 'cheer') playCrowdCheerSound()
-    else if (fx.sound === 'dwindle') playInfluenceDwindleSound()
-    else if (fx.sound === 'calamity') playCalamitySound(fx.calamityFace ?? 4)
-    if (fx.notice) {
-      showBoardNotice(fx.notice.title, fx.notice.detail, {
-        durationMs: fx.notice.durationMs,
-        tone: fx.notice.tone,
-      })
+    const audienceId = fx.audiencePlayerId
+    const assessed =
+      audienceId != null ? getGameTableSnapshot().players.find((p) => p.id === audienceId) : undefined
+    const skipAiAssessment = assessed != null && isAiSeat(assessed)
+    const localSeatId = getPlayUiSnapshot().session.handRailPlayerId
+    const onlineTargeted = isOnlineActor && audienceId != null
+    const showOnThisDevice =
+      !skipAiAssessment && (!onlineTargeted || audienceId === localSeatId)
+
+    if (showOnThisDevice) {
+      if (fx.sound === 'construction') playConstructionSound()
+      else if (fx.sound === 'anchor') playAnchorDropSound()
+      else if (fx.sound === 'income') playIncomeSound()
+      else if (fx.sound === 'boo') playCrowdBooSound()
+      else if (fx.sound === 'cheer') playCrowdCheerSound()
+      else if (fx.sound === 'dwindle') playInfluenceDwindleSound()
+      else if (fx.sound === 'calamity') playCalamitySound(fx.calamityFace ?? 4)
+      if (fx.notice) {
+        showBoardNotice(fx.notice.title, fx.notice.detail, {
+          durationMs: fx.notice.durationMs,
+          tone: fx.notice.tone,
+        })
+      }
     }
   }
 
@@ -617,7 +619,17 @@ function AppInner() {
           setDiscardDialogState({ open: true, numToDiscard: e.numToDiscard })
         }
       } else if (e.type === 'game_over') {
-        toast.success('Final Round complete — game over!')
+        toast.success(
+          e.reason === 'endgame-deadline'
+            ? 'Endgame deadline — scoring the city!'
+            : 'Final Round complete — game over!'
+        )
+      } else if (e.type === 'end_game_offer') {
+        toast.info(
+          e.lastChance
+            ? `${e.playerName} must declare the endgame now or the game ends immediately.`
+            : `${e.playerName} has ${e.clusterSize} adjacent properties and may declare the endgame.`
+        )
       } else if (e.type === 'build_celebration') {
         const title =
           e.suffix === ' anchored!' ? (
@@ -1459,6 +1471,7 @@ function AppInner() {
   const handlePlotSelect = (row: number, col: string) => plots.plotSelect(sessionRef.current, row, col)
 
   const handleEndTurn = () => turn.endTurn(sessionRef.current)
+  const handleEndGameDecision = (declare: boolean) => turn.endGameDecision(sessionRef.current, declare)
 
   /**
    * Auto-end guard. Once a founder consumes all 3 turn actions (1 build + 2 actions, or
@@ -1568,6 +1581,7 @@ function AppInner() {
     safeGameState.isSetupComplete,
     safeGameState.gameEnded,
     safeGameState.openingNarrationComplete,
+    safeGameState.pendingEndGameDeclaration,
     localControlsActingSeat,
   ])
 
@@ -1708,6 +1722,7 @@ function AppInner() {
   aiCpRef.current = currentPlayerMaybe ?? null
   aiHooksRef.current = {
     handleEndTurn,
+    handleEndGameDecision,
     handleUndoLastActionCancel,
     handleActionCriteriaBank,
     handleCancelTakeoverSelect,
@@ -1747,6 +1762,7 @@ function AppInner() {
   setGameHandlerBag({
     handlePlayCards,
     handleEndTurn,
+    handleEndGameDecision,
     handleUnstickPlay,
     handlePlotClaim: stableHandlePlotClaim,
     handlePropertyClick: stableHandlePropertyClick,
@@ -1898,7 +1914,8 @@ function AppInner() {
   const handInteractionsActive =
     !isSpectator &&
     handRailPlayerIndex === safeGameState.currentPlayerIndex &&
-    actingPlayerSeat?.isAi !== true
+    actingPlayerSeat?.isAi !== true &&
+    !safeGameState.pendingEndGameDeclaration
 
   setPlaySession({
     isSpectator,
@@ -1906,6 +1923,7 @@ function AppInner() {
     isLandscapeLayout,
     handRailPlayerId: handRailPlayer.id,
     currentPlayerIsAi: currentPlayer.isAi === true,
+    localControlsActingSeat,
   })
   sessionRef.current = { ...sessionRef.current, handInteractionsActive }
 

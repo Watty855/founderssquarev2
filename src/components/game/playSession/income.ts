@@ -8,6 +8,7 @@ import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyEndTurn } from '@/lib/gameEngine/applyEndTurn'
 import { applyBankActionCards } from '@/lib/gameEngine/applyBankAction'
 import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
+import { consumeOnePendingIncomeTax, incomeTaxLevyMillion, pendingIncomeTaxCount } from '@/lib/cityTax'
 import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
 import { attachUndoSnapshotIfTurnAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
 import {
@@ -260,9 +261,9 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
 
     const incomeOwnerPreview = safeGameState.players[safeGameState.currentPlayerIndex]
     const ownerId = incomeOwnerPreview.id
-    const pendingTax = (safeGameState.pendingIncomeTaxPlayerIds ?? []).includes(ownerId)
+    const pendingTax = pendingIncomeTaxCount(safeGameState.pendingIncomeTaxPlayerIds, ownerId) > 0
     const totalInc = getPlayUiSnapshot().incomeDialogState.totalIncome
-    const levy = pendingTax ? Math.floor(totalInc * 0.5) : 0
+    const levy = pendingTax ? incomeTaxLevyMillion(totalInc) : 0
 
     const isPropertyRoll = incomeResolution === 'property-roll'
     const { payoutByPlayerId: rawInvestorPayout, awards: investorIncomeAwards } = isPropertyRoll
@@ -310,7 +311,7 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
       if (current.incomeResolvedThisTurn) return current
       const currentPlayer = current.players[current.currentPlayerIndex]
       const ownerIdResolved = currentPlayer.id
-      const stillPendingTax = (current.pendingIncomeTaxPlayerIds ?? []).includes(ownerIdResolved)
+      const stillPendingTax = pendingIncomeTaxCount(current.pendingIncomeTaxPlayerIds, ownerIdResolved) > 0
 
       const { payoutByPlayerId } = isPropertyRoll
         ? computeInvestorIncomeAwardsForOwner(current.plots, ownerIdResolved)
@@ -371,10 +372,9 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
       const newActionsPlayedThisTurn = current.actionsPlayedThisTurn + actionsPlayed
       const newTurnActionsConsumed = (current.turnActionsConsumed ?? 0) + actionsPlayed
 
-      const nextPendingTax =
-        stillPendingTax
-          ? (current.pendingIncomeTaxPlayerIds ?? []).filter((id) => id !== ownerIdResolved)
-          : (current.pendingIncomeTaxPlayerIds ?? [])
+      const nextPendingTax = stillPendingTax
+        ? consumeOnePendingIncomeTax(current.pendingIncomeTaxPlayerIds, ownerIdResolved)
+        : (current.pendingIncomeTaxPlayerIds ?? [])
 
       const newState: GameState = {
         ...current,
@@ -419,13 +419,16 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
           ? `You collected $${earnedIncome}M before investor shares; you keep $${cashToAdd}M.`
           : `Income collected: $${cashToAdd}M!`
     )
-    if (pendingTax) {
-      const taxTitle = 'Tax Time Boys & Girls!'
-      const taxDetail =
-        levy > 0
-          ? `City assessment: −$${levy}M (50% of your $${totalInc}M property income base). You keep $${cashToAdd}M. Cannot be overturned.`
-          : `Assessment cleared on this Income. You keep $${cashToAdd}M. Cannot be overturned.`
-      broadcastBoardFx({ notice: { title: taxTitle, detail: taxDetail }, sound: 'boo' })
+    if (pendingTax && levy > 0 && !isAiSeat(incomeOwnerPreview)) {
+      broadcastBoardFx({
+        sound: 'boo',
+        audiencePlayerId: ownerId,
+        notice: {
+          title: 'Income Taxation',
+          detail: `You paid $${levy}M in city income tax.`,
+          durationMs: 2000,
+        },
+      })
     }
     if (isPropertyRoll && totalInvestorPayout > 0) {
       const resolutionLabel =

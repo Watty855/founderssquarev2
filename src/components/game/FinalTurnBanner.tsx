@@ -94,7 +94,7 @@ export function FinalTurnBanner({
               color: '#fca5a5',
             }}
           >
-            Final Round triggered by {triggererName}
+            Final Round declared by {triggererName}
           </p>
           <p
             style={{

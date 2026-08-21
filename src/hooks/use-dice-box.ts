@@ -105,8 +105,9 @@ export function useDiceBox({ containerId, open }: UseDiceBoxOptions) {
     }
 
     let cancelled = false
+    let frame2 = 0
 
-    const timer = setTimeout(async () => {
+    const startInit = async () => {
       const container = document.getElementById(containerId)
       if (!container || cancelled || initializingRef.current) return
 
@@ -170,11 +171,18 @@ export function useDiceBox({ containerId, open }: UseDiceBoxOptions) {
           initializingRef.current = false
         }
       }
-    }, 200)
+    }
+
+    const frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        void startInit()
+      })
+    })
 
     return () => {
       cancelled = true
-      clearTimeout(timer)
+      cancelAnimationFrame(frame1)
+      if (frame2) cancelAnimationFrame(frame2)
       teardownRenderer()
       setIsReady(false)
       initializingRef.current = false

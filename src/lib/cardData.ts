@@ -1233,7 +1233,7 @@ export const actionCards: ActionCard[] = [
     copies: 4,
     diceRequired: false,
     actions:
-      'Assessment of tax towards improvement of city properties. When played, every other founder is assessed on their next Income resolution: their collection is reduced by 50% of their property income total for that roll (shelters and ordinary defenses do not apply). The player who played Income Taxation has prepared appropriate shelters and is not assessed.',
+      'Assessment of tax towards improvement of city properties. When played, every other founder is assessed on a later Income card: that collection is reduced by 50% of their property income total, rounded to the nearest $1M (shelters and ordinary defenses do not apply). Additional Income Taxation cards stack — each card adds one more taxed Income for every other founder. The player who played this card has prepared shelters and is not assessed for this card.',
   },
   {
     id: 'property-taxation',
@@ -1247,7 +1247,7 @@ export const actionCards: ActionCard[] = [
     copies: 4,
     diceRequired: false,
     actions:
-      'Assessment of property tax towards improvement of city properties. When played, every other founder immediately pays the city 10% of the total value of the properties they own. This assessment cannot be overturned by the other players. The player who played Property Taxation has prepared appropriate tax shelters and is not assessed.',
+      'Assessment of property tax towards improvement of city properties. When played, every other founder immediately pays the city 10% of the total value of the properties they own, rounded to the nearest $1M. This assessment cannot be overturned by the other players. The player who played Property Taxation has prepared appropriate tax shelters and is not assessed.',
   },
   {
     id: 'police-raid-on-mafia',
@@ -1339,7 +1339,7 @@ export const actionCards: ActionCard[] = [
     diceRequired: true,
     diceRollRule: 'Each founder rolls: 1 = 5% of treasury, 6 = 30% (5% per pip)',
     actions:
-      'When drawn, this card is played immediately and does not go into a hand — but never more than once every 6 rounds of play. Extra or too-soon copies are shuffled back into the deck. Every founder rolls a die, starting with the founder who drew it and continuing in turn order. Each founder loses 5% of their cash reserve per pip on their own roll (5% on a 1, up to 30% on a 6), rounded down, never below $0M. The electronic table randomizes the calamity story for that roll; the loss is always the same. This cannot be overturned. After every founder has rolled, play resumes as normal.',
+      'When drawn, this card is played immediately and does not go into a hand — but never more than once every 7 rounds of play. Extra or too-soon copies are shuffled back into the deck. Every founder rolls a die, starting with the founder who drew it and continuing in turn order. Each founder loses 5% of their cash reserve per pip on their own roll (5% on a 1, up to 30% on a 6), rounded down, never below $0M. The electronic table randomizes the calamity story for that roll; the loss is always the same. This cannot be overturned. After every founder has rolled, play resumes as normal.',
   },
   {
     id: 'draw-2-action-cards',

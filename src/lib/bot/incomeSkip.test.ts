@@ -83,6 +83,7 @@ function stubHandlers(): SimpleAiTurnHandlers & { playCalls: unknown[][] } {
     handleBoardPlotSelect: vi.fn(),
     handleRezoningPropertySelect: vi.fn(),
     handleRezoningHousingDensity: vi.fn(),
+    handleEndGameDecision: vi.fn(),
   }
 }
 

@@ -313,55 +313,67 @@ export function PlayerHand({
 
   const handleBuildProperty = () => {
     if (!cardDialog) return
-    onPlayCards(cardDialog.instanceId, [], [], { housingHighDensity: false })
+    const instanceId = cardDialog.instanceId
     setCardDialog(null)
+    onPlayCards(instanceId, [], [], { housingHighDensity: false })
   }
 
   const handleBuildHousing = (highDensity: boolean) => {
     if (!cardDialog) return
-    onPlayCards(cardDialog.instanceId, [], [], { housingHighDensity: highDensity })
+    const instanceId = cardDialog.instanceId
     setCardDialog(null)
+    onPlayCards(instanceId, [], [], { housingHighDensity: highDensity })
   }
 
   const handleCashCard = () => {
     if (!cardDialog) return
-    onPlayCards(null, [], [cardDialog.instanceId])
+    const instanceId = cardDialog.instanceId
     setCardDialog(null)
+    onPlayCards(null, [], [instanceId])
   }
 
   const handleBuildAnchorWildCard = () => {
     if (!cardDialog || !wildCardEmulateId) return
-    onPlayCards(cardDialog.instanceId, [], [], {
-      wildCardEmulatePropertyId: wildCardEmulateId,
-      ...(taxBuildPhase === 'pick-property' && taxBuildActionInstanceId
+    const instanceId = cardDialog.instanceId
+    const emulateId = wildCardEmulateId
+    const taxOpts =
+      taxBuildPhase === 'pick-property' && taxBuildActionInstanceId
         ? {
             useTaxBuild: true,
             taxBuildActionInstanceId: taxBuildActionInstanceId,
             skipTaxBuildPrompt: true,
           }
-        : {}),
-    })
+        : {}
     setCardDialog(null)
+    onPlayCards(instanceId, [], [], {
+      wildCardEmulatePropertyId: emulateId,
+      ...taxOpts,
+    })
   }
 
   const handleBuildCivicFlex = () => {
     if (!cardDialog || !civicVariantId) return
-    onPlayCards(cardDialog.instanceId, [], [], {
-      wildCardEmulatePropertyId: civicVariantId,
-      ...(taxBuildPhase === 'pick-property' && taxBuildActionInstanceId
+    const instanceId = cardDialog.instanceId
+    const variantId = civicVariantId
+    const taxOpts =
+      taxBuildPhase === 'pick-property' && taxBuildActionInstanceId
         ? {
             useTaxBuild: true,
             taxBuildActionInstanceId: taxBuildActionInstanceId,
             skipTaxBuildPrompt: true,
           }
-        : {}),
-    })
+        : {}
     setCardDialog(null)
+    onPlayCards(instanceId, [], [], {
+      wildCardEmulatePropertyId: variantId,
+      ...taxOpts,
+    })
   }
 
   const handlePlayAction = () => {
     if (!cardDialog) return
-    const actionMeta = actionCardsList.find((c) => c.instance.instanceId === cardDialog.instanceId)
+    const instanceId = cardDialog.instanceId
+    const actionMeta = actionCardsList.find((c) => c.instance.instanceId === instanceId)
     const playAs =
       actionMeta?.id === ACTION_WILD_CARD_ID ? actionWildEmulateId : actionMeta?.id
     const wildOpts =
@@ -370,28 +382,32 @@ export function PlayerHand({
         : {}
     if (playAs === 'city-council-freeze') {
       if (councilFreezeTargetId === null) return
-      onPlayCards(null, [cardDialog.instanceId], [], { councilFreezeTargetId, ...wildOpts })
-    } else {
-      if (actionMeta?.id === ACTION_WILD_CARD_ID && !actionWildEmulateId) return
-      onPlayCards(null, [cardDialog.instanceId], [], Object.keys(wildOpts).length ? wildOpts : undefined)
+      const targetId = councilFreezeTargetId
+      setCardDialog(null)
+      setCouncilFreezeTargetId(null)
+      setActionWildEmulateId(null)
+      onPlayCards(null, [instanceId], [], { councilFreezeTargetId: targetId, ...wildOpts })
+      return
     }
+    if (actionMeta?.id === ACTION_WILD_CARD_ID && !actionWildEmulateId) return
     setCardDialog(null)
     setCouncilFreezeTargetId(null)
     setActionWildEmulateId(null)
+    onPlayCards(null, [instanceId], [], Object.keys(wildOpts).length ? wildOpts : undefined)
   }
 
   const handleCouncilFreezeTargetSelect = (targetPlayerId: number) => {
     if (!cardDialog) return
-    const actionMeta = actionCardsList.find((c) => c.instance.instanceId === cardDialog.instanceId)
+    const instanceId = cardDialog.instanceId
+    const actionMeta = actionCardsList.find((c) => c.instance.instanceId === instanceId)
     const wildOpts =
       actionMeta?.id === ACTION_WILD_CARD_ID && actionWildEmulateId
         ? { wildCardEmulateActionId: actionWildEmulateId }
         : {}
-    setCouncilFreezeTargetId(targetPlayerId)
-    onPlayCards(null, [cardDialog.instanceId], [], { councilFreezeTargetId: targetPlayerId, ...wildOpts })
     setCardDialog(null)
     setCouncilFreezeTargetId(null)
     setActionWildEmulateId(null)
+    onPlayCards(null, [instanceId], [], { councilFreezeTargetId: targetPlayerId, ...wildOpts })
   }
 
 
@@ -938,9 +954,10 @@ export function PlayerHand({
         <DeckPile variant="action" hasCards={actionDeckHasCards} />
       </div>
 
-      {/* Card action dialog */}
+      {/* Card action dialog — unmount on close so Play isn't blocked by the 200ms overlay fade. */}
+      {cardDialog?.open ? (
       <Dialog
-        open={cardDialog?.open || false}
+        open
         onOpenChange={(open) => {
           if (!open) {
             setCardDialog(null)
@@ -957,7 +974,7 @@ export function PlayerHand({
             borderRadius: 16,
             padding: '24px 24px 16px',
           }}
-          className="[&>button:first-child]:hidden"
+          className="[&>button:first-child]:hidden duration-100"
         >
           <DialogHeader style={{ marginBottom: 16 }}>
             <DialogTitle style={{ fontSize: 18, fontWeight: 400, marginBottom: 4 }}>
@@ -1575,6 +1592,7 @@ export function PlayerHand({
           </div>
         </DialogContent>
       </Dialog>
+      ) : null}
     </>
   )
 }

@@ -8,6 +8,10 @@ import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyEndTurn } from '@/lib/gameEngine/applyEndTurn'
 import { applyBankActionCards } from '@/lib/gameEngine/applyBankAction'
 import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
+import {
+  appendIncomeTaxAssessments,
+  propertyTaxLevyMillion,
+} from '@/lib/cityTax'
 import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
 import { attachUndoSnapshotIfTurnAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
 import {
@@ -1255,12 +1259,13 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
                 actionsPlayedCount++
                 const actorId = currentPlayer.id
                 const otherIds = current.players.filter((p) => p.id !== actorId).map((p) => p.id)
-                pendingIncomeTaxPlayerIds = Array.from(new Set([...pendingIncomeTaxPlayerIds, ...otherIds]))
+                pendingIncomeTaxPlayerIds = appendIncomeTaxAssessments(pendingIncomeTaxPlayerIds, otherIds)
                 broadcastBoardFx({
                   sound: 'boo',
                   notice: {
                     title: 'Income Taxation levied!',
-                    detail: `${currentPlayer.name} sheltered their income — all other founders face a 50% city assessment.`,
+                    detail: `${currentPlayer.name} sheltered their income — every other founder is assessed 50% on a later Income card. Extra Taxation cards stack.`,
+                    durationMs: 2000,
                   },
                 })
                 return
@@ -1271,7 +1276,6 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
                 updatedActionDiscard.push(instance)
                 actionsPlayedCount++
                 const actorId = currentPlayer.id
-                const assessedNames: string[] = []
                 current.players.forEach((p) => {
                   if (p.id === actorId) return
                   let ownedValue = 0
@@ -1280,22 +1284,24 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
                     const propertyCard = propertyCards.find((c) => c.id === plot.builtProperty)
                     if (propertyCard) ownedValue += getPlotPropertyEndValue(plot, propertyCard)
                   })
-                  // 10% of total property value, paid to the city. Not rebuttable —
-                  // no pendingRebuttalRoll is created. Never drives money below $0M.
-                  const assessed = Math.min(p.money, Math.floor(ownedValue * 0.1))
+                  const assessed = propertyTaxLevyMillion(ownedValue, p.money)
                   const prior = propertyTaxByPlayerId.get(p.id) ?? 0
                   propertyTaxByPlayerId.set(p.id, prior + assessed)
-                  if (assessed > 0) assessedNames.push(`${p.name} $${assessed}M`)
                 })
-                broadcastBoardFx({
-                  sound: 'boo',
-                  notice: {
-                    title: 'Property Taxation assessed!',
-                    detail:
-                      assessedNames.length > 0
-                        ? `${currentPlayer.name} sheltered their holdings — the city collects 10% of property value: ${assessedNames.join(', ')}. No rebuttal allowed.`
-                        : `${currentPlayer.name} sheltered their holdings — no other founder owns taxable property yet.`,
-                  },
+                broadcastBoardFx({ sound: 'boo' })
+                current.players.forEach((p) => {
+                  if (p.id === actorId) return
+                  const assessed = propertyTaxByPlayerId.get(p.id) ?? 0
+                  if (assessed <= 0) return
+                  if (isAiSeat(p)) return
+                  broadcastBoardFx({
+                    audiencePlayerId: p.id,
+                    notice: {
+                      title: 'Property Taxation',
+                      detail: `You paid $${assessed}M in city property tax.`,
+                      durationMs: 2000,
+                    },
+                  })
                 })
                 return
               }

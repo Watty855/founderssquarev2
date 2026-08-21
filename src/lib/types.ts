@@ -1,4 +1,5 @@
 import { CardInstance } from './cardTypes'
+import type { LotCategoryLetter } from './lotCategory'
 
 export interface Player {
   id: number
@@ -16,7 +17,18 @@ export interface Player {
   peerHandCounts?: { actions: number; properties: number }
 }
 
-import type { LotCategoryLetter } from './lotCategory'
+export type PendingEndGameDeclaration = {
+  playerId: number
+  clusterSize: number
+  plots: Array<{ row: number; col: string }>
+  /** First unlock is usually mid-turn; later offers fire when that founder ends a turn. */
+  phase: 'mid-turn' | 'end-of-turn'
+  /** Fourth additional turn: continuing ends the game immediately (no extra round). */
+  lastChance: boolean
+  /** True for offers after the qualifying turn — continuing spends one defer. */
+  consumesDefer: boolean
+  deferTurnsRemaining: number
+}
 
 export type CivicVariantId = 'city-hall' | 'courthouse' | 'police' | 'civic-center'
 
@@ -73,13 +85,27 @@ export interface GameState {
   showNewCardsAnimation?: boolean
   gameEnded?: boolean
   winningSequence?: Array<{ row: number; col: string }>
-  /** Set when nine-in-a-row or a completed city block triggers the Final Round. The triggerer's
-   *  current turn finishes, then every founder (incl. triggerer) gets exactly one final turn. */
+  /**
+   * Set when a founder declares the endgame (12+ adjacent properties). That founder's
+   * current turn finishes, then every founder (including the declarer) gets one final turn.
+   */
   endGameTriggered?: boolean
-  /** Founder id whose build/rezoning move triggered the final round (used for the banner). */
+  /** Founder id who declared the Final Round (used for the banner). */
   endGameTriggerPlayerId?: number
-  /** Coordinate of the placement that completed the nine-in-a-row or city-block trigger. */
+  /** Coordinate from the adjacent cluster that unlocked the declaration. */
   endGameTriggerLocation?: { row: number; col: string }
+  /** Founder who currently holds 12+ adjacent properties and may declare the endgame. */
+  endGameEligiblePlayerId?: number
+  /**
+   * Additional turns of the eligible founder that may still pass without declaring.
+   * Initialised to 4 when they first reach 12 adjacent. Hitting 0 without a declaration
+   * ends the game immediately at the conclusion of that fourth additional turn.
+   */
+  endGameDeferTurnsRemaining?: number
+  /** True after a declare/continue prompt this turn so End Turn does not re-offer. */
+  endGameDeclarationOfferedThisTurn?: boolean
+  /** Modal prompt: declare the endgame or continue playing. */
+  pendingEndGameDeclaration?: PendingEndGameDeclaration
   /** Snapshot before the current founder's last turn-consuming action (build or action card). */
   undoLastAction?: import('./undoLastAction').UndoLastAction
   /** Counts down through the final round. Initialised to `players.length + 1` when the trigger
@@ -135,9 +161,10 @@ export interface GameState {
     policeRaidInfluenceLabels?: string[]
   }
   /**
-   * Player ids who must take a city income tax on their next Income card resolution:
-   * they keep max(0, collected − floor(property income total × 50%)); flag clears after that resolution.
-   * The founder who played Income Taxation is never added here.
+   * Founder ids queued for city income tax. Duplicates stack: each Income Taxation card
+   * appends every other founder once. Each Income resolution consumes one matching id
+   * and withholds 50% of that roll’s property-income pool (nearest $1M).
+   * The founder who played a given Income Taxation card is not appended for that card.
    */
   pendingIncomeTaxPlayerIds?: number[]
   /**
@@ -156,7 +183,7 @@ export interface GameState {
   calamityUsedVariantKeys?: string[]
   /**
    * Play-round number when the last Calamity event started. The next Calamity
-   * cannot fire until `playRoundNumber >= lastCalamityPlayRound + 6`.
+   * cannot fire until `playRoundNumber >= lastCalamityPlayRound + 7`.
    */
   lastCalamityPlayRound?: number
   /** After lobby setup, false until the player finishes the opening narration; omitted in older saves (treated as done). */

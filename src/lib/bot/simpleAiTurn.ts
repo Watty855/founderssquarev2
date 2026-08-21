@@ -22,7 +22,8 @@ import {
 import { getInvestablePlots, getTakeoverTargetPlots } from '@/lib/investmentTargets'
 import {
   getPlotsEligibleForScandal,
-  checkForNineSequentialProperties,
+  largestOwnedAdjacentCluster,
+  END_GAME_ADJACENT_THRESHOLD,
   totalRemoveInvestorsBuyoutMillion,
   countPlayerBuiltInCityBlock,
   blockCompletionBiasScore,
@@ -79,6 +80,8 @@ export interface SimpleAiTurnHandlers {
   /** Rezoning hand / density steps (bots must complete these or they cancel-loop). */
   handleRezoningPropertySelect: (propertyInstanceId: string) => void
   handleRezoningHousingDensity: (highDensity: boolean) => void
+  /** Resolve the 12-adjacent endgame declare / continue prompt. */
+  handleEndGameDecision: (declare: boolean) => void
 }
 
 export interface SimpleAiTurnUi {
@@ -114,9 +117,9 @@ function endGameProximityScore(plots: Plot[], playerId: number): number {
   const owned = plots.filter(
     (p) => p.type === 'city' && p.builtProperty && p.claimedBy === playerId
   ).length
-  // Rough pressure: owned count toward 9, plus a boost if they already qualify.
-  if (checkForNineSequentialProperties(plots)?.triggeredByPlayerId === playerId) return 100
-  return owned
+  const cluster = largestOwnedAdjacentCluster(plots, playerId)
+  if (cluster && cluster.plots.length >= END_GAME_ADJACENT_THRESHOLD) return 100
+  return Math.max(owned, cluster?.plots.length ?? 0)
 }
 
 function propertyEndValue(builtPropertyId: string | undefined): number {
@@ -682,6 +685,20 @@ export function trySimpleAiMainPhase(
     return false
   }
   if (gs.pendingCalamity) return false
+
+  if (gs.pendingEndGameDeclaration && gs.pendingEndGameDeclaration.playerId === cp.id) {
+    const pending = gs.pendingEndGameDeclaration
+    const self = playerWealthScore(gs, cp.id)
+    let rivalBest = 0
+    for (const p of gs.players) {
+      if (p.id === cp.id) continue
+      rivalBest = Math.max(rivalBest, playerWealthScore(gs, p.id))
+    }
+    const leading = self >= rivalBest
+    const declare = pending.lastChance ? !leading : leading
+    h.handleEndGameDecision(declare)
+    return true
+  }
 
   // End-of-turn soft hand cap — resolve in one call (never cancel/reopen).
   if (ui.discardDialogOpen) {

@@ -99,7 +99,7 @@ describe('calamity flavor', () => {
   })
 })
 
-describe('calamity 6-round spacing', () => {
+describe('calamity 7-round spacing', () => {
   it('allows the first Calamity of the game', () => {
     expect(calamityAllowedThisRound(baseState())).toBe(true)
     expect(calamityAllowedThisRound(baseState({ lastCalamityPlayRound: undefined, playRoundNumber: 1 }))).toBe(true)
@@ -107,8 +107,8 @@ describe('calamity 6-round spacing', () => {
 
   it(`blocks until ${CALAMITY_MIN_ROUNDS_BETWEEN} rounds after the last fire`, () => {
     expect(calamityAllowedThisRound(baseState({ lastCalamityPlayRound: 1, playRoundNumber: 1 }))).toBe(false)
-    expect(calamityAllowedThisRound(baseState({ lastCalamityPlayRound: 1, playRoundNumber: 6 }))).toBe(false)
-    expect(calamityAllowedThisRound(baseState({ lastCalamityPlayRound: 1, playRoundNumber: 7 }))).toBe(true)
+    expect(calamityAllowedThisRound(baseState({ lastCalamityPlayRound: 1, playRoundNumber: 7 }))).toBe(false)
+    expect(calamityAllowedThisRound(baseState({ lastCalamityPlayRound: 1, playRoundNumber: 8 }))).toBe(true)
   })
 })
 
@@ -134,7 +134,7 @@ describe('calamity draw intercept', () => {
     expect(next.pendingCalamity?.queuedInstances).toEqual([])
   })
 
-  it('defers Calamity when the last fire was fewer than 6 rounds ago and draws a replacement', () => {
+  it('defers Calamity when the last fire was fewer than 7 rounds ago and draws a replacement', () => {
     const start = baseState({ lastCalamityPlayRound: 1, playRoundNumber: 4 })
     const drawn = [mkAction(CALAMITY_CARD_ID, 1), mkAction('income', 7)]
     const next = ingestActionDraw(start, 0, drawn, start.actionDeck, start.actionDiscard, 'append')
@@ -149,12 +149,12 @@ describe('calamity draw intercept', () => {
     ).toBe(true)
   })
 
-  it('fires again once 6 rounds have passed', () => {
-    const start = baseState({ lastCalamityPlayRound: 1, playRoundNumber: 7 })
+  it('fires again once 7 rounds have passed', () => {
+    const start = baseState({ lastCalamityPlayRound: 1, playRoundNumber: 8 })
     const drawn = [mkAction(CALAMITY_CARD_ID, 1), mkAction('income', 7)]
     const next = ingestActionDraw(start, 0, drawn, start.actionDeck, start.actionDiscard, 'append')
     expect(next.pendingCalamity?.instance.instanceId).toBe('calamity-1')
-    expect(next.lastCalamityPlayRound).toBe(7)
+    expect(next.lastCalamityPlayRound).toBe(8)
   })
 
   it('fires only one Calamity from a double draw and buries the extra copy', () => {
@@ -230,7 +230,7 @@ describe('applyEndTurn calamity draw', () => {
     expect(result.state.pendingCalamity?.rollOrderPlayerIds[0]).toBe(2)
   })
 
-  it('does not fire Calamity on a start-of-turn draw inside the 6-round gap', () => {
+  it('does not fire Calamity on a start-of-turn draw inside the 7-round gap', () => {
     const start = baseState({
       turnActionsConsumed: 3,
       lastCalamityPlayRound: 1,

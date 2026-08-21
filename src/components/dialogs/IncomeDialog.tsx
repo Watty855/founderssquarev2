@@ -236,7 +236,7 @@ export function IncomeDialog({
   useEffect(() => {
     if (aiAutoplay) return
     if (!atChooser && !showDoubleIncomePrompt && !isRolling && !incomeResult && hasIncomeGeneratingProperties && isReady) {
-      const timer = setTimeout(() => roll(), 300)
+      const timer = setTimeout(() => roll(), 50)
       return () => clearTimeout(timer)
     }
   }, [

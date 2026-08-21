@@ -220,6 +220,7 @@ export type PlaySessionChrome = {
   isLandscapeLayout: boolean
   handRailPlayerId: number | null
   currentPlayerIsAi: boolean
+  localControlsActingSeat: boolean
 }
 
 export type PlayUiState = {
@@ -283,6 +284,7 @@ export const initialPlayUiState: PlayUiState = {
     isLandscapeLayout: false,
     handRailPlayerId: null,
     currentPlayerIsAi: false,
+    localControlsActingSeat: true,
   },
 }
 
@@ -330,7 +332,8 @@ export function setPlaySession(session: PlaySessionChrome) {
     prev.isCompactLayout === session.isCompactLayout &&
     prev.isLandscapeLayout === session.isLandscapeLayout &&
     prev.handRailPlayerId === session.handRailPlayerId &&
-    prev.currentPlayerIsAi === session.currentPlayerIsAi
+    prev.currentPlayerIsAi === session.currentPlayerIsAi &&
+    prev.localControlsActingSeat === session.localControlsActingSeat
   ) {
     return
   }

@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { DiscardDialog } from '@/components/dialogs/DiscardDialog'
+import { DeclareEndGameDialog } from '@/components/dialogs/DeclareEndGameDialog'
 import { IncomeDialog } from '@/components/dialogs/IncomeDialog'
 import { InvestmentOrphanDialog } from '@/components/dialogs/InvestmentOrphanDialog'
 import { RollDieDialog } from '@/components/dialogs/RollDieDialog'
@@ -194,6 +195,22 @@ export function DialogHost() {
 
   return (
     <>
+      {gs.pendingEndGameDeclaration ? (
+        <DeclareEndGameDialog
+          open
+          playerName={
+            gs.players.find((p) => p.id === gs.pendingEndGameDeclaration?.playerId)?.name ?? 'Founder'
+          }
+          pending={gs.pendingEndGameDeclaration}
+          canDecide={
+            ui.session.localControlsActingSeat &&
+            currentPlayer?.isAi !== true &&
+            currentPlayer?.id === gs.pendingEndGameDeclaration.playerId
+          }
+          onDeclare={() => h.handleEndGameDecision(true)}
+          onContinue={() => h.handleEndGameDecision(false)}
+        />
+      ) : null}
       <InvestmentOrphanDialog
         open={ui.actionCriteriaDialog.open}
         cardName={ui.actionCriteriaDialog.cardName}

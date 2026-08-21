@@ -1,6 +1,6 @@
 import type { GameState, Plot } from '@/lib/types'
 import { updatePlotAt } from '@/lib/boardIndex'
-import { buildEndGameTriggerPatch } from '@/lib/gameEngine/statePatches'
+import { buildEndGameEligibilityPatch } from '@/lib/gameEngine/statePatches'
 import { replenishCurrentPlayerActionHand } from '@/lib/turnActions'
 
 export type PendingRebuttal = NonNullable<GameState['pendingRebuttalRoll']>
@@ -80,7 +80,7 @@ export function applyHostileTakeoverOnFail(
     return p
   })
   const baseUpdate: GameState = { ...state, players, plots: newPlots }
-  const triggerPatch = buildEndGameTriggerPatch(state, newPlots, {
+  const triggerPatch = buildEndGameEligibilityPatch(state, newPlots, {
     row: ctx.row,
     col: ctx.col,
   })

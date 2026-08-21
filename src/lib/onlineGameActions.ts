@@ -51,11 +51,19 @@ export type GameAction =
   | { type: 'rebuttal_roll'; result: number }
   /** Current calamity roller reports their die + the flavor key chosen on their device. */
   | { type: 'calamity_roll'; result: number; variantKey: string }
+  /** Eligible founder declares the endgame (Final Round) or continues play. */
+  | { type: 'end_game_decision'; declare: boolean }
 
 export type GameEvent =
   | { type: 'discard_required'; numToDiscard: number }
   | { type: 'turn_changed'; playerName: string; finalRound: boolean }
-  | { type: 'game_over' }
+  | { type: 'game_over'; reason?: 'final-round' | 'endgame-deadline' }
+  | {
+      type: 'end_game_offer'
+      playerName: string
+      clusterSize: number
+      lastChance: boolean
+    }
   | { type: 'build_celebration'; lotName: string; suffix: string; detail: string }
   | { type: 'toast'; level: 'info' | 'success' | 'error'; message: string }
   /** Council-freeze negate roll resolved — announced with sound on every device. */
@@ -92,6 +100,11 @@ export type BoardFx = {
   sound?: 'construction' | 'anchor' | 'income' | 'boo' | 'cheer' | 'dwindle' | 'calamity'
   /** Die face 1–6 when `sound` is `calamity` — drives SFX intensity. */
   calamityFace?: number
+  /**
+   * When set, only this founder’s device (or the shared pass-and-play table for humans)
+   * should show `notice`. Host tables skip AI-seat assessments.
+   */
+  audiencePlayerId?: number
   notice?: {
     title: string
     detail?: string

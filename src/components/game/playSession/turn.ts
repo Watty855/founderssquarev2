@@ -6,6 +6,7 @@ import { propertyCards, actionCards } from '@/lib/cardData'
 import type { PropertyCard, CardInstance } from '@/lib/cardTypes'
 import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyEndTurn } from '@/lib/gameEngine/applyEndTurn'
+import { applyEndGameDecision } from '@/lib/gameEngine/applyEndGameDecision'
 import { applyBankActionCards } from '@/lib/gameEngine/applyBankAction'
 import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
 import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
@@ -231,7 +232,19 @@ export function endTurn(s: PlaySession)
         if (ev.type === 'discard_required') {
           setDiscardDialogState({ open: true, numToDiscard: ev.numToDiscard })
         } else if (ev.type === 'game_over') {
-          setTimeout(() => toast.success('Final Round complete — game over!'), 200)
+          setTimeout(() => {
+            toast.success(
+              ev.reason === 'endgame-deadline'
+                ? 'Endgame deadline — scoring the city!'
+                : 'Final Round complete — game over!'
+            )
+          }, 200)
+        } else if (ev.type === 'end_game_offer') {
+          toast.info(
+            ev.lastChance
+              ? `${ev.playerName} must declare the endgame now or the game ends immediately.`
+              : `${ev.playerName} has ${ev.clusterSize} adjacent properties and may declare the endgame.`
+          )
         } else if (ev.type === 'turn_changed') {
           toast.info(ev.finalRound ? `${ev.playerName}'s final turn` : `${ev.playerName}'s turn`)
         } else if (ev.type === 'toast') {
@@ -253,6 +266,48 @@ export function endTurn(s: PlaySession)
       })
     }, 2000)
   }
+
+export function endGameDecision(s: PlaySession, declare: boolean)
+{
+  const { isOnlineActor, sendAction, setGameState } = s
+  if (isOnlineActor) {
+    sendAction({ type: 'end_game_decision', declare })
+    return
+  }
+  setGameState((current) => {
+    const result = applyEndGameDecision(current, declare)
+    if (!result.ok) {
+      toast.error(result.error)
+      return current
+    }
+    for (const ev of result.events) {
+      if (ev.type === 'discard_required') {
+        setDiscardDialogState({ open: true, numToDiscard: ev.numToDiscard })
+      } else if (ev.type === 'game_over') {
+        setTimeout(() => {
+          toast.success(
+            ev.reason === 'endgame-deadline'
+              ? 'Endgame deadline — scoring the city!'
+              : 'Final Round complete — game over!'
+          )
+        }, 200)
+      } else if (ev.type === 'end_game_offer') {
+        toast.info(
+          ev.lastChance
+            ? `${ev.playerName} must declare the endgame now or the game ends immediately.`
+            : `${ev.playerName} has ${ev.clusterSize} adjacent properties and may declare the endgame.`
+        )
+      } else if (ev.type === 'turn_changed') {
+        toast.info(ev.finalRound ? `${ev.playerName}'s final turn` : `${ev.playerName}'s turn`)
+      } else if (ev.type === 'toast') {
+        if (ev.level === 'success') toast.success(ev.message)
+        else if (ev.level === 'error') toast.error(ev.message)
+        else toast.info(ev.message)
+      }
+    }
+    return result.state
+  })
+}
 
 export function discardComplete(s: PlaySession, discardedInstanceIds: string[])
 {
@@ -322,7 +377,19 @@ export function discardComplete(s: PlaySession, discardedInstanceIds: string[])
         if (ev.type === 'discard_required') {
           setDiscardDialogState({ open: true, numToDiscard: ev.numToDiscard })
         } else if (ev.type === 'game_over') {
-          setTimeout(() => toast.success('Final Round complete — game over!'), 200)
+          setTimeout(() => {
+            toast.success(
+              ev.reason === 'endgame-deadline'
+                ? 'Endgame deadline — scoring the city!'
+                : 'Final Round complete — game over!'
+            )
+          }, 200)
+        } else if (ev.type === 'end_game_offer') {
+          toast.info(
+            ev.lastChance
+              ? `${ev.playerName} must declare the endgame now or the game ends immediately.`
+              : `${ev.playerName} has ${ev.clusterSize} adjacent properties and may declare the endgame.`
+          )
         } else if (ev.type === 'turn_changed') {
           toast.info(ev.finalRound ? `${ev.playerName}'s final turn` : `${ev.playerName}'s turn`)
         } else if (ev.type === 'toast') {
@@ -551,6 +618,20 @@ export function unstickPlay(s: PlaySession)
     }
 
     const acting = safeGameState.players[safeGameState.currentPlayerIndex]
+
+    if (safeGameState.pendingEndGameDeclaration && acting?.isAi === true) {
+      const pending = safeGameState.pendingEndGameDeclaration
+      const selfScore = acting.money
+      const rivalBest = Math.max(
+        0,
+        ...safeGameState.players.filter((p) => p.id !== acting.id).map((p) => p.money)
+      )
+      const leading = selfScore >= rivalBest
+      const declare = pending.lastChance ? !leading : leading
+      getGameHandlers().handleEndGameDecision(declare)
+      toast.success('Forced endgame decision for Founderbot — play continues.')
+      return
+    }
 
     // Force-resolve stuck Income (bots) — previously Unstick could not clear this dialog.
     if (getPlayUiSnapshot().incomeDialogState.open && (acting?.isAi === true || getPlayUiSnapshot().incomeDialogState.player?.isAi === true)) {

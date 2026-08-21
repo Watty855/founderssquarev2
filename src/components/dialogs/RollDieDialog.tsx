@@ -197,7 +197,7 @@ function RollDieDialogInner({
     const t = window.setTimeout(() => {
       if (mode === 'council-freeze-attacker') void runAttackerRoll()
       else void roll()
-    }, 300)
+    }, 50)
     return () => window.clearTimeout(t)
   }, [
     open,
@@ -923,7 +923,7 @@ function RollDieDialogInner({
               ) : showGenericRollAgain ? (
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button
-                    onClick={() => { reset(); setTimeout(() => void roll(), 300) }}
+                    onClick={() => { reset(); setTimeout(() => void roll(), 50) }}
                     style={{
                       flex: 1, height: 42, borderRadius: 10, backgroundColor: 'transparent', color: '#f0f0f5',
                       fontSize: 14, fontWeight: 500, border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer',

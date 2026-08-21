@@ -47,6 +47,21 @@ export function buildRequiredAction(gs: GameState, ui: PlayUiState): RequiredAct
   const currentPlayer = gs.players[gs.currentPlayerIndex]
   const rollDieAiAutoplay = rollSeatIsAi(gs, ui.rollDieDialogState, currentPlayer)
 
+  if (gs.pendingEndGameDeclaration) {
+    const pending = gs.pendingEndGameDeclaration
+    const name = gs.players.find((p) => p.id === pending.playerId)?.name ?? 'Founder'
+    return {
+      id: `endgame-declare-${pending.playerId}-${pending.phase}-${pending.lastChance ? 'last' : pending.deferTurnsRemaining}`,
+      title: pending.lastChance ? 'Last chance to declare the endgame' : 'Declare the endgame?',
+      detail: pending.lastChance
+        ? `${name} has ${pending.clusterSize} adjacent properties. Declare for one more round each, or the game ends now.`
+        : `${name} has ${pending.clusterSize} adjacent properties. Declare for one more round each, or continue playing.`,
+      tone: pending.lastChance ? 'danger' : 'warning',
+      ctaLabel: currentPlayer?.isAi ? 'Unstick' : 'Choose in dialog',
+      onCta: currentPlayer?.isAi ? h.handleUnstickPlay : undefined,
+    }
+  }
+
   if (ui.calamityAcceptPending) {
     const pending = ui.calamityAcceptPending
     return {

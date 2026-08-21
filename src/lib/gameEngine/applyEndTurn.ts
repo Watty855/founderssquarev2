@@ -12,6 +12,7 @@ import type { ApplyGameActionResult, GameEvent } from '@/lib/onlineGameActions'
 import {
   applyFinalRoundCountdown,
   clearCouncilFreezeIfEndingPlayer,
+  maybeOfferEndGameAtEndOfTurn,
 } from '@/lib/gameEngine/statePatches'
 import { ingestActionDraw } from '@/lib/calamity'
 
@@ -126,8 +127,22 @@ export function applyEndTurn(
     }
   }
 
+  if (state.pendingEndGameDeclaration) {
+    return {
+      ok: false,
+      error: 'Declare the endgame or continue play before ending your turn.',
+      code: 'endgame_pending',
+    }
+  }
+
+  const offer = maybeOfferEndGameAtEndOfTurn(state)
+  if (offer.intercepted) {
+    return { ok: true, state: offer.state, events: offer.events }
+  }
+  const stateAfterOffer = offer.state
+
   const newState: GameState = {
-    ...state,
+    ...stateAfterOffer,
     players: updatedPlayers,
     actionDeck: updatedActionDeck,
     propertyDeck: updatedPropertyDeck,
@@ -140,11 +155,12 @@ export function applyEndTurn(
     crossingTheLineActive: false,
     playedPropertyCardThisTurn: undefined,
     undoLastAction: undefined,
+    endGameDeclarationOfferedThisTurn: undefined,
   }
 
   const finalRoundPatch = applyFinalRoundCountdown(state)
   if (finalRoundPatch.gameEnded) {
-    events.push({ type: 'game_over' })
+    events.push({ type: 'game_over', reason: 'final-round' })
     return {
       ok: true,
       state: {
@@ -169,7 +185,7 @@ export function applyEndTurn(
 
   // Start-of-turn draw 2 may put the next founder over MAX_ACTION_HAND_SIZE — that is
   // intentional. They keep the excess until *their* turn ends. Calamity cards
-  // never enter the hand; ingestActionDraw plays them city-wide when the 6-round
+  // never enter the hand; ingestActionDraw plays them city-wide when the 7-round
   // gap has elapsed, otherwise they are buried and replaced.
 
   const inFinalRound = finalRoundPatch.finalRoundTurnsRemaining !== undefined

@@ -54,6 +54,7 @@ let overlayState: OverlayState = initialOverlayState
 const listeners = new Set<() => void>()
 
 let boardNoticeTimer: ReturnType<typeof setTimeout> | null = null
+let noticeQueue: Array<{ title: ReactNode; detail?: string; tone?: BoardNoticeTone; durationMs: number }> = []
 let motivationalTimer: ReturnType<typeof setTimeout> | null = null
 let openingProTipTimer: ReturnType<typeof setTimeout> | null = null
 let finalTurnTimer: ReturnType<typeof setTimeout> | null = null
@@ -100,6 +101,7 @@ export function resetOverlayStore() {
     clearTimeout(boardNoticeTimer)
     boardNoticeTimer = null
   }
+  noticeQueue = []
   if (motivationalTimer) {
     clearTimeout(motivationalTimer)
     motivationalTimer = null
@@ -120,18 +122,32 @@ export function showBoardNotice(
   detail?: string,
   opts?: { quick?: boolean; durationMs?: number; tone?: BoardNoticeTone }
 ) {
-  if (boardNoticeTimer) {
-    clearTimeout(boardNoticeTimer)
-    boardNoticeTimer = null
-  }
-  setOverlayState({
-    ...overlayState,
-    boardNotice: { title, detail, tone: opts?.tone },
-  })
   const ms =
     opts?.durationMs ?? (opts?.tone === 'calamity' ? 10000 : opts?.quick ? 900 : 4000)
+  if (overlayState.boardNotice != null || boardNoticeTimer) {
+    noticeQueue.push({ title, detail, tone: opts?.tone, durationMs: ms })
+    return
+  }
+  presentBoardNotice(title, detail, opts?.tone, ms)
+}
+
+function presentBoardNotice(
+  title: ReactNode,
+  detail: string | undefined,
+  tone: BoardNoticeTone | undefined,
+  ms: number
+) {
+  setOverlayState({
+    ...overlayState,
+    boardNotice: { title, detail, tone },
+  })
   boardNoticeTimer = setTimeout(() => {
     boardNoticeTimer = null
+    const next = noticeQueue.shift()
+    if (next) {
+      presentBoardNotice(next.title, next.detail, next.tone, next.durationMs)
+      return
+    }
     setOverlayState({ ...overlayState, boardNotice: null })
   }, ms)
 }
@@ -141,6 +157,7 @@ export function clearBoardNotice() {
     clearTimeout(boardNoticeTimer)
     boardNoticeTimer = null
   }
+  noticeQueue = []
   if (overlayState.boardNotice == null) return
   setOverlayState({ ...overlayState, boardNotice: null })
 }

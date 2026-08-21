@@ -9,7 +9,7 @@ import { getHousingBuildCost, isHousingPropertyCard } from '@/lib/housingEconomi
 import { getBuildCelebrationNotice } from '@/lib/buildCelebrationMessages'
 import { MAX_TURN_ACTIONS, replenishCurrentPlayerActionHand, turnLimitReached } from '@/lib/turnActions'
 import type { ApplyGameActionResult, GameEvent } from '@/lib/onlineGameActions'
-import { buildEndGameTriggerPatch } from '@/lib/gameEngine/statePatches'
+import { buildEndGameEligibilityPatch, endGameOfferEvents } from '@/lib/gameEngine/statePatches'
 import { getPlotIndexAt } from '@/lib/boardIndex'
 
 export type BuildAtParams = {
@@ -134,7 +134,7 @@ export function applyBuildAt(state: GameState, params: BuildAtParams): ApplyGame
     },
   }
 
-  const triggerPatch = buildEndGameTriggerPatch(state, newPlots, { row: params.row, col: params.col })
+  const triggerPatch = buildEndGameEligibilityPatch(state, newPlots, { row: params.row, col: params.col })
   let merged: GameState = { ...newState, ...triggerPatch }
 
   const events: GameEvent[] = []
@@ -170,15 +170,7 @@ export function applyBuildAt(state: GameState, params: BuildAtParams): ApplyGame
       message: `Built with Tax Dollars at 50% cost ($${fullBuildCost}M → $${buildCost}M).`,
     })
   }
-  if (triggerPatch.endGameTriggered) {
-    const triggererName =
-      state.players.find((p) => p.id === triggerPatch.endGameTriggerPlayerId)?.name ?? 'A founder'
-    events.push({
-      type: 'toast',
-      level: 'success',
-      message: `${triggererName} completed nine properties in a row or a city block — Final Round!`,
-    })
-  }
+  events.push(...endGameOfferEvents(state, merged))
 
   const { state: replenished } = replenishCurrentPlayerActionHand(merged, state.currentPlayerIndex)
   merged = replenished

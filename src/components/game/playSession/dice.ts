@@ -8,7 +8,7 @@ import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyEndTurn } from '@/lib/gameEngine/applyEndTurn'
 import { applyBankActionCards } from '@/lib/gameEngine/applyBankAction'
 import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
-import { buildEndGameTriggerPatch } from '@/lib/gameEngine/statePatches'
+import { buildEndGameEligibilityPatch } from '@/lib/gameEngine/statePatches'
 import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
 import { attachUndoSnapshotIfTurnAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
 import {
@@ -976,20 +976,20 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             return p
           })
           const baseUpdate: GameState = { ...current, players, plots: newPlots }
-          const takeoverTriggerPatch = buildEndGameTriggerPatch(current, newPlots, { row, col })
+          const takeoverTriggerPatch = buildEndGameEligibilityPatch(current, newPlots, { row, col })
           const stateAfterTakeover: GameState = { ...baseUpdate, ...takeoverTriggerPatch }
           setTimeout(() => {
             toast.success(
               `Takeover complete — paid $${payment120Million}M (120% of end value) to the former owner.`
             )
           }, 0)
-          if (takeoverTriggerPatch.endGameTriggered) {
+          if (takeoverTriggerPatch.pendingEndGameDeclaration) {
             const triggererName =
-              current.players.find((p) => p.id === takeoverTriggerPatch.endGameTriggerPlayerId)?.name ??
-              'A founder'
+              current.players.find((p) => p.id === takeoverTriggerPatch.pendingEndGameDeclaration?.playerId)
+                ?.name ?? 'A founder'
             setTimeout(() => {
-              toast.success(
-                `${triggererName} completed nine properties in a row or a city block — Final Round! Each founder gets one more turn.`
+              toast.info(
+                `${triggererName} has 12 adjacent properties and may declare the endgame.`
               )
             }, 600)
           }
@@ -1430,18 +1430,19 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             buildCost,
           },
         }
-        const triggerPatch = buildEndGameTriggerPatch(current, newPlots, { row: ctx.row, col: ctx.col })
+        const triggerPatch = buildEndGameEligibilityPatch(current, newPlots, { row: ctx.row, col: ctx.col })
         const stateWithTrigger: GameState = { ...newState, ...triggerPatch }
-        if (triggerPatch.endGameTriggered) {
+        if (triggerPatch.pendingEndGameDeclaration) {
           const triggererName =
-            current.players.find((p) => p.id === triggerPatch.endGameTriggerPlayerId)?.name ?? 'A founder'
+            current.players.find((p) => p.id === triggerPatch.pendingEndGameDeclaration?.playerId)?.name ??
+            'A founder'
           setTimeout(() => {
-            toast.success(
-              `${triggererName} completed nine properties in a row or a city block — Final Round! Each founder gets one more turn.`
+            toast.info(
+              `${triggererName} has 12 adjacent properties and may declare the endgame.`
             )
           }, 600)
         }
-        if (turnLimitReached(newTurnConsumed)) {
+        if (turnLimitReached(newTurnConsumed) && !stateWithTrigger.pendingEndGameDeclaration) {
           scheduleEndOfTurn()
         }
         return withReplenishedActionHand(stateWithTrigger, cpIdx)

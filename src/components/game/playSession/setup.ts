@@ -293,6 +293,10 @@ export function setupComplete(s: PlaySession, players: Player[], partyBoard?: Pa
         endGameTriggered: undefined,
         endGameTriggerPlayerId: undefined,
         endGameTriggerLocation: undefined,
+        endGameEligiblePlayerId: undefined,
+        endGameDeferTurnsRemaining: undefined,
+        endGameDeclarationOfferedThisTurn: undefined,
+        pendingEndGameDeclaration: undefined,
         finalRoundTurnsRemaining: undefined,
       }
       // First founder's extra 2 is a real draw — Calamity here fires immediately after narration.

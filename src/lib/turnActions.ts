@@ -34,6 +34,7 @@ export function shouldAutoAdvanceTurn(state: GameState): boolean {
   if (state.pendingCouncilFreezeDefense != null) return false
   if (state.pendingRebuttalRoll != null) return false
   if (state.pendingCalamity != null) return false
+  if (state.pendingEndGameDeclaration != null) return false
   if (state.showNewCardsAnimation === true) return false
   return true
 }
