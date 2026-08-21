@@ -28,6 +28,7 @@ import { type CardFlight } from '@/components/game/CardFlightLayer'
 import {
   clearBoardNotice,
   dismissOpeningProTip,
+  getOverlaySnapshot,
   resetOverlayStore,
   setFinalTurnBanner,
   setMotivationalFlashRound,
@@ -35,6 +36,7 @@ import {
   setOverlayHiddenInstanceIds,
   setShowOpeningProTip,
   showBoardNotice,
+  subscribeOverlay,
 } from '@/lib/gameOverlayStore'
 import { getGameTableSnapshot, publishGameState, subscribeGameTable } from '@/lib/gameTableStore'
 import { rollSeatIsAi } from '@/lib/buildRequiredAction'
@@ -122,6 +124,7 @@ import {
   calamityLossMillion,
   calamityPercentForFace,
   calamityPostRollBannerDetail,
+  CALAMITY_OUTCOME_BANNER_MS,
   CALAMITY_PRE_ROLL_INSTRUCTION,
   dealActionHandSkippingCalamity,
   findCalamityVariant,
@@ -500,6 +503,7 @@ function AppInner() {
   }, [])
 
   const calamityCommitInFlightRef = useRef(false)
+  const skipNextCalamityResultNoticeRef = useRef(false)
 
   onBoardFxRef.current = (fx: BoardFx) => {
     const audienceId = fx.audiencePlayerId
@@ -709,18 +713,22 @@ function AppInner() {
           playInfluenceDwindleSound()
         }
       } else if (e.type === 'calamity_result') {
-        showBoardNotice(
-          'Calamity',
-          calamityPostRollBannerDetail({
-            face: e.result,
-            playerName: e.playerName,
-            percent: e.percent,
-            lossMillion: e.lossMillion,
-            variant: { key: '', title: e.variantTitle, flavor: e.variantFlavor },
-          }) + (e.cityWideComplete ? '\nCalamity resolved — play resumes.' : ''),
-          { tone: 'calamity', durationMs: 10000 }
-        )
-        playCalamitySound(e.result)
+        if (skipNextCalamityResultNoticeRef.current) {
+          skipNextCalamityResultNoticeRef.current = false
+        } else {
+          showBoardNotice(
+            'Calamity',
+            calamityPostRollBannerDetail({
+              face: e.result,
+              playerName: e.playerName,
+              percent: e.percent,
+              lossMillion: e.lossMillion,
+              variant: { key: '', title: e.variantTitle, flavor: e.variantFlavor },
+            }) + (e.cityWideComplete ? '\nCalamity resolved — play resumes.' : ''),
+            { tone: 'calamity', durationMs: CALAMITY_OUTCOME_BANNER_MS }
+          )
+          playCalamitySound(e.result)
+        }
       }
     }
   }
@@ -1277,29 +1285,29 @@ function AppInner() {
     }
     if (gameState.openingNarrationComplete === false) return
     if (getPlayUiSnapshot().calamityAcceptPending) return
+    if (getOverlaySnapshot().boardNotice?.tone === 'calamity') return
 
     const rollerId = pending.rollOrderPlayerIds[pending.currentRollIndex]
     const roller = gameState.players.find((p) => p.id === rollerId)
     const announceKey = `${pending.instance.instanceId}|${pending.currentRollIndex}`
     if (announcedCalamityKeyRef.current !== announceKey) {
       announcedCalamityKeyRef.current = announceKey
-      const step = pending.currentRollIndex + 1
-      const total = pending.rollOrderPlayerIds.length
-      showBoardNotice(
-        'Calamity',
-        `${CALAMITY_PRE_ROLL_INSTRUCTION}\n${
-          pending.currentRollIndex === 0
-            ? `${pending.drawnByName} drew Calamity. ${roller?.name ?? 'The next founder'} rolls first (${step} of ${total}).`
-            : `${roller?.name ?? 'Next founder'} rolls (${step} of ${total}).`
-        }`,
-        { tone: 'calamity', durationMs: 10000 }
-      )
+      if (pending.currentRollIndex === 0) {
+        const step = pending.currentRollIndex + 1
+        const total = pending.rollOrderPlayerIds.length
+        showBoardNotice(
+          'Calamity',
+          `${CALAMITY_PRE_ROLL_INSTRUCTION}\n${pending.drawnByName} drew Calamity. ${roller?.name ?? 'The next founder'} rolls first (${step} of ${total}).`,
+          { tone: 'calamity', durationMs: CALAMITY_OUTCOME_BANNER_MS }
+        )
+        return
+      }
     }
 
     const controlsRoller =
       !partyBoardConfig
         ? true
-        : roller?.isAi === true
+        : isAiSeat(roller)
           ? partyBoardConfig.role === 'host'
           : partyBoardSeatPlayer?.id === rollerId
     if (!controlsRoller) return
@@ -1332,7 +1340,12 @@ function AppInner() {
     })
     }
     run()
-    return subscribePlayUi(run)
+    const unsubUi = subscribePlayUi(run)
+    const unsubOverlay = subscribeOverlay(run)
+    return () => {
+      unsubUi()
+      unsubOverlay()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     pendingCalamityKey,
@@ -1693,7 +1706,10 @@ function AppInner() {
 
   const commitCalamityRoll = (result: number, extras?: { calamityVariantKey?: string }) => calamity.commitCalamityRoll(sessionRef.current, result, extras)
 
-  const handleAcceptCalamity = () => calamity.acceptCalamity(sessionRef.current)
+  const handleAcceptCalamity = () => {
+    skipNextCalamityResultNoticeRef.current = true
+    calamity.acceptCalamity(sessionRef.current)
+  }
 
   const handleRollDieComplete = (result: number, extras?: { calamityVariantKey?: string }) => dice.rollDieComplete(sessionRef.current, result, extras)
 
@@ -2254,7 +2270,6 @@ function AppInner() {
             }
           >
             <BoardViewport compact={isCompactLayout} landscape={isLandscapeLayout} />
-            <CalamityAcceptLayer />
           </div>
           <HandRail />
         </div>
@@ -2276,6 +2291,7 @@ function AppInner() {
 
       <Toaster />
       <DialogHost />
+      <CalamityAcceptLayer />
       {safeGameState.gameEnded && (
         <GameEndDialog
           open={safeGameState.gameEnded}

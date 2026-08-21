@@ -8,6 +8,7 @@ import {
   CALAMITY_CARD_ID,
   CALAMITY_LOSS_PERCENT,
   CALAMITY_MIN_ROUNDS_BETWEEN,
+  CALAMITY_OUTCOME_BANNER_MS,
   ingestActionDraw,
   pickCalamityVariant,
   splitCalamityDraws,
@@ -50,6 +51,12 @@ function baseState(over: Partial<GameState> = {}): GameState {
     ...over,
   }
 }
+
+describe('calamity outcome banner', () => {
+  it('holds two seconds so every seat can read the result', () => {
+    expect(CALAMITY_OUTCOME_BANNER_MS).toBe(2000)
+  })
+})
 
 describe('calamity stakes', () => {
   it('uses a 5% treasury step per pip', () => {

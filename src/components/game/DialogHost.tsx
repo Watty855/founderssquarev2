@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -18,7 +19,7 @@ import { InvestmentOrphanDialog } from '@/components/dialogs/InvestmentOrphanDia
 import { RollDieDialog } from '@/components/dialogs/RollDieDialog'
 import { UndoLastActionDialog } from '@/components/dialogs/UndoLastActionDialog'
 import { actionCards, propertyCards } from '@/lib/cardData'
-import { CALAMITY_ACCEPT_LABEL, calamityPostRollBannerDetail } from '@/lib/calamity'
+import { CALAMITY_ACCEPT_LABEL, CALAMITY_OUTCOME_BANNER_MS, calamityPostRollBannerDetail } from '@/lib/calamity'
 import { getGameHandlers } from '@/lib/gameHandlerBag'
 import { useGameTableStore } from '@/lib/gameTableStore'
 import { rollSeatIsAi } from '@/lib/buildRequiredAction'
@@ -41,18 +42,33 @@ const DOUBLE_INCOME_BANK_VALUE = actionCards.find((c) => c.id === 'double-income
 
 export function CalamityAcceptLayer() {
   const pending = usePlayUiStore((s) => s.calamityAcceptPending)
+  const autoAccept = pending?.autoAccept === true
+  const acceptKey = pending
+    ? `${pending.playerName}|${pending.face}|${pending.variantKey}|${pending.lossMillion}`
+    : ''
+
+  useEffect(() => {
+    if (!pending || !autoAccept) return
+    const t = window.setTimeout(() => {
+      getGameHandlers().handleAcceptCalamity()
+    }, CALAMITY_OUTCOME_BANNER_MS)
+    return () => window.clearTimeout(t)
+  }, [acceptKey, autoAccept, pending])
+
   if (!pending) return null
   const h = getGameHandlers()
   return (
     <div
-      className="absolute inset-0 z-40 flex items-center justify-center p-3 sm:p-6"
+      className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6"
+      style={{ pointerEvents: 'auto' }}
       aria-live="assertive"
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="fs-calamity-accept-title"
     >
+      <div className="absolute inset-0 bg-black/55" aria-hidden />
       <div
-        className="max-w-[min(94vw,32rem)] rounded-xl border px-5 py-5 text-center sm:rounded-2xl sm:px-8 sm:py-7"
+        className="relative max-w-[min(94vw,32rem)] rounded-xl border px-5 py-5 text-center sm:rounded-2xl sm:px-8 sm:py-7"
         style={{
           background: 'linear-gradient(180deg, #dc2626 0%, #991b1b 42%, #7f1d1d 100%)',
           borderColor: 'rgba(254, 202, 202, 0.55)',
@@ -97,27 +113,43 @@ export function CalamityAcceptLayer() {
             },
           })}
         </p>
-        <button
-          type="button"
-          onClick={() => h.handleAcceptCalamity()}
-          className="fs-required-banner-cta"
-          style={{
-            marginTop: 18,
-            height: 44,
-            padding: '0 22px',
-            borderRadius: 999,
-            backgroundColor: '#7f1d1d',
-            color: '#fff',
-            border: '1px solid #fecaca',
-            fontSize: 13,
-            fontWeight: 800,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            cursor: 'pointer',
-          }}
-        >
-          {CALAMITY_ACCEPT_LABEL}
-        </button>
+        {autoAccept ? (
+          <p
+            style={{
+              marginTop: 18,
+              marginBottom: 0,
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'rgba(254, 226, 226, 0.8)',
+            }}
+          >
+            Resolving…
+          </p>
+        ) : (
+          <button
+            type="button"
+            onClick={() => h.handleAcceptCalamity()}
+            className="fs-required-banner-cta"
+            style={{
+              marginTop: 18,
+              height: 44,
+              padding: '0 22px',
+              borderRadius: 999,
+              backgroundColor: '#7f1d1d',
+              color: '#fff',
+              border: '1px solid #fecaca',
+              fontSize: 13,
+              fontWeight: 800,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+            }}
+          >
+            {CALAMITY_ACCEPT_LABEL}
+          </button>
+        )}
       </div>
     </div>
   )

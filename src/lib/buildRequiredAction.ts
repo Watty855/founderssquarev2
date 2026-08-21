@@ -25,7 +25,7 @@ export function rollSeatIsAi(
 ): boolean {
   if (!rd.open) return false
   const playerIsAi = (id: number | undefined | null): boolean =>
-    id != null && gs.players.some((p) => p.id === id && p.isAi)
+    id != null && gs.players.some((p) => p.id === id && (p.isAi === true || p.aiDifficulty != null))
   switch (rd.mode) {
     case 'council-freeze-defender':
       return playerIsAi(rd.targetPlayerId)
@@ -69,8 +69,8 @@ export function buildRequiredAction(gs: GameState, ui: PlayUiState): RequiredAct
       title: 'Calamity',
       detail: `Rolled ${pending.face}. ${pending.percent}% of cash reserve lost. ${pending.variantTitle}: ${pending.variantFlavor}`,
       tone: 'calamity',
-      ctaLabel: CALAMITY_ACCEPT_LABEL,
-      onCta: h.handleAcceptCalamity,
+      ctaLabel: pending.autoAccept ? 'Resolving…' : CALAMITY_ACCEPT_LABEL,
+      onCta: pending.autoAccept ? undefined : h.handleAcceptCalamity,
     }
   }
 

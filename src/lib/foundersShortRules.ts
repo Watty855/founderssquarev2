@@ -9,24 +9,24 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
   {
     title: 'Goal',
     lines: [
-      'Build properties, play action cards, and collect income. Win by timing the endgame and out-scoring rivals.',
+      'Build properties, play action cards, and collect income. Win by timing the Final Round and out-scoring rivals.',
     ],
   },
   {
     title: 'Your turn',
     lines: [
+      'Your hand holds 5 property cards and 5 action cards at all times. Play begins with drawing 2 additional action cards; play ends by drawing back up to 5 property cards.',
       '3 actions per turn: 1 build + 2 others, or 0 builds + 3 actions.',
       'A successful Rezoning counts as 2 actions (build included); a failed one costs 1.',
       'Only one Income action per turn.',
-      'Hand may exceed 8 mid-turn — discard down to 8 only after your 3 actions are used.',
+      'Hand may not exceed 8 at the conclusion of your turn — it may exceed 8 mid-turn.',
     ],
   },
   {
     title: 'Anchor Tenets',
     lines: [
       'Center lot of every block. Reach is citywide (G) or block-only (B) per its printed rules; multiple built copies stack.',
-      '+$1M to your other properties in its block during Income; Regulation Bureau/Union also −$1M to rivals there; Mafia takes $1M from rival businesses there.',
-      '+1 influence for owning 5+ properties in a block, or targeting the lot across from your 6 sequential street lots.',
+      'Anchor Tenets add additional monetary value and influence to their block and city, based on the various property values.',
       'Scandal or a successful Police Raid overthrows an Anchor Tenet — the lot vacates and can be reclaimed.',
     ],
   },
@@ -55,9 +55,9 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
   {
     title: 'End game',
     lines: [
-      '12 adjacent built properties (including across a street) lets that founder declare the endgame.',
-      'Declaring gives every player — including the declarer — one more turn, then scoring.',
-      'They may defer up to 4 extra turns; if they never declare, the game ends at the close of the 4th.',
+      '12 adjacent properties owned by the same player makes the Final Round available — only that player may declare it, on their own turn.',
+      'Declaring starts it immediately: every other founder gets one more turn, and the declaring player also gets one more turn, then final scoring (Squares & Streets).',
+      'The eligible player has up to 4 of their own turns to declare. If they haven’t declared by the end of their 4th turn, the game ends immediately at that point — no bonus round for anyone else.',
     ],
   },
 ]

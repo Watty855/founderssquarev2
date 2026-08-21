@@ -15,7 +15,7 @@ interface RulesQuickSheetProps {
 
 /** Bundled PDF + raster page (WebView-safe) of Founders_Square_Quick_Rules.pdf */
 const QUICK_RULES_PDF_URL = '/Founders_Square_Quick_Rules.pdf'
-const QUICK_RULES_SHEET_IMG = '/assets/quick-rules-sheet.png?v=20260818'
+const QUICK_RULES_SHEET_IMG = '/assets/quick-rules-sheet.png?v=20260821'
 
 export function RulesQuickSheet({ open, onOpenChange }: RulesQuickSheetProps) {
   return (

@@ -212,6 +212,8 @@ export type CalamityAcceptPending = {
   percent: number
   lossMillion: number
   playerName: string
+  /** Founderbot seats resolve after the outcome banner — no Accept click. */
+  autoAccept?: boolean
 }
 
 export type PlaySessionChrome = {

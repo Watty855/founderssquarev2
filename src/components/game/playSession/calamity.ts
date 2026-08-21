@@ -160,6 +160,7 @@ export function calamitySettled(s: PlaySession, info: {
         percent,
         lossMillion,
         playerName,
+        autoAccept: isAiSeat(roller),
       })
       playCalamitySound(face)
       clearBoardNotice()

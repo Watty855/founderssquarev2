@@ -230,6 +230,12 @@ function RollDieDialogInner({
       if (cancelled) return
       if (aiResolvedKeyRef.current === key) return
       aiResolvedKeyRef.current = key
+      if (mode === 'calamity') {
+        const face = Math.floor(Math.random() * 6) + 1
+        const variant = pickCalamityVariant(face, calamitySummary?.usedVariantKeys)
+        onCalamitySettledRef.current?.({ face, variant })
+        return
+      }
       onCompleteRef.current(Math.floor(Math.random() * 6) + 1)
     }, AI_FAST_PLAYBACK_MS)
     return () => {
@@ -246,6 +252,7 @@ function RollDieDialogInner({
     defenderName,
     calamitySummary?.rollerName,
     calamitySummary?.rollIndex,
+    calamitySummary?.usedVariantKeys,
   ])
 
   const councilFreezeIntroTitle =

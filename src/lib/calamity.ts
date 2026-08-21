@@ -126,6 +126,9 @@ export function calamityAllowedThisRound(
 
 export const CALAMITY_ACCEPT_LABEL = 'Accept Calamity'
 
+/** Outcome banner / bot auto-accept pause so every seat can read the result. */
+export const CALAMITY_OUTCOME_BANNER_MS = 2000
+
 /** Post-roll banner body: die result, percent of cash reserve lost, and the table cause. */
 export function calamityPostRollBannerDetail(opts: {
   face?: number

@@ -2,6 +2,7 @@
 
 import { useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { CardFlight } from '@/components/game/CardFlightLayer'
+import { CALAMITY_OUTCOME_BANNER_MS } from '@/lib/calamity'
 
 const OPENING_PRO_TIP_DURATION_MS = 10_000
 
@@ -123,7 +124,7 @@ export function showBoardNotice(
   opts?: { quick?: boolean; durationMs?: number; tone?: BoardNoticeTone }
 ) {
   const ms =
-    opts?.durationMs ?? (opts?.tone === 'calamity' ? 10000 : opts?.quick ? 900 : 4000)
+    opts?.durationMs ?? (opts?.tone === 'calamity' ? CALAMITY_OUTCOME_BANNER_MS : opts?.quick ? 900 : 4000)
   if (overlayState.boardNotice != null || boardNoticeTimer) {
     noticeQueue.push({ title, detail, tone: opts?.tone, durationMs: ms })
     return
