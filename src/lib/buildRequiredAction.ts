@@ -2,7 +2,8 @@
 
 import type { GameState, Player } from '@/lib/types'
 import type { PropertyCard } from '@/lib/cardTypes'
-import { propertyCards } from '@/lib/cardData'
+import { actionCards, propertyCards } from '@/lib/cardData'
+import { incomePercentageForDie } from '@/lib/incomeDice'
 import { getValidPlotsForProperty } from '@/lib/placementRules'
 import { needsEmulateChoiceBeforePlacement, resolvePropertyPlacementTemplate } from '@/lib/placementTemplate'
 import {
@@ -310,13 +311,24 @@ export function buildRequiredAction(gs: GameState, ui: PlayUiState): RequiredAct
     }
   }
   if (ui.incomeDialogState.open) {
+    const income = ui.incomeDialogState
     return {
       id: 'income',
-      title: 'Income — review and confirm',
-      detail:
-        'Review your income breakdown in the dialog and click Collect to take your earnings before continuing your turn.',
+      title: 'Income — collecting',
+      detail: 'Income is resolving automatically. If this stalls, collect now to continue your turn.',
       tone: 'info',
-      ctaLabel: 'Collect in dialog',
+      ctaLabel: 'Collect now',
+      onCta: () => {
+        if (income.hasBuiltPropertiesForIncomeRoll) {
+          const face = 4
+          const pct = incomePercentageForDie(face)
+          const amount = Math.floor((income.totalIncome * pct) / 100)
+          h.handleIncomeComplete(Math.max(0, amount), undefined, 'property-roll', face)
+        } else {
+          const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? 4
+          h.handleIncomeComplete(bv, undefined, 'bank-income-card')
+        }
+      },
     }
   }
   if (ui.rezoningMode.phase === 'pick-property') {

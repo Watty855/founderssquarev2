@@ -330,6 +330,9 @@ export function applyGameAction(
     }
 
     case 'play_cards':
+      // Card plays (including Founderbot hands) resolve locally, then
+      // `commit_actor_state`. Typed play_cards is not implemented — do not
+      // switch AI income to income_complete after playCards already committed.
       return {
         ok: false,
         error: 'Complex card play must use commit_actor_state after local resolution.',

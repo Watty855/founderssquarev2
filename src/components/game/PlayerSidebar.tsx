@@ -58,7 +58,15 @@ export function PlayerSidebar() {
   const handInteractionsActive =
     !isSpectator && handRailPlayerId === acting?.id && acting?.isAi !== true
   const gs = useGameTableStore((s) => s)
-  const undoLastActionAvailable = canUndoLastAction(gs, { handInteractionsActive, isSpectator })
+  const diceResolutionOpen = usePlayUiStore(
+    (s) =>
+      s.rollDieDialogState.open || s.incomeDialogState.open || s.calamityAcceptPending != null
+  )
+  const undoLastActionAvailable = canUndoLastAction(gs, {
+    handInteractionsActive,
+    isSpectator,
+    diceResolutionOpen,
+  })
 
   const hudButtons = (size: number, compactBtns: boolean) => (
     <div

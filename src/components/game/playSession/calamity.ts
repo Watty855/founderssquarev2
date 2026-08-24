@@ -111,7 +111,7 @@ import {
   hostileTakeoverDefenseSuccessTitle,
   investmentNoticeTitle,
 } from '@/lib/confrontationNotice'
-import { countResolvedActionStepsInBatch, initialGameState, isAiSeat, withReplenishedActionHand } from './helpers'
+import { countResolvedActionStepsInBatch, initialGameState, withReplenishedActionHand } from './helpers'
 import type { PlaySession } from './types'
 
 export function calamitySettled(s: PlaySession, info: {
@@ -160,7 +160,7 @@ export function calamitySettled(s: PlaySession, info: {
         percent,
         lossMillion,
         playerName,
-        autoAccept: isAiSeat(roller),
+        autoAccept: true,
       })
       playCalamitySound(face)
       clearBoardNotice()

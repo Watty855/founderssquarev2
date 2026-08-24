@@ -19,7 +19,8 @@ import { InvestmentOrphanDialog } from '@/components/dialogs/InvestmentOrphanDia
 import { RollDieDialog } from '@/components/dialogs/RollDieDialog'
 import { UndoLastActionDialog } from '@/components/dialogs/UndoLastActionDialog'
 import { actionCards, propertyCards } from '@/lib/cardData'
-import { CALAMITY_ACCEPT_LABEL, CALAMITY_OUTCOME_BANNER_MS, calamityPostRollBannerDetail } from '@/lib/calamity'
+import { CALAMITY_OUTCOME_BANNER_MS, calamityPostRollBannerDetail } from '@/lib/calamity'
+import { incomeTaxLevyMillion, pendingIncomeTaxCount } from '@/lib/cityTax'
 import { getGameHandlers } from '@/lib/gameHandlerBag'
 import { useGameTableStore } from '@/lib/gameTableStore'
 import { rollSeatIsAi } from '@/lib/buildRequiredAction'
@@ -42,21 +43,19 @@ const DOUBLE_INCOME_BANK_VALUE = actionCards.find((c) => c.id === 'double-income
 
 export function CalamityAcceptLayer() {
   const pending = usePlayUiStore((s) => s.calamityAcceptPending)
-  const autoAccept = pending?.autoAccept === true
   const acceptKey = pending
     ? `${pending.playerName}|${pending.face}|${pending.variantKey}|${pending.lossMillion}`
     : ''
 
   useEffect(() => {
-    if (!pending || !autoAccept) return
+    if (!acceptKey) return
     const t = window.setTimeout(() => {
       getGameHandlers().handleAcceptCalamity()
     }, CALAMITY_OUTCOME_BANNER_MS)
     return () => window.clearTimeout(t)
-  }, [acceptKey, autoAccept, pending])
+  }, [acceptKey])
 
   if (!pending) return null
-  const h = getGameHandlers()
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6"
@@ -113,43 +112,19 @@ export function CalamityAcceptLayer() {
             },
           })}
         </p>
-        {autoAccept ? (
-          <p
-            style={{
-              marginTop: 18,
-              marginBottom: 0,
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'rgba(254, 226, 226, 0.8)',
-            }}
-          >
-            Resolving…
-          </p>
-        ) : (
-          <button
-            type="button"
-            onClick={() => h.handleAcceptCalamity()}
-            className="fs-required-banner-cta"
-            style={{
-              marginTop: 18,
-              height: 44,
-              padding: '0 22px',
-              borderRadius: 999,
-              backgroundColor: '#7f1d1d',
-              color: '#fff',
-              border: '1px solid #fecaca',
-              fontSize: 13,
-              fontWeight: 800,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              cursor: 'pointer',
-            }}
-          >
-            {CALAMITY_ACCEPT_LABEL}
-          </button>
-        )}
+        <p
+          style={{
+            marginTop: 18,
+            marginBottom: 0,
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: 'rgba(254, 226, 226, 0.8)',
+          }}
+        >
+          Resolving…
+        </p>
       </div>
     </div>
   )
@@ -316,6 +291,11 @@ export function DialogHost() {
           unionIncomePenalty={income.unionIncomePenalty}
           rivalUnionPlotLabels={income.rivalUnionPlotLabels}
           hasBuiltPropertiesForIncomeRoll={income.hasBuiltPropertiesForIncomeRoll}
+          incomeTaxLevyMillion={
+            income.player && pendingIncomeTaxCount(gs.pendingIncomeTaxPlayerIds, income.player.id) > 0
+              ? incomeTaxLevyMillion(income.totalIncome)
+              : 0
+          }
           doubleIncomeAllowed={(gs.turnActionsConsumed ?? 0) + 2 <= MAX_TURN_ACTIONS}
           onComplete={h.handleIncomeComplete}
           onCancel={h.handleIncomeCancel}

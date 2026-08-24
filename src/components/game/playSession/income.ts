@@ -12,6 +12,7 @@ import { consumeOnePendingIncomeTax, incomeTaxLevyMillion, pendingIncomeTaxCount
 import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
 import { attachUndoSnapshotIfTurnAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
 import {
+  CALAMITY_OUTCOME_BANNER_MS,
   beginCalamity,
   calamityAllowedThisRound,
   calamityLossMillion,
@@ -230,22 +231,16 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
   } = s
   const gameState = safeGameState
 
-    if (!getPlayUiSnapshot().incomeDialogState.actionInstanceId) return
-    if (incomeCompleteLockRef.current) return
+    const resetIncomeDialog = () => setIncomeDialogState({ ...closedIncomeDialog })
+
+    if (incomeCompleteLockRef.current) {
+      resetIncomeDialog()
+      return
+    }
     incomeCompleteLockRef.current = true
 
-    // The acting device's IncomeDialog already played the cash register locally;
-    // mirror it to the rest of the table so income lands with sound everywhere.
-    broadcastBoardFx(
-      {
-        sound: 'income',
-        notice: {
-          title: `${getPlayUiSnapshot().incomeDialogState.player?.name ?? 'A founder'} collected income`,
-          detail: `$${earnedIncome}M added to their treasury.`,
-        },
-      },
-      { localEcho: false }
-    )
+    try {
+    if (!getPlayUiSnapshot().incomeDialogState.actionInstanceId) return
 
     const consumedBefore = safeGameState.turnActionsConsumed ?? 0
     let effectiveDoubleIncomeId = doubleIncomeInstanceId
@@ -260,6 +255,7 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
     }
 
     const incomeOwnerPreview = safeGameState.players[safeGameState.currentPlayerIndex]
+    if (!incomeOwnerPreview) return
     const ownerId = incomeOwnerPreview.id
     const pendingTax = pendingIncomeTaxCount(safeGameState.pendingIncomeTaxPlayerIds, ownerId) > 0
     const totalInc = getPlayUiSnapshot().incomeDialogState.totalIncome
@@ -288,8 +284,6 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
       Object.values(rawInvestorPayout).reduce((a, b) => a + b, 0)
     const investorsProRated = isPropertyRoll && totalInvestorOwed > 0 && totalInvestorPayout < totalInvestorOwed
 
-    const resetIncomeDialog = () => setIncomeDialogState({ ...closedIncomeDialog })
-
     // Founderbots (host-driven, including Play Online) resolve locally then
     // commit_actor_state — the same path as their other card plays. Typed
     // income_complete looks the card up on the authority snapshot; if that hand
@@ -310,6 +304,7 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
       patchGameState((current) => {
       if (current.incomeResolvedThisTurn) return current
       const currentPlayer = current.players[current.currentPlayerIndex]
+      if (!currentPlayer) return current
       const ownerIdResolved = currentPlayer.id
       const stillPendingTax = pendingIncomeTaxCount(current.pendingIncomeTaxPlayerIds, ownerIdResolved) > 0
 
@@ -396,40 +391,33 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
     })
     }
 
-    resetIncomeDialog()
+    const levyNote = pendingTax && levy > 0 ? ` City tax −$${levy}M.` : ''
+    const collectTitle = `${incomeOwnerPreview.name} collected income`
+    const collectDetail =
+      isPropertyRoll && dieFace != null
+        ? `Rolled ${dieFace} — $${earnedIncome}M collected${cashToAdd !== earnedIncome ? ` · keeps $${cashToAdd}M after shares and levies` : ''}.${levyNote}`
+        : incomeResolution === 'bank-income-card'
+          ? `$${earnedIncome}M added to their treasury.${levyNote}`
+          : `$${cashToAdd}M added to their treasury.${levyNote}`
 
-    if (isPropertyRoll && dieFace != null) {
-      broadcastDiceRollNotice(
-        `${incomeOwnerPreview.name} rolled ${dieFace}`,
-        `$${earnedIncome}M collected${cashToAdd !== earnedIncome ? ` · keeps $${cashToAdd}M after shares and levies` : ''}.`,
-        'income'
-      )
-    } else if (incomeResolution === 'bank-income-card') {
-      broadcastDiceRollNotice(
-        `${incomeOwnerPreview.name} banked Income`,
-        `$${earnedIncome}M added to their treasury.`,
-        'income'
-      )
-    }
+    broadcastBoardFx({
+      sound: 'income',
+      notice: {
+        title: collectTitle,
+        detail: collectDetail,
+        durationMs: CALAMITY_OUTCOME_BANNER_MS,
+        replace: true,
+      },
+    })
 
     toast.success(
       pendingTax
         ? `Income collected: $${cashToAdd}M after city tax assessment${levy > 0 ? ` (−$${levy}M)` : ''}.`
         : isPropertyRoll && totalInvestorPayout > 0
           ? `You collected $${earnedIncome}M before investor shares; you keep $${cashToAdd}M.`
-          : `Income collected: $${cashToAdd}M!`
+          : `Income collected: $${cashToAdd}M!`,
+      { duration: CALAMITY_OUTCOME_BANNER_MS }
     )
-    if (pendingTax && levy > 0 && !isAiSeat(incomeOwnerPreview)) {
-      broadcastBoardFx({
-        sound: 'boo',
-        audiencePlayerId: ownerId,
-        notice: {
-          title: 'Income Taxation',
-          detail: `You paid $${levy}M in city income tax.`,
-          durationMs: 2000,
-        },
-      })
-    }
     if (isPropertyRoll && totalInvestorPayout > 0) {
       const resolutionLabel =
         incomeResolution === 'property-roll' ? 'property income roll' : 'banked Income card'
@@ -463,6 +451,12 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
         })
         .join(', ')
       toast.info(`Mafia tribute paid: ${detail}`)
+    }
+    } catch (err) {
+      console.error('Income complete failed — closing dialog so play can continue:', err)
+    } finally {
+      resetIncomeDialog()
+      incomeCompleteLockRef.current = false
     }
   }
 

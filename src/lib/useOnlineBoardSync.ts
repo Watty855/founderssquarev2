@@ -7,6 +7,7 @@ import type { BoardFx, GameAction, GameEvent } from '@/lib/onlineGameActions'
 import { applyGameAction } from '@/lib/gameEngine/applyGameAction'
 import {
   mergePublicAndPrivateHands,
+  toPublicGameState,
   type PrivateHandPayload,
   type PublicGameState,
 } from '@/lib/onlinePublicState'
@@ -22,7 +23,8 @@ import {
   type AuthorityOutbound,
   type OnlineAuthorityStore,
 } from '@/lib/onlineRoomAuthority'
-import { toPublicGameState } from '@/lib/onlinePublicState'
+import { AUTHORITY_LOCATION } from '@/lib/authorityLocation'
+import { applyPublicGameStatePatch, type PublicGameStatePatch } from '@/lib/publicStatePatch'
 import { boardTopic, getDeviceConnectionId, getRealtimeClient, normalizeRoomCode } from '@/lib/realtimeClient'
 import {
   clearAuthoritySnapshot,
@@ -31,6 +33,12 @@ import {
 } from '@/lib/onlineAuthorityMemory'
 
 export type SendActionOptions = { skipOptimistic?: boolean }
+
+export type OnlineSyncClock = {
+  localRev: number
+  hostRev: number
+  hostDelayed: boolean
+}
 export type OnlineConnectionStatus =
   | 'offline'
   | 'connecting'
@@ -47,6 +55,7 @@ const RESYNC_GIVE_UP_MS = 12_000
 /** When stale, try one fresh hydrate this often in case the host woke up. */
 const STALE_RETRY_MS = 15_000
 const AUTHORITY_PERSIST_DEBOUNCE_MS = 400
+const ACTION_ACK_TIMEOUT_MS = 3000
 /**
  * Coalesce rapid public_state / private_hand merges (AI flurries, dice-era bursts)
  * so the React board does not rebuild on every wire tick. Leading flush when idle
@@ -58,7 +67,7 @@ const MERGE_VIEW_COALESCE_MS = 100
 type BoardWire =
   | { kind: 'public_state'; rev: number; state: unknown; to?: string }
   | { kind: 'private_hand'; rev: number; to: string; hand: PrivateHandPayload }
-  | { kind: 'action_applied'; rev: number; actionId: string; state: unknown; events?: GameEvent[] }
+  | { kind: 'action_applied'; rev: number; actionId: string; state?: unknown; fromRev?: number; patch?: PublicGameStatePatch; events?: GameEvent[] }
   | { kind: 'action_rejected'; to: string; actionId: string; rev: number; error: string; code?: string }
   | { kind: 'game_action'; from: string; actionId: string; action: GameAction }
   | { kind: 'game_request'; from: string; displayName?: string }
@@ -74,10 +83,11 @@ type BoardWire =
  *    the board after setup and answers `game_request` hydrates for joiners.
  *  - Every seat (host included) submits typed `game_action`s; the host applies
  *    them with the shared engine, bumps the revision, and broadcasts the
- *    redacted `public_state` plus per-seat `private_hand`s.
+ *    redacted public board (full keyframe on join / every Nth rev, else a
+ *    revision-keyed patch) plus per-seat `private_hand`s.
  *  - Guests apply moves optimistically and roll back on `action_rejected`.
- *
- * Return shape matches the original hook so GameApp is unchanged.
+ *  - Authority currently runs on the hosting phone (`AUTHORITY_LOCATION`).
+ *    Cloud/edge is the only complete fix for mixed IPs and iOS suspend.
  */
 export function useOnlineBoardSync(params: {
   config: PartyBoardSyncConfig | null
@@ -104,8 +114,14 @@ export function useOnlineBoardSync(params: {
   const [connectionStatus, setConnectionStatus] = useState<OnlineConnectionStatus>(
     config ? 'connecting' : 'offline'
   )
+  const [syncClock, setSyncClock] = useState<OnlineSyncClock>({
+    localRev: 0,
+    hostRev: 0,
+    hostDelayed: false,
+  })
   const connectionStatusRef = useRef<OnlineConnectionStatus>(config ? 'connecting' : 'offline')
   connectionStatusRef.current = connectionStatus
+  const pendingAckTimersRef = useRef<Map<string, number>>(new Map())
 
   const channelRef = useRef<RealtimeChannel | null>(null)
   const hostInitSentRef = useRef(false)
@@ -229,10 +245,36 @@ export function useOnlineBoardSync(params: {
       latestPublicRef.current = raw as PublicGameState
       // Keep a fingerprint only when needed for debugging / legacy callers; viewKey uses rev.
       latestPublicJsonRef.current = ''
+      setSyncClock((prev) => {
+        const localRev = lastRevRef.current
+        const hostRev = Math.max(prev.hostRev, rev)
+        const hostDelayed = pendingAckTimersRef.current.size === 0 ? false : prev.hostDelayed
+        if (prev.localRev === localRev && prev.hostRev === hostRev && prev.hostDelayed === hostDelayed) {
+          return prev
+        }
+        return { localRev, hostRev, hostDelayed }
+      })
       scheduleApplyMergedView()
     },
     [scheduleApplyMergedView]
   )
+
+  const clearActionAck = useCallback((actionId: string) => {
+    const timer = pendingAckTimersRef.current.get(actionId)
+    if (timer != null) {
+      window.clearTimeout(timer)
+      pendingAckTimersRef.current.delete(actionId)
+    }
+    if (pendingAckTimersRef.current.size === 0) {
+      setSyncClock((prev) => (prev.hostDelayed ? { ...prev, hostDelayed: false } : prev))
+    }
+  }, [])
+
+  const clearAllActionAcks = useCallback(() => {
+    for (const timer of pendingAckTimersRef.current.values()) window.clearTimeout(timer)
+    pendingAckTimersRef.current.clear()
+    setSyncClock((prev) => (prev.hostDelayed ? { ...prev, hostDelayed: false } : prev))
+  }, [])
 
   const ingestPrivateHand = useCallback(
     (hand: PrivateHandPayload, rev: number) => {
@@ -324,6 +366,18 @@ export function useOnlineBoardSync(params: {
     [sendWire]
   )
 
+  const ingestPublicPatch = useCallback(
+    (fromRev: number, rev: number, patch: PublicGameStatePatch) => {
+      const prev = latestPublicRef.current
+      if (!prev || lastRevRef.current !== fromRev) {
+        requestSnapshot()
+        return
+      }
+      ingestPublicState(rev, applyPublicGameStatePatch(prev, patch))
+    },
+    [ingestPublicState, requestSnapshot]
+  )
+
   const rollbackAction = useCallback(
     (actionId: string, error?: string) => {
       optimisticEventsFiredRef.current.delete(actionId)
@@ -356,10 +410,18 @@ export function useOnlineBoardSync(params: {
               kind: 'action_applied',
               rev: m.rev,
               actionId: m.actionId,
-              state: m.state,
               events: m.events,
+              ...(m.state
+                ? { state: m.state }
+                : { fromRev: m.fromRev, patch: m.patch }),
             })
-            ingestPublicState(m.rev, m.state)
+            // Host always ingests the full public snapshot even when the wire is a patch.
+            const localPub =
+              m.state ??
+              (authorityRef.current.lastPublicJson
+                ? (JSON.parse(authorityRef.current.lastPublicJson) as PublicGameState)
+                : null)
+            if (localPub) ingestPublicState(m.rev, localPub)
             pendingRollbackRef.current.clear()
             const alreadyFired = optimisticEventsFiredRef.current.delete(m.actionId)
             if (m.events.length > 0 && !alreadyFired) onGameEventsRef.current?.(m.events)
@@ -410,7 +472,10 @@ export function useOnlineBoardSync(params: {
           if (msg.to === myId) ingestPrivateHand(msg.hand, msg.rev)
           return
         case 'action_applied': {
-          ingestPublicState(msg.rev, msg.state)
+          clearActionAck(msg.actionId)
+          if (msg.state) ingestPublicState(msg.rev, msg.state)
+          else if (msg.patch && msg.fromRev != null) ingestPublicPatch(msg.fromRev, msg.rev, msg.patch)
+          else requestSnapshot()
           pendingRollbackRef.current.clear()
           const alreadyFired = optimisticEventsFiredRef.current.delete(msg.actionId)
           const events = msg.events ?? []
@@ -418,6 +483,7 @@ export function useOnlineBoardSync(params: {
           return
         }
         case 'action_rejected':
+          clearActionAck(msg.actionId)
           if (msg.to === myId) rollbackAction(msg.actionId, msg.error)
           return
         case 'game_action': {
@@ -460,6 +526,7 @@ export function useOnlineBoardSync(params: {
               resyncStartedAtRef.current = 0
             }
             lastAuthorityIdRef.current = msg.authorityId
+            setSyncClock((prev) => (prev.hostRev === msg.rev ? prev : { ...prev, hostRev: msg.rev }))
             const viewerId = resolveViewerId()
             // Only require private-hand catch-up after the host has successfully
             // delivered a hand for this seat. Name-fallback viewer ids without a
@@ -494,12 +561,14 @@ export function useOnlineBoardSync(params: {
     },
     [
       ingestPublicState,
+      ingestPublicPatch,
       ingestPrivateHand,
       rollbackAction,
       deliverOutbound,
       sendWire,
       requestSnapshot,
       resolveViewerId,
+      clearActionAck,
     ]
   )
   const handleWireRef = useRef(handleWire)
@@ -576,6 +645,11 @@ export function useOnlineBoardSync(params: {
         } else rollbackAction(actionId, result.error)
       } else {
         sendWire({ kind: 'game_action', from: connId, actionId, action })
+        const timer = window.setTimeout(() => {
+          pendingAckTimersRef.current.delete(actionId)
+          setSyncClock((prev) => (prev.hostDelayed ? prev : { ...prev, hostDelayed: true }))
+        }, ACTION_ACK_TIMEOUT_MS)
+        pendingAckTimersRef.current.set(actionId, timer)
       }
 
       return actionId
@@ -603,6 +677,8 @@ export function useOnlineBoardSync(params: {
     lastSnapshotRequestAtRef.current = 0
     resyncStartedAtRef.current = 0
     lastStaleRetryAtRef.current = 0
+    clearAllActionAcks()
+    setSyncClock({ localRev: 0, hostRev: 0, hostDelayed: false })
     if (authorityPersistTimerRef.current != null) {
       window.clearTimeout(authorityPersistTimerRef.current)
       authorityPersistTimerRef.current = null
@@ -693,6 +769,7 @@ export function useOnlineBoardSync(params: {
     })
 
     return () => {
+      clearAllActionAcks()
       void client.removeChannel(ch)
       if (channelRef.current === ch) channelRef.current = null
     }
@@ -859,5 +936,7 @@ export function useOnlineBoardSync(params: {
     requestResync,
     flushAuthorityPersist,
     isOnline: config != null && getRealtimeClient() != null,
+    syncClock,
+    authorityLocation: AUTHORITY_LOCATION,
   }
 }

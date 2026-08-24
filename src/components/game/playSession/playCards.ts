@@ -15,6 +15,7 @@ import {
 import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
 import { attachUndoSnapshotIfTurnAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
 import {
+  CALAMITY_OUTCOME_BANNER_MS,
   beginCalamity,
   calamityAllowedThisRound,
   calamityLossMillion,
@@ -1435,13 +1436,16 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
               currentPlayer.money
             queueMicrotask(() => {
               toast.success(
-                `${currentPlayer.name} collected income: $${Math.max(0, gained)}M (rolled ${face}).`
+                `${currentPlayer.name} collected income: $${Math.max(0, gained)}M (rolled ${face}).`,
+                { duration: CALAMITY_OUTCOME_BANNER_MS }
               )
               broadcastBoardFx({
                 sound: 'income',
                 notice: {
                   title: `${currentPlayer.name} collected income`,
                   detail: `Rolled ${face} — $${Math.max(0, gained)}M added to their treasury.`,
+                  durationMs: CALAMITY_OUTCOME_BANNER_MS,
+                  replace: true,
                 },
               })
             })

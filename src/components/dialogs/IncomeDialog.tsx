@@ -10,8 +10,10 @@ import {
   incomeRollMoodForDie,
 } from '@/lib/incomeDice'
 import { AI_FAST_PLAYBACK_MS } from '@/lib/bot/aiTiming'
+import { CALAMITY_OUTCOME_BANNER_MS } from '@/lib/calamity'
 import { playIncomeSound } from '@/lib/soundEffects'
 import { useDiceBox } from '@/hooks/use-dice-box'
+import { closedIncomeDialog, setIncomeDialogState } from '@/lib/playUiStore'
 
 interface IncomeDialogProps {
   open: boolean
@@ -48,6 +50,8 @@ interface IncomeDialogProps {
   rivalUnionPlotLabels?: string[]
   /** True when the player has any built property — allows Income roll even if Union penalties net the pool to $0. */
   hasBuiltPropertiesForIncomeRoll?: boolean
+  /** City income tax levy ($M) if this founder has a pending Income Taxation assessment. */
+  incomeTaxLevyMillion?: number
   /**
    * When false, the player may not apply Double Income to this Income resolution (Income + Double Income
    * would exceed the per-turn action limit).
@@ -126,6 +130,7 @@ export function IncomeDialog({
   unionIncomePenalty = 0,
   rivalUnionPlotLabels = [],
   hasBuiltPropertiesForIncomeRoll,
+  incomeTaxLevyMillion = 0,
   doubleIncomeAllowed = true,
   onComplete,
   onCancel,
@@ -166,6 +171,7 @@ export function IncomeDialog({
 
   const onCompleteRef = useRef(onComplete)
   onCompleteRef.current = onComplete
+  const collectedRef = useRef(false)
   const playerRef = useRef(player)
   playerRef.current = player
   const totalIncomeRef = useRef(totalIncome)
@@ -176,6 +182,9 @@ export function IncomeDialog({
   doubleAllowedRef.current = doubleIncomeAllowed
   const bankValueRef = useRef(bankValue)
   bankValueRef.current = bankValue
+  const incomeResultRef = useRef(incomeResult)
+  incomeResultRef.current = incomeResult
+  const resultShownAtRef = useRef(0)
 
   // Reset chooser UI only when the dialog opens. Parent re-renders pass a new
   // `player` object identity; depending on it here cancelled Founderbot collect.
@@ -184,7 +193,9 @@ export function IncomeDialog({
     setIncomeResult(null)
     setDoubleIncomeActive(false)
     setSelectedDoubleIncomeId(null)
-    setShowInitialChoice(true)
+    collectedRef.current = false
+    resultShownAtRef.current = 0
+    setShowInitialChoice(!hasPropsRef.current)
     const hasDoubleIncome = (playerRef.current?.actionCards || []).some((instance) => {
       const card = actionCards.find((c) => c.id === instance.cardId)
       return card?.id === 'double-income'
@@ -275,26 +286,77 @@ export function IncomeDialog({
     // Keep the gross rolled amount here. Mafia tribute is settled from remaining
     // cash after investors so recipients never receive more than the payer can fund.
 
-    setIncomeResult({ percentage, amount, status, event })
+    setIncomeResult((prev) => {
+      if (
+        prev &&
+        prev.percentage === percentage &&
+        prev.amount === amount &&
+        prev.status === status
+      ) {
+        return prev
+      }
+      return { percentage, amount, status, event }
+    })
   }, [aiAutoplay, diceValue, totalIncome, doubleIncomeActive])
 
-  const handleCollect = () => {
-    if (incomeResult) {
+  const selectedDoubleIncomeIdRef = useRef(selectedDoubleIncomeId)
+  selectedDoubleIncomeIdRef.current = selectedDoubleIncomeId
+  const diceValueRef = useRef(diceValue)
+  diceValueRef.current = diceValue
+
+  const commitIncomeResult = () => {
+    const result = incomeResultRef.current
+    if (!result) return
+    if (!collectedRef.current) {
+      collectedRef.current = true
       playIncomeSound()
-      onComplete(
-        incomeResult.amount,
-        doubleIncomeAllowed ? selectedDoubleIncomeId || undefined : undefined,
+      onCompleteRef.current(
+        result.amount,
+        doubleAllowedRef.current ? selectedDoubleIncomeIdRef.current || undefined : undefined,
         'property-roll',
-        diceValue ?? undefined
+        diceValueRef.current && diceValueRef.current >= 1 && diceValueRef.current <= 6
+          ? diceValueRef.current
+          : undefined
       )
     }
+    // Dismiss even if the parent handler already applied income — never leave Collecting… up.
+    window.queueMicrotask(() => setIncomeDialogState({ ...closedIncomeDialog }))
   }
+  const commitIncomeResultRef = useRef(commitIncomeResult)
+  commitIncomeResultRef.current = commitIncomeResult
+
+  useEffect(() => {
+    if (!incomeResult) {
+      resultShownAtRef.current = 0
+      return
+    }
+    if (resultShownAtRef.current === 0) {
+      resultShownAtRef.current = Date.now()
+    }
+  }, [incomeResult])
+
+  /**
+   * Interval (not a one-shot timeout) so React Strict Mode's effect cleanup/re-run
+   * cannot cancel collect forever and leave the dialog stuck on "Collecting…".
+   */
+  useEffect(() => {
+    if (aiAutoplay || !open) return
+    const tick = () => {
+      if (!incomeResultRef.current || resultShownAtRef.current === 0) return
+      if (Date.now() - resultShownAtRef.current < CALAMITY_OUTCOME_BANNER_MS) return
+      commitIncomeResultRef.current()
+    }
+    const id = window.setInterval(tick, 100)
+    tick()
+    return () => window.clearInterval(id)
+  }, [aiAutoplay, open])
 
   const handleBankCard = () => {
     const incomeCard = actionCards.find(c => c.id === 'income')
     if (incomeCard) {
       playIncomeSound()
       onComplete(incomeCard.bankValue, undefined, 'bank-income-card')
+      window.queueMicrotask(() => setIncomeDialogState({ ...closedIncomeDialog }))
     }
   }
 
@@ -303,6 +365,10 @@ export function IncomeDialog({
   }
 
   const handleClose = () => {
+    if (incomeResultRef.current) {
+      commitIncomeResult()
+      return
+    }
     if (!isRolling) {
       onCancel()
     }
@@ -914,6 +980,11 @@ export function IncomeDialog({
                       <div style={{ fontSize: 'clamp(22px, 5vw, 28px)', fontWeight: 300, color: '#1eaedb' }}>
                         ${incomeResult.amount}M
                       </div>
+                      {incomeTaxLevyMillion > 0 && (
+                        <div style={{ marginTop: 6, fontSize: 11, color: '#fbbf24', lineHeight: 1.35 }}>
+                          City income tax −${incomeTaxLevyMillion}M is applied when this income is collected.
+                        </div>
+                      )}
                       {mafiaLevyTotal > 0 ? (
                         <div style={{ marginTop: 6, fontSize: 11, color: '#f87171', lineHeight: 1.35 }}>
                           Mafia tribute up to −${mafiaLevyTotal}M is paid from remaining cash after investor shares.
@@ -922,27 +993,32 @@ export function IncomeDialog({
                     </div>
                   </div>
 
+                  <p
+                    style={{
+                      textAlign: 'center',
+                      fontSize: 13,
+                      color: '#93c5fd',
+                      margin: '8px 0 0',
+                    }}
+                  >
+                    Collecting…
+                  </p>
                   <button
-                    onClick={handleCollect}
+                    type="button"
+                    onClick={commitIncomeResult}
                     className="btn-ps"
                     style={{
-                      position: 'sticky',
-                      bottom: 0,
-                      zIndex: 2,
-                      height: 48,
-                      width: '100%',
+                      height: 36,
                       borderRadius: 10,
                       backgroundColor: '#0070cc',
                       color: '#fff',
-                      fontSize: 15,
-                      fontWeight: 700,
+                      fontSize: 13,
+                      fontWeight: 600,
                       border: '2px solid transparent',
                       cursor: 'pointer',
-                      boxShadow: '0 -12px 24px #141418',
-                      marginTop: 4,
                     }}
                   >
-                    Collect Income
+                    Collect now
                   </button>
                 </div>
               )}

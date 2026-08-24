@@ -12,7 +12,7 @@ export type PlayCardsOptionsPayload = {
   suppressPlacementToast?: boolean
 }
 
-/** Client → PartyKit room authority. */
+/** Client → table authority. Prefer these typed actions on the wire; `commit_actor_state` is the fallback for locally resolved card plays (including Founderbot income after playCards already committed). */
 export type GameAction =
   /** `seatIndex` = the seat ending its turn, so the authority can drop stale end_turns precisely. */
   | { type: 'end_turn'; seatIndex?: number }
@@ -110,6 +110,8 @@ export type BoardFx = {
     detail?: string
     /** Override default board-notice duration (ms). */
     durationMs?: number
+    /** Drop any showing/queued notice and show this one immediately. */
+    replace?: boolean
     /** Strong red overlay for city-wide Calamity. */
     tone?: 'default' | 'calamity'
   }

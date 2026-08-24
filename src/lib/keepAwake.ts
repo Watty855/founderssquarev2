@@ -1,6 +1,9 @@
 /**
  * Prevent the device screen from sleeping while a table is in progress.
  * Uses @capacitor-community/keep-awake on native; Screen Wake Lock API in browsers that support it.
+ *
+ * Required while the hosting phone is the rules authority — iOS suspend still
+ * freezes guests; wake-lock only delays that. Cloud/edge authority is the complete fix.
  */
 
 import { Capacitor } from '@capacitor/core'

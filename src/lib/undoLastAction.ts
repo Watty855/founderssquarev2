@@ -115,9 +115,15 @@ export function attachUndoSnapshotIfTurnAction(before: GameState, after: GameSta
 
 export function canUndoLastAction(
   state: GameState,
-  opts: { handInteractionsActive: boolean; isSpectator: boolean }
+  opts: {
+    handInteractionsActive: boolean
+    isSpectator: boolean
+    /** Die is in the air or an outcome banner is up — those resolutions cannot be undone. */
+    diceResolutionOpen?: boolean
+  }
 ): boolean {
   if (opts.isSpectator || !opts.handInteractionsActive) return false
+  if (opts.diceResolutionOpen) return false
   const undo = state.undoLastAction
   if (!undo) return false
   return undo.playerIndex === state.currentPlayerIndex

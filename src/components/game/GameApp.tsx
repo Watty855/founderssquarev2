@@ -116,7 +116,7 @@ import {
   playerHasBuiltIncomeProperty,
 } from '@/lib/bot/simpleAiTurn'
 import type { SimpleAiTurnHandlers, SimpleAiTurnUi } from '@/lib/bot/simpleAiTurn'
-import { AI_MAIN_PHASE_DELAY_NORMAL_MS } from '@/lib/bot/aiTiming'
+import { AI_MAIN_PHASE_DELAY_NORMAL_MS, AI_MAIN_PHASE_BURST_STEPS } from '@/lib/bot/aiTiming'
 import {
   applyCalamityRoll,
   beginCalamity,
@@ -233,7 +233,7 @@ function AppInner() {
     [setGameStateRaw]
   )
   useLayoutEffect(() => {
-    publishGameState(gameState)
+    if (getGameTableSnapshot() !== gameState) publishGameState(gameState)
   }, [gameState])
   const [hostAwayWarning, setHostAwayWarning] = useState(false)
   const [guestOnlineHintDismissed, setGuestOnlineHintDismissed] = useState(() => {
@@ -296,6 +296,7 @@ function AppInner() {
     connectionStatus,
     requestResync,
     flushAuthorityPersist,
+    syncClock,
   } = partyBoardSync
   const sendActionRef = useRef(sendAction)
   sendActionRef.current = sendAction
@@ -527,6 +528,7 @@ function AppInner() {
         showBoardNotice(fx.notice.title, fx.notice.detail, {
           durationMs: fx.notice.durationMs,
           tone: fx.notice.tone,
+          replace: fx.notice.replace,
         })
       }
     }
@@ -541,7 +543,10 @@ function AppInner() {
   const broadcastDiceRollNotice = useCallback(
     (title: string, detail?: string, sound?: BoardFx['sound']) => {
       const diceTitle = title.startsWith('🎲') ? title : `🎲 ${title}`
-      broadcastBoardFx({ notice: { title: diceTitle, detail }, sound })
+      broadcastBoardFx({
+        notice: { title: diceTitle, detail, durationMs: CALAMITY_OUTCOME_BANNER_MS },
+        sound,
+      })
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [isOnlineActor]
@@ -562,6 +567,7 @@ function AppInner() {
         notice: {
           title: titleOverride ?? confrontationNoticeTitle(kind, attackerName, targetName),
           detail: confrontationNoticeDetail(outcome, detail),
+          durationMs: CALAMITY_OUTCOME_BANNER_MS,
         },
         sound,
       })
@@ -1292,7 +1298,9 @@ function AppInner() {
     const announceKey = `${pending.instance.instanceId}|${pending.currentRollIndex}`
     if (announcedCalamityKeyRef.current !== announceKey) {
       announcedCalamityKeyRef.current = announceKey
-      if (pending.currentRollIndex === 0) {
+      // Humans get a 2s pre-roll banner; Founderbots skip it so the table does not
+      // sit idle. Calamity *outcome* banners still serialize the next roll.
+      if (pending.currentRollIndex === 0 && !isAiSeat(roller)) {
         const step = pending.currentRollIndex + 1
         const total = pending.rollOrderPlayerIds.length
         showBoardNotice(
@@ -1455,6 +1463,8 @@ function AppInner() {
         notice: {
           title: '🎲 Income resolution',
           detail: `${getPlayUiSnapshot().incomeDialogState.player?.name ?? 'A founder'} is rolling for income.`,
+          durationMs: CALAMITY_OUTCOME_BANNER_MS,
+          replace: true,
         },
       },
       { localEcho: false }
@@ -1868,13 +1878,45 @@ function AppInner() {
   useEffect(() => {
     if (!aiPlayerReady) return
     const tick = () => {
-      const gsSnap = aiGsRef.current
-      const cpSnap = aiCpRef.current
-      const ui = aiUiRef.current
       const hx = aiHooksRef.current
-      if (!ui || !gsSnap || !cpSnap || !cpSnap.isAi) return
-      const acted = trySimpleAiMainPhase(gsSnap, cpSnap, ui, hx)
-      if (acted) lastAiProgressAtRef.current = Date.now()
+      if (!hx) return
+      for (let step = 0; step < AI_MAIN_PHASE_BURST_STEPS; step++) {
+        const tableGs = getGameTableSnapshot()
+        const gsSnap = tableGs.players.length > 0 ? tableGs : aiGsRef.current
+        const cpSnap = gsSnap?.players[gsSnap.currentPlayerIndex]
+        const playUi = getPlayUiSnapshot()
+        const ui = aiUiRef.current
+        if (!ui || !gsSnap || !cpSnap?.isAi) return
+        if (playUi.incomeDialogState.open || playUi.rollDieDialogState.open) return
+        const acted = trySimpleAiMainPhase(
+          gsSnap,
+          cpSnap,
+          {
+            ...ui,
+            rollDieDialogOpen: playUi.rollDieDialogState.open,
+            incomeDialogOpen: playUi.incomeDialogState.open,
+            discardDialogOpen: playUi.discardDialogState.open,
+            discardDialogNumToDiscard: playUi.discardDialogState.numToDiscard,
+            placementActive: playUi.placementMode.active,
+            placementPropertyCardId: playUi.placementMode.propertyCardId,
+            placementWildEmulatePropertyId: playUi.placementMode.wildCardEmulatePropertyId,
+            placementHousingHighDensity: playUi.placementMode.housingHighDensity,
+            takeoverSelectActive: playUi.takeoverSelectMode.active,
+            scandalSelectActive: playUi.scandalSelectMode.active,
+            rezoningPhase: playUi.rezoningMode.phase,
+            investmentSelectActive: playUi.investmentSelectMode.active,
+            removeInvestorsSelectActive: playUi.removeInvestorsSelectMode.active,
+            discardPropertySelectActive: playUi.discardPropertySelectMode.active,
+            taxBuildModePhase: playUi.taxBuildMode.phase,
+            taxBuildPromptOpen: playUi.taxBuildPrompt.open,
+            actionCriteriaDialogOpen: playUi.actionCriteriaDialog.open,
+            showNewCardsAnimation: !!gsSnap.showNewCardsAnimation,
+          },
+          hx
+        )
+        if (acted) lastAiProgressAtRef.current = Date.now()
+        if (!acted) break
+      }
     }
     const immediate = window.setTimeout(tick, 120)
     const interval = window.setInterval(tick, AI_MAIN_PHASE_DELAY_NORMAL_MS)
@@ -2004,6 +2046,43 @@ function AppInner() {
   const councilFreezePlayerNumber =
     councilFreezePlayerIndex >= 0 ? councilFreezePlayerIndex + 1 : null
 
+  const guestHostDelayed = partyBoardConfig?.role === 'guest' && syncClock.hostDelayed
+  const guestRevBehind =
+    partyBoardConfig?.role === 'guest' &&
+    syncClock.hostRev > syncClock.localRev &&
+    (syncClock.localRev > 0 || syncClock.hostRev > 0)
+  const guestClockUnhealthy = Boolean(guestHostDelayed || guestRevBehind)
+  const revPair =
+    syncClock.localRev > 0 || syncClock.hostRev > 0
+      ? `${syncClock.localRev}/${syncClock.hostRev}`
+      : null
+  const badgeTone: 'ok' | 'warn' | 'error' =
+    connectionStatus === 'error'
+      ? 'error'
+      : connectionStatus === 'connected' && !guestClockUnhealthy
+        ? 'ok'
+        : 'warn'
+  const guestStatusLabel =
+    guestHostDelayed && revPair
+      ? `Host delayed · ${revPair}`
+      : guestHostDelayed
+        ? 'Host delayed'
+        : guestRevBehind && revPair
+          ? `Behind · ${revPair}`
+          : connectionStatus === 'connected'
+            ? revPair
+              ? `Online · ${revPair}`
+              : 'Online'
+            : connectionStatus === 'resyncing'
+              ? revPair
+                ? `Resyncing · ${revPair}`
+                : 'Resyncing…'
+              : connectionStatus === 'stale'
+                ? 'Host unreachable'
+                : connectionStatus === 'error'
+                  ? 'Connection error'
+                  : 'Connecting…'
+
   return (
     <div className="h-screen flex flex-col overflow-hidden game-table" style={{ backgroundColor: '#000000' }}>
       {partyBoardConfig ? (
@@ -2016,29 +2095,29 @@ function AppInner() {
             onClick={partyBoardConfig.role === 'guest' ? requestResync : undefined}
             title={
               partyBoardConfig.role === 'guest'
-                ? 'Online table connection — click to resync'
-                : 'You are the table host — keep this screen open'
+                ? guestHostDelayed
+                  ? 'Host did not ACK this action — keep their device awake, then resync'
+                  : guestRevBehind
+                    ? `This device is at rev ${syncClock.localRev}; host is at ${syncClock.hostRev}`
+                    : 'Online table connection — click to resync'
+                : 'You are the table host — keep this screen open. This device is the rules authority.'
             }
             aria-live="polite"
             className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] shadow-lg backdrop-blur-md"
             style={{
               cursor: partyBoardConfig.role === 'guest' ? 'pointer' : 'default',
               color:
-                connectionStatus === 'connected'
-                  ? '#bbf7d0'
-                  : connectionStatus === 'error'
-                    ? '#fecaca'
-                    : '#fde68a',
+                badgeTone === 'ok' ? '#bbf7d0' : badgeTone === 'error' ? '#fecaca' : '#fde68a',
               borderColor:
-                connectionStatus === 'connected'
+                badgeTone === 'ok'
                   ? 'rgba(74,222,128,0.45)'
-                  : connectionStatus === 'error'
+                  : badgeTone === 'error'
                     ? 'rgba(248,113,113,0.5)'
                     : 'rgba(251,191,36,0.5)',
               background:
-                connectionStatus === 'connected'
+                badgeTone === 'ok'
                   ? 'rgba(6,78,59,0.88)'
-                  : connectionStatus === 'error'
+                  : badgeTone === 'error'
                     ? 'rgba(127,29,29,0.9)'
                     : 'rgba(120,53,15,0.9)',
             }}
@@ -2051,28 +2130,17 @@ function AppInner() {
                 flexShrink: 0,
                 borderRadius: 999,
                 backgroundColor:
-                  connectionStatus === 'connected'
-                    ? '#4ade80'
-                    : connectionStatus === 'error'
-                      ? '#f87171'
-                      : '#fbbf24',
-                boxShadow:
-                  connectionStatus === 'connected' ? '0 0 8px rgba(74,222,128,0.8)' : undefined,
+                  badgeTone === 'ok' ? '#4ade80' : badgeTone === 'error' ? '#f87171' : '#fbbf24',
+                boxShadow: badgeTone === 'ok' ? '0 0 8px rgba(74,222,128,0.8)' : undefined,
               }}
             />
             {partyBoardConfig.role === 'host'
               ? connectionStatus === 'connected'
-                ? 'Hosting'
+                ? revPair
+                  ? `Hosting · ${revPair}`
+                  : 'Hosting'
                 : 'Host reconnecting…'
-              : connectionStatus === 'connected'
-                ? 'Online'
-                : connectionStatus === 'resyncing'
-                  ? 'Resyncing…'
-                  : connectionStatus === 'stale'
-                    ? 'Host unreachable'
-                    : connectionStatus === 'error'
-                      ? 'Connection error'
-                      : 'Connecting…'}
+              : guestStatusLabel}
           </button>
           {partyBoardConfig.role === 'host' ? (
             <div className="rounded-xl border border-sky-300/30 bg-black/85 px-3 py-2 text-left shadow-lg backdrop-blur-md">
@@ -2096,6 +2164,24 @@ function AppInner() {
                   className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-100"
                 >
                   End table
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {partyBoardConfig.role === 'guest' && guestHostDelayed && connectionStatus === 'connected' ? (
+            <div className="rounded-xl border border-amber-300/50 bg-amber-950/90 px-3 py-2 text-left shadow-lg backdrop-blur-md">
+              <p className="m-0 mb-2 text-[11px] leading-snug text-amber-50/90">
+                Host delayed — no ACK for your last action
+                {revPair ? ` (you ${syncClock.localRev}, host ${syncClock.hostRev})` : ''}. Keep
+                their device awake, then Resync.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={requestResync}
+                  className="rounded-full border border-sky-300/40 bg-sky-500/20 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-sky-100"
+                >
+                  Resync
                 </button>
               </div>
             </div>

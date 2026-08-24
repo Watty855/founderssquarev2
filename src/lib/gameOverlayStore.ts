@@ -121,11 +121,17 @@ export function resetOverlayStore() {
 export function showBoardNotice(
   title: ReactNode,
   detail?: string,
-  opts?: { quick?: boolean; durationMs?: number; tone?: BoardNoticeTone }
+  opts?: { quick?: boolean; durationMs?: number; tone?: BoardNoticeTone; replace?: boolean }
 ) {
   const ms =
     opts?.durationMs ?? (opts?.tone === 'calamity' ? CALAMITY_OUTCOME_BANNER_MS : opts?.quick ? 900 : 4000)
-  if (overlayState.boardNotice != null || boardNoticeTimer) {
+  if (opts?.replace) {
+    if (boardNoticeTimer) {
+      clearTimeout(boardNoticeTimer)
+      boardNoticeTimer = null
+    }
+    noticeQueue = []
+  } else if (overlayState.boardNotice != null || boardNoticeTimer) {
     noticeQueue.push({ title, detail, tone: opts?.tone, durationMs: ms })
     return
   }

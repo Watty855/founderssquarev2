@@ -10,7 +10,6 @@ import {
   calamityLossMillion,
   calamityPercentForFace,
   calamityPostRollBannerDetail,
-  CALAMITY_ACCEPT_LABEL,
   CALAMITY_PRE_ROLL_INSTRUCTION,
   pickCalamityVariant,
   type CalamityVariant,
@@ -20,6 +19,7 @@ import {
   defenseRollRequiredTitle,
 } from '@/lib/confrontationNotice'
 import { AI_FAST_PLAYBACK_MS } from '@/lib/bot/aiTiming'
+import { CALAMITY_OUTCOME_BANNER_MS } from '@/lib/calamity'
 
 export type RollDieDialogMode =
   | 'roll-die'
@@ -126,10 +126,11 @@ function RollDieDialogInner({
   const councilFreezeFlow = mode === 'council-freeze-attacker' || mode === 'council-freeze-defender'
   const councilFreezeBankValue = actionCards.find((c) => c.id === 'city-council-freeze')?.bankValue ?? 2
 
-  const [showCouncilFreezeIntro, setShowCouncilFreezeIntro] = useState(true)
+  const [showCouncilFreezeIntro, setShowCouncilFreezeIntro] = useState(false)
   const diceBoxOpen = open && !aiAutoplay && (!councilFreezeFlow || !showCouncilFreezeIntro)
   const showNonIntroDiceUi = !councilFreezeFlow || !showCouncilFreezeIntro
   const aiResolvedKeyRef = useRef('')
+  const autoContinueKeyRef = useRef('')
   const onCompleteRef = useRef(onComplete)
   onCompleteRef.current = onComplete
   const onCalamitySettledRef = useRef(onCalamitySettled)
@@ -165,7 +166,7 @@ function RollDieDialogInner({
 
   useEffect(() => {
     if (open && councilFreezeFlow) {
-      setShowCouncilFreezeIntro((diceRetryNonce ?? 0) === 0)
+      setShowCouncilFreezeIntro(false)
     }
   }, [open, mode, councilFreezeFlow, diceRetryNonce])
 
@@ -179,7 +180,7 @@ function RollDieDialogInner({
     if (!councilFreezeFailAuto || !open) return
     const t = window.setTimeout(() => {
       onCouncilFreezeFailDismiss?.()
-    }, 2400)
+    }, CALAMITY_OUTCOME_BANNER_MS)
     return () => window.clearTimeout(t)
   }, [councilFreezeFailAuto, open, onCouncilFreezeFailDismiss])
 
@@ -192,7 +193,8 @@ function RollDieDialogInner({
 
   useEffect(() => {
     if (aiAutoplay) return
-    if (!open || !councilFreezeFlow || showCouncilFreezeIntro || councilFreezeFailAuto) return
+    if (!open || councilFreezeFailAuto) return
+    if (showCouncilFreezeIntro) return
     if (isRolling || diceValue !== null || !isReady) return
     const t = window.setTimeout(() => {
       if (mode === 'council-freeze-attacker') void runAttackerRoll()
@@ -393,8 +395,42 @@ function RollDieDialogInner({
     (removeInvestorsFlow && diceValue !== null) ||
     (calamityFlow && diceValue !== null)
 
+  useEffect(() => {
+    if (aiAutoplay) return
+    if (!open || diceValue === null || !singleContinueAfterRoll) return
+    // Calamity closes this dialog from onCalamitySettled and holds the overlay 2s.
+    if (calamityFlow) return
+    const key = `${mode}|${diceRetryNonce}|${diceValue}`
+    let cancelled = false
+    const t = window.setTimeout(() => {
+      if (cancelled) return
+      if (autoContinueKeyRef.current === key) return
+      autoContinueKeyRef.current = key
+      onCompleteRef.current(diceValue)
+    }, CALAMITY_OUTCOME_BANNER_MS)
+    return () => {
+      cancelled = true
+      window.clearTimeout(t)
+    }
+  }, [
+    aiAutoplay,
+    open,
+    diceValue,
+    singleContinueAfterRoll,
+    calamityFlow,
+    mode,
+    diceRetryNonce,
+  ])
+
   const suppressBackdropDismiss =
-    councilFreezeFailAuto || takeoverFlow || scandalFlow || rezoningFlow || policeRaidFlow || removeInvestorsFlow || calamityFlow
+    councilFreezeFailAuto ||
+    councilFreezeFlow ||
+    takeoverFlow ||
+    scandalFlow ||
+    rezoningFlow ||
+    policeRaidFlow ||
+    removeInvestorsFlow ||
+    calamityFlow
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && !suppressBackdropDismiss && onCancel()}>
@@ -437,7 +473,7 @@ function RollDieDialogInner({
               City Council fails
             </p>
             <p style={{ margin: 0, fontSize: 12, color: '#a8a8b8', maxWidth: 280, lineHeight: 1.45 }}>
-              Three rolls without reaching 5–6 after influence. This window will close automatically.
+              Three rolls without reaching 5–6 after influence. This closes in two seconds.
             </p>
           </div>
         )}
@@ -835,62 +871,28 @@ function RollDieDialogInner({
               )}
 
               {diceValue === null ? (
-                aiAutoplay ? (
-                  <p style={{ textAlign: 'center', fontSize: 13, color: '#93c5fd', margin: 0 }}>
-                    {isRolling || !isReady ? 'Computer is rolling…' : 'Computer initiating roll…'}
-                  </p>
-                ) : (
-                <button
-                  onClick={() => {
-                    if (mode === 'council-freeze-attacker') void runAttackerRoll()
-                    else void roll()
-                  }}
-                  disabled={isRolling || !isReady}
-                  className="btn-ps"
-                  style={{
-                    height: 42, borderRadius: 10, backgroundColor: '#0070cc', color: '#fff',
-                    fontSize: 14, fontWeight: 600, border: '2px solid transparent',
-                    cursor: isRolling || !isReady ? 'not-allowed' : 'pointer',
-                    opacity: isRolling || !isReady ? 0.6 : 1,
-                  }}
-                >
-                  {isRolling
-                    ? 'Rolling...'
-                    : !isReady
-                      ? 'Loading...'
-                      : takeoverFlow ||
-                          scandalFlow ||
-                          rezoningFlow ||
-                          policeRaidFlow ||
-                          removeInvestorsFlow
-                        ? 'Roll the die'
-                        : 'Roll Die'}
-                </button>
-                )
+                <p style={{ textAlign: 'center', fontSize: 13, color: '#93c5fd', margin: 0 }}>
+                  {aiAutoplay
+                    ? isRolling || !isReady
+                      ? 'Computer is rolling…'
+                      : 'Computer initiating roll…'
+                    : isRolling || !isReady
+                      ? 'Rolling…'
+                      : 'Rolling…'}
+                </p>
               ) : singleContinueAfterRoll ? (
                 aiAutoplay ? (
                   <p style={{ textAlign: 'center', fontSize: 13, color: '#93c5fd', margin: 0 }}>
                     Computer resolving…
                   </p>
+                ) : calamityFlow ? (
+                  <p style={{ textAlign: 'center', fontSize: 13, color: '#fecaca', margin: 0 }}>
+                    Outcome locked — continuing…
+                  </p>
                 ) : (
-                <button
-                  onClick={() => {
-                    if (diceValue === null) return
-                    onComplete(
-                      diceValue,
-                      calamityFlow && calamityVariant
-                        ? { calamityVariantKey: calamityVariant.key }
-                        : undefined
-                    )
-                  }}
-                  className="btn-ps"
-                  style={{
-                    width: '100%', height: 42, borderRadius: 10, backgroundColor: calamityFlow ? '#991b1b' : '#0070cc', color: '#fff',
-                    fontSize: 14, fontWeight: 600, border: calamityFlow ? '1px solid #fecaca' : '2px solid transparent', cursor: 'pointer',
-                  }}
-                >
-                  {calamityFlow ? CALAMITY_ACCEPT_LABEL : 'Continue'}
-                </button>
+                  <p style={{ textAlign: 'center', fontSize: 13, color: '#93c5fd', margin: 0 }}>
+                    Continuing…
+                  </p>
                 )
               ) : showAttackerFailChoices ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -951,7 +953,14 @@ function RollDieDialogInner({
                 </div>
               ) : null}
 
-              {!councilFreezeFailAuto && !takeoverFlow && !scandalFlow && !rezoningFlow && !policeRaidFlow && !removeInvestorsFlow && (
+              {!councilFreezeFailAuto &&
+                !councilFreezeFlow &&
+                !takeoverFlow &&
+                !scandalFlow &&
+                !rezoningFlow &&
+                !policeRaidFlow &&
+                !removeInvestorsFlow &&
+                !calamityFlow && (
                 <button
                   onClick={onCancel}
                   style={{ height: 28, background: 'none', color: '#666680', fontSize: 12, border: 'none', cursor: 'pointer' }}

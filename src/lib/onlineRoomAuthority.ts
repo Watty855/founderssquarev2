@@ -7,11 +7,19 @@ import { resolveGuestSeatForRemap } from '@/lib/partySeatIds'
 import { buildPrivateHandForPlayer } from '@/lib/partyGameBroadcast'
 import { toPublicGameState, type PublicGameState } from '@/lib/onlinePublicState'
 import type { PrivateHandPayload } from '@/lib/onlinePublicState'
+import {
+  diffPublicGameState,
+  patchIsCheaperThanKeyframe,
+  shouldSendPublicKeyframe,
+  type PublicGameStatePatch,
+} from '@/lib/publicStatePatch'
 
 /**
- * In-memory game authority — transport agnostic. In v2 it runs on the HOST
- * device: guests send actions over the realtime channel, the host validates
- * them with the rules engine and broadcasts authoritative state back.
+ * In-memory game authority — transport agnostic. Today it runs on the HOST
+ * phone (`AUTHORITY_LOCATION = host-device`). A cloud/edge process should emit
+ * the same AuthorityOutbound messages so mixed IPs and iOS suspend cannot freeze
+ * the table. Guests send typed actions; the authority validates them and
+ * broadcasts a revision-keyed public patch (full snapshot on join / every Nth rev).
  */
 export type OnlineAuthorityStore = {
   gameRev: number
@@ -19,10 +27,20 @@ export type OnlineAuthorityStore = {
   authorityId: string | null
   gameHostId: string | null
   gameStateJson: string | null
+  /** Last public snapshot JSON — used to emit revision-keyed patches. */
+  lastPublicJson: string | null
+  lastHandJsonByKey: Record<string, string>
 }
 
 export function createAuthorityStore(): OnlineAuthorityStore {
-  return { gameRev: 0, authorityId: null, gameHostId: null, gameStateJson: null }
+  return {
+    gameRev: 0,
+    authorityId: null,
+    gameHostId: null,
+    gameStateJson: null,
+    lastPublicJson: null,
+    lastHandJsonByKey: {},
+  }
 }
 
 export function authorityIsLive(store: OnlineAuthorityStore): boolean {
@@ -73,6 +91,8 @@ export function authorityResumeGame(
   store.gameRev = Math.max(1, Math.floor(snap.gameRev))
   store.gameHostId = hostSessionId.trim() || snap.gameHostId
   store.gameStateJson = JSON.stringify(parsed)
+  store.lastPublicJson = JSON.stringify(toPublicGameState(parsed))
+  store.lastHandJsonByKey = {}
   return { ok: true, state: parsed }
 }
 
@@ -83,7 +103,9 @@ export type AuthorityOutbound =
       type: 'action_applied'
       rev: number
       actionId: string
-      state: PublicGameState
+      state?: PublicGameState
+      fromRev?: number
+      patch?: PublicGameStatePatch
       events: GameEvent[]
     }
   | { target: 'all'; type: 'game_cleared' }
@@ -169,47 +191,69 @@ export function authorityBroadcastAfterState(
   meta?: { actionId: string; events: GameEvent[] }
 ): AuthorityOutbound[] {
   const pub = toPublicGameState(gs)
-  // One full public payload per action — action_applied already carries state.
-  const out: AuthorityOutbound[] = meta
-    ? [
-        {
-          target: 'all',
-          type: 'action_applied',
-          rev: store.gameRev,
-          actionId: meta.actionId,
-          state: pub,
-          events: meta.events,
-        },
-      ]
-    : [{ target: 'all', type: 'public_state', rev: store.gameRev, state: pub }]
+  const prev: PublicGameState | null = store.lastPublicJson
+    ? (JSON.parse(store.lastPublicJson) as PublicGameState)
+    : null
+  const fromRev = Math.max(0, store.gameRev - 1)
+  const patch = prev ? diffPublicGameState(prev, pub, fromRev, store.gameRev) : null
+  const keyframe =
+    shouldSendPublicKeyframe(store.gameRev, prev != null) ||
+    prev == null ||
+    patch == null ||
+    !patchIsCheaperThanKeyframe(patch, pub.plots.length)
+
+  const out: AuthorityOutbound[] = []
+  if (meta) {
+    if (keyframe || !prev || !patch) {
+      out.push({
+        target: 'all',
+        type: 'action_applied',
+        rev: store.gameRev,
+        actionId: meta.actionId,
+        state: pub,
+        events: meta.events,
+      })
+    } else {
+      out.push({
+        target: 'all',
+        type: 'action_applied',
+        rev: store.gameRev,
+        actionId: meta.actionId,
+        fromRev,
+        patch,
+        events: meta.events,
+      })
+    }
+  } else {
+    out.push({ target: 'all', type: 'public_state', rev: store.gameRev, state: pub })
+  }
+  store.lastPublicJson = JSON.stringify(pub)
+
+  const pushHand = (sessionId: string, hand: PrivateHandPayload) => {
+    const key = `${sessionId}:${hand.playerId}`
+    const json = JSON.stringify(hand)
+    if (store.lastHandJsonByKey[key] === json) return
+    store.lastHandJsonByKey[key] = json
+    out.push({
+      target: 'client',
+      sessionId,
+      type: 'private_hand',
+      rev: store.gameRev,
+      hand,
+    })
+  }
+
   for (const sessionId of authorityListHumanSessionIds(gs)) {
     const idx = findHostSeatIndexForConnection(gs, sessionId)
     if (idx < 0) continue
     const hand = buildPrivateHandForPlayer(gs, idx)
-    if (hand) {
-      out.push({
-        target: 'client',
-        sessionId,
-        type: 'private_hand',
-        rev: store.gameRev,
-        hand,
-      })
-    }
+    if (hand) pushHand(sessionId, hand)
   }
-  // The host device drives AI seats, so it needs their real hands locally.
   if (store.gameHostId) {
     for (let idx = 0; idx < gs.players.length; idx++) {
       if (!gs.players[idx]?.isAi) continue
       const hand = buildPrivateHandForPlayer(gs, idx, { includeAi: true })
-      if (hand) {
-        out.push({
-          target: 'client',
-          sessionId: store.gameHostId,
-          type: 'private_hand',
-          rev: store.gameRev,
-          hand,
-        })
-      }
+      if (hand) pushHand(store.gameHostId, hand)
     }
   }
   return out
@@ -278,6 +322,8 @@ export function authorityInitGame(
         : `auth_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
     store.gameRev = 1
     store.gameStateJson = raw
+    store.lastPublicJson = null
+    store.lastHandJsonByKey = {}
   } catch {
     return { ok: false, error: 'Invalid board snapshot.' }
   }
@@ -291,5 +337,7 @@ export function authorityClearGame(store: OnlineAuthorityStore, hostSessionId: s
   store.authorityId = null
   store.gameRev = 0
   store.gameStateJson = null
+  store.lastPublicJson = null
+  store.lastHandJsonByKey = {}
   return true
 }
