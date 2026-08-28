@@ -196,7 +196,7 @@ export function finalizeCouncilFreezeAttackFailure(s: PlaySession, instanceId: s
         source === 'auto'
           ? 'Three rolls failed — freeze card spent with no effect.'
           : 'Did not reach 5–6 after influence — freeze card spent with no effect.',
-        'boo'
+        'unsuccessful-roll'
       )
     }
   }
@@ -548,7 +548,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             targetName,
             'pending',
             `Rolled ${total} — ${targetName} must roll a 6 to negate the freeze.`,
-            'boo'
+            'victory-roll'
           )
         }
 
@@ -707,7 +707,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             targetName,
             'blocked',
             `${targetName} rolled 6 — freeze negated. They can build as usual.`,
-            'cheer'
+            'victory-roll'
           )
         } else {
           announceConfrontation(
@@ -716,7 +716,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             targetName,
             'success',
             `${targetName} rolled ${result} — freeze holds. They cannot build until they finish their next turn.`,
-            'boo'
+            'unsuccessful-roll'
           )
         }
       }
@@ -775,7 +775,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             ownerName,
             'failure',
             `Rolled ${takeoverTotal} — need 5+ after influence. Card spent; $1M fee lost.`,
-            'cheer'
+            'unsuccessful-roll'
           )
         }
         setRollDieDialogState({
@@ -814,7 +814,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
           ownerName,
           'pending',
           `Rolled ${takeoverTotal} — ${ownerName} may roll once to defend; only a 6 blocks.`,
-          'boo',
+          'victory-roll',
           hostileTakeoverAttackerSuccessTitle()
         )
       }
@@ -865,7 +865,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             ownerName,
             'pending',
             `Rolled ${takeoverTotal} — ${ownerName} may roll once to defend; only a 6 blocks.`,
-            'boo',
+            'victory-roll',
             hostileTakeoverAttackerSuccessTitle()
           )
         }
@@ -946,7 +946,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
           ownerName,
           'blocked',
           `${ownerName} rolled 6 — ${col}${row} stays with its owner.`,
-          'cheer',
+          'victory-roll',
           hostileTakeoverDefenseSuccessTitle()
         )
       } else {
@@ -1006,7 +1006,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             ownerName,
             'success',
             `${attackerName} takes ${col}${row} — paid $${payment120Million}M (120% of end value).`,
-            'dwindle',
+            'unsuccessful-roll',
             hostileTakeoverAttackerSuccessTitle()
           )
         }
@@ -1055,7 +1055,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             ownerName,
             'failure',
             `Rolled ${total} — need 6+ after influence. Scandal card discarded.`,
-            'cheer'
+            'unsuccessful-roll'
           )
         }
         finalizeScandalCardSpent(s, instanceId)
@@ -1126,7 +1126,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             ownerName,
             'pending',
             `Rolled ${total} — ${ownerName} must roll a 6 at ${ctx.col}${ctx.row} to negate.`,
-            'boo'
+            'victory-roll'
           )
         }
         return
@@ -1144,7 +1144,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
           ownerName,
           'pending',
           `Rolled ${total} — ${ownerName} must roll a 6 at ${ctx.col}${ctx.row} to negate.`,
-          'boo'
+          'victory-roll'
         )
       }
       setRollDieDialogState({
@@ -1207,7 +1207,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             ownerName,
             'blocked',
             `${ownerName} rolled 6 — anchor keeps its influence at ${ctx.col}${ctx.row}.`,
-            'cheer'
+            'victory-roll'
           )
         } else {
           patchGameState((current) => {
@@ -1232,7 +1232,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             ownerName,
             'success',
             `Anchor overthrown at ${ctx.col}${ctx.row} — lot is vacant Anchor Tenet again.`,
-            'dwindle'
+            'unsuccessful-roll'
           )
         }
       }
@@ -1293,6 +1293,15 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
         toast.error(
           `Rezoning denied (total ${total}). Zoning unchanged — Rezoning card discarded; you cannot build on that lot this attempt.`
         )
+        {
+          const founderName =
+            safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Founder'
+          broadcastDiceRollNotice(
+            `Rezoning denied — ${founderName}`,
+            `Total ${total} — zoning unchanged. Rezoning discarded.`,
+            'unsuccessful-roll'
+          )
+        }
         setRollDieDialogState({
           open: false,
           mode: 'roll-die',
@@ -1405,6 +1414,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             card.type === 'anchor'
               ? { lotName: card.name, suffix: ' anchored!' }
               : celebration ?? { lotName: getPlotLotDisplayName(ctx.col, ctx.row, rezPlot.building), suffix: ' built!' }
+          broadcastBoardFx({ sound: 'victory-roll' })
           broadcastBoardFx({
             sound: card.type === 'anchor' ? 'anchor' : 'construction',
             notice: {
@@ -1478,6 +1488,24 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
           type: 'info',
           text: `Police Raid fails (${result}${bonus > 0 ? ` + ${bonus}` : ''}). Need 5+ to succeed.`,
         })
+        {
+          const attackerName =
+            safeGameState.players[safeGameState.currentPlayerIndex]?.name ?? 'Attacker'
+          const mafiaOwner =
+            safeGameState.players.find((p) =>
+              safeGameState.plots.some(
+                (pl) => pl.builtProperty === 'mafia' && pl.claimedBy === p.id
+              )
+            )?.name ?? 'Mafia owner'
+          announceConfrontation(
+            'Police Raid on Mafia',
+            attackerName,
+            mafiaOwner,
+            'failure',
+            `Rolled ${result}${bonus > 0 ? ` + ${bonus}` : ''} — need 5+ to succeed. Police Raid is discarded.`,
+            'unsuccessful-roll'
+          )
+        }
         return
       }
       /** Counter roll: Mafia owner rolls one. Needs 6 if attacker had no raid influence; 5–6 if attacker had +1 from Police/City Hall/Courthouse. */
@@ -1535,7 +1563,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             mafiaOwner,
             'pending',
             `Raid succeeds (${result}${bonus > 0 ? ` + ${bonus}` : ''}) — ${mafiaOwner} must roll to counter.`,
-            'boo'
+            'victory-roll'
           )
         }
         return
@@ -1556,7 +1584,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
           mafiaOwner,
           'pending',
           `Raid succeeds (${result}${bonus > 0 ? ` + ${bonus}` : ''}) — ${mafiaOwner} must roll to counter.`,
-          'boo'
+          'victory-roll'
         )
       }
       setRollDieDialogState({
@@ -1631,7 +1659,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             mafiaOwner,
             'success',
             `Mafia rolls ${result} — cannot counter (needed ${counterThreshold}+). Mafia lots return to vacant Anchor Tenet.`,
-            'dwindle'
+            'unsuccessful-roll'
           )
         } else {
           announceConfrontation(
@@ -1640,7 +1668,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             mafiaOwner,
             'blocked',
             `Mafia counters with ${result} (needed ${counterThreshold}+). Police Raid is repelled.`,
-            'cheer'
+            'victory-roll'
           )
         }
       }
@@ -1688,7 +1716,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
           riInvestorLabel,
           'failure',
           `Rolled ${result}${bonus > 0 ? ` + ${bonus}` : ''} (need 5+) — investors stay at ${ctx.col}${ctx.row}.`,
-          'cheer'
+          'unsuccessful-roll'
         )
         finalizeSimpleActionResolution(s, instanceId, {
           type: 'info',
@@ -1784,7 +1812,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
         riInvestorLabel,
         'success',
         `Investors cleared from ${ctx.col}${ctx.row} (roll ${result}${bonus > 0 ? ` + ${bonus}` : ''} = ${total}).`,
-        'dwindle'
+        'victory-roll'
       )
 
       setRollDieDialogState({

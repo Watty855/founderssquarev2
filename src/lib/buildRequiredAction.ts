@@ -473,5 +473,22 @@ export function buildRequiredAction(gs: GameState, ui: PlayUiState): RequiredAct
       onCancel: h.handleCancelPlacement,
     }
   }
+  if (
+    currentPlayer &&
+    currentPlayer.isAi !== true &&
+    !ui.session.localControlsActingSeat &&
+    !ui.session.isSpectator
+  ) {
+    return {
+      id: `wait-live-${currentPlayer.id}-${gs.currentPlayerIndex}`,
+      title: `Waiting on ${currentPlayer.name}`,
+      detail: ui.session.isTableHost
+        ? 'This founder has not played. If their app froze, tap Unstick to skip their turn.'
+        : `Waiting for ${currentPlayer.name} to play. If they are frozen, ask the host to tap Unstick.`,
+      tone: 'warning',
+      ctaLabel: 'Unstick',
+      onCta: h.handleUnstickPlay,
+    }
+  }
   return null
 }

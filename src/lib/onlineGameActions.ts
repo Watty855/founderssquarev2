@@ -14,8 +14,11 @@ export type PlayCardsOptionsPayload = {
 
 /** Client → table authority. Prefer these typed actions on the wire; `commit_actor_state` is the fallback for locally resolved card plays (including Founderbot income after playCards already committed). */
 export type GameAction =
-  /** `seatIndex` = the seat ending its turn, so the authority can drop stale end_turns precisely. */
-  | { type: 'end_turn'; seatIndex?: number }
+  /**
+   * `seatIndex` = the seat ending its turn, so the authority can drop stale end_turns precisely.
+   * `hostSkipStuckSeat` lets the host force-end a frozen live founder's turn (Unstick only).
+   */
+  | { type: 'end_turn'; seatIndex?: number; hostSkipStuckSeat?: boolean }
   | {
       type: 'build_at'
       row: number
@@ -97,7 +100,7 @@ export type GameEvent =
 
 /** Fire-and-forget effects (sounds / board notices) mirrored to every device on the board channel. */
 export type BoardFx = {
-  sound?: 'construction' | 'anchor' | 'income' | 'boo' | 'cheer' | 'dwindle' | 'calamity'
+  sound?: 'construction' | 'anchor' | 'income' | 'boo' | 'cheer' | 'dwindle' | 'calamity' | 'victory-roll' | 'unsuccessful-roll'
   /** Die face 1–6 when `sound` is `calamity` — drives SFX intensity. */
   calamityFace?: number
   /**

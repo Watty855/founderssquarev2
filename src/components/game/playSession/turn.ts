@@ -845,5 +845,29 @@ export function unstickPlay(s: PlaySession)
       return
     }
 
+    // Live guest frozen on their main phase: host cannot End Turn (wrong seat) and
+    // no dialog is open on this device, so Unstick would previously no-op.
+    if (
+      acting &&
+      partyBoardConfig?.role === 'host' &&
+      partyBoardSeatPlayer?.id !== acting.id
+    ) {
+      const seatAtCall = aiGsRef.current?.currentPlayerIndex ?? safeGameState.currentPlayerIndex
+      if (isOnlineActor) {
+        sendAction({ type: 'end_turn', seatIndex: seatAtCall, hostSkipStuckSeat: true })
+      } else {
+        setGameState((current) => {
+          const result = applyEndTurn(current, { expectedSeatIndex: seatAtCall })
+          if (!result.ok) {
+            toast.error(result.error)
+            return current
+          }
+          return result.state
+        })
+      }
+      toast.success(`Skipped ${acting.name}'s stuck turn.`)
+      return
+    }
+
     toast.info('Nothing obvious was stuck. If the table still feels frozen, try Unstick again in a moment.')
   }

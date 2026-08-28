@@ -117,6 +117,14 @@ export function applyGameAction(
 
   switch (action.type) {
     case 'end_turn': {
+      if (action.hostSkipStuckSeat) {
+        if (!ctx.senderIsHost) {
+          return { ok: false, error: 'Only the host can skip a stuck founder.', code: 'host_only' }
+        }
+        return applyEndTurn(state, {
+          expectedSeatIndex: action.seatIndex ?? state.currentPlayerIndex,
+        })
+      }
       const turnErr = assertActorTurn(state, ctx)
       if (turnErr) return turnErr
       return applyEndTurn(state, {

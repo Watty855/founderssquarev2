@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { useDiceBox } from '@/hooks/use-dice-box'
 import { XCircle } from '@phosphor-icons/react'
 import { actionCards } from '@/lib/cardData'
-import { playCrowdCheerSound } from '@/lib/soundEffects'
+import { playVictoryRollSound, playUnsuccessfulRollSound } from '@/lib/soundEffects'
 import {
   calamityLossMillion,
   calamityPercentForFace,
@@ -362,17 +362,47 @@ function RollDieDialogInner({
 
   const canAffordRetry = attackerMoney >= 5
 
-  // Crowd cheer once per winning roll
-  const anyWinningRoll =
+  const councilFreezeDefenderSuccess = mode === 'council-freeze-defender' && diceValue === 6
+  const councilFreezeDefenderFail =
+    mode === 'council-freeze-defender' && diceValue !== null && diceValue !== 6
+  const hostileTakeoverDefenderSuccess = mode === 'hostile-takeover-defender' && diceValue === 6
+  const hostileTakeoverDefenderFail =
+    mode === 'hostile-takeover-defender' && diceValue !== null && diceValue !== 6
+  const scandalDefenderSuccess = mode === 'scandal-defender' && diceValue === 6
+  const scandalDefenderFail = mode === 'scandal-defender' && diceValue !== null && diceValue !== 6
+  const policeRaidDefenderSuccess =
+    mode === 'police-raid-defender' && diceValue !== null && diceValue >= policeRaidCounterThreshold
+  const policeRaidDefenderFail =
+    mode === 'police-raid-defender' && diceValue !== null && diceValue < policeRaidCounterThreshold
+
+  const anyVictoryRoll =
     attackerSuccess ||
     hostileTakeoverAttackerSuccess ||
     scandalAttackerSuccess ||
-    rezoningRollSuccess ||
     policeRaidAttackerSuccess ||
-    removeInvestorsSuccess
+    removeInvestorsSuccess ||
+    rezoningRollSuccess ||
+    councilFreezeDefenderSuccess ||
+    hostileTakeoverDefenderSuccess ||
+    scandalDefenderSuccess ||
+    policeRaidDefenderSuccess
+  const anyUnsuccessfulRoll =
+    attackerFail ||
+    hostileTakeoverAttackerFail ||
+    scandalAttackerFail ||
+    policeRaidAttackerFail ||
+    removeInvestorsFail ||
+    rezoningRollFail ||
+    councilFreezeDefenderFail ||
+    hostileTakeoverDefenderFail ||
+    scandalDefenderFail ||
+    policeRaidDefenderFail
+
   useEffect(() => {
-    if (open && anyWinningRoll) playCrowdCheerSound()
-  }, [open, anyWinningRoll])
+    if (!open) return
+    if (anyVictoryRoll) playVictoryRollSound()
+    else if (anyUnsuccessfulRoll) playUnsuccessfulRollSound()
+  }, [open, anyVictoryRoll, anyUnsuccessfulRoll])
 
   const showGenericRollAgain =
     mode === 'roll-die' && diceValue !== null

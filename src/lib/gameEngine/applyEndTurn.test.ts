@@ -165,6 +165,45 @@ describe('applyEndTurn action-hand soft cap', () => {
     expect(result.events).toEqual([])
   })
 
+  it('rejects hostSkipStuckSeat from a guest', () => {
+    const bobTurn = baseState({
+      currentPlayerIndex: 1,
+      turnActionsConsumed: 0,
+    })
+    const result = applyGameAction(
+      bobTurn,
+      { type: 'end_turn', seatIndex: 1, hostSkipStuckSeat: true },
+      { senderConnectionId: 'alice-conn', senderIsHost: false }
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.code).toBe('host_only')
+  })
+
+  it('lets the host skip a stuck live founder without sitting in that seat', () => {
+    const bobTurn = baseState({
+      currentPlayerIndex: 1,
+      turnActionsConsumed: 1,
+    })
+    const asHostOwnSeat = applyGameAction(
+      bobTurn,
+      { type: 'end_turn', seatIndex: 1 },
+      { senderConnectionId: 'alice-conn', senderIsHost: true }
+    )
+    expect(asHostOwnSeat.ok).toBe(false)
+    if (!asHostOwnSeat.ok) expect(asHostOwnSeat.code).toBe('wrong_turn')
+
+    const skip = applyGameAction(
+      bobTurn,
+      { type: 'end_turn', seatIndex: 1, hostSkipStuckSeat: true },
+      { senderConnectionId: 'alice-conn', senderIsHost: true }
+    )
+    expect(skip.ok).toBe(true)
+    if (!skip.ok) return
+    expect(skip.state.currentPlayerIndex).toBe(0)
+    expect(skip.events.some((e) => e.type === 'turn_changed')).toBe(true)
+  })
+
   it('online end_turn with a stale seatIndex does not disturb the acting founder', () => {
     const bobTurn = baseState({
       players: [mkPlayer(1, 'Alice', 5, 'alice-conn'), mkPlayer(2, 'Bob', 10, 'bob-conn')],

@@ -106,6 +106,8 @@ import {
   playAnchorDropSound,
   playCrowdBooSound,
   playCrowdCheerSound,
+  playVictoryRollSound,
+  playUnsuccessfulRollSound,
   playInfluenceDwindleSound,
   playCalamitySound,
 } from '@/lib/soundEffects'
@@ -522,6 +524,8 @@ function AppInner() {
       else if (fx.sound === 'income') playIncomeSound()
       else if (fx.sound === 'boo') playCrowdBooSound()
       else if (fx.sound === 'cheer') playCrowdCheerSound()
+      else if (fx.sound === 'victory-roll') playVictoryRollSound()
+      else if (fx.sound === 'unsuccessful-roll') playUnsuccessfulRollSound()
       else if (fx.sound === 'dwindle') playInfluenceDwindleSound()
       else if (fx.sound === 'calamity') playCalamitySound(fx.calamityFace ?? 4)
       if (fx.notice) {
@@ -671,7 +675,7 @@ function AppInner() {
             ),
             isAiName(e.targetName) ? { quick: true } : undefined
           )
-          playCrowdCheerSound()
+          playVictoryRollSound()
         } else {
           showBoardNotice(
             freezeTitle,
@@ -681,7 +685,7 @@ function AppInner() {
             ),
             isAiName(e.targetName) ? { quick: true } : undefined
           )
-          playCrowdBooSound()
+          playUnsuccessfulRollSound()
         }
       } else if (e.type === 'rebuttal_result') {
         const kindLabel: ConfrontationKind =
@@ -702,7 +706,7 @@ function AppInner() {
             ),
             isAiName(e.targetName) && isAiName(e.attackerName) ? { quick: true } : undefined
           )
-          playCrowdCheerSound()
+          playVictoryRollSound()
         } else {
           showBoardNotice(
             e.kind === 'hostile-takeover' ? hostileTakeoverAttackerSuccessTitle() : vsTitle,
@@ -716,7 +720,7 @@ function AppInner() {
             ),
             isAiName(e.targetName) && isAiName(e.attackerName) ? { quick: true } : undefined
           )
-          playInfluenceDwindleSound()
+          playUnsuccessfulRollSound()
         }
       } else if (e.type === 'calamity_result') {
         if (skipNextCalamityResultNoticeRef.current) {
@@ -1982,6 +1986,7 @@ function AppInner() {
     handRailPlayerId: handRailPlayer.id,
     currentPlayerIsAi: currentPlayer.isAi === true,
     localControlsActingSeat,
+    isTableHost: partyBoardConfig?.role === 'host',
   })
   sessionRef.current = { ...sessionRef.current, handInteractionsActive }
 
@@ -2257,6 +2262,7 @@ function AppInner() {
           compact={isCompactLayout}
           isSpectator={isSpectator}
           currentPlayerIsAi={currentPlayer.isAi === true}
+          canEndTurn={handInteractionsActive}
           onEndTurn={handleEndTurn}
           onUnstick={handleUnstickPlay}
           onNewGame={handleNewGame}

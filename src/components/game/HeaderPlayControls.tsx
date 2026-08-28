@@ -7,6 +7,7 @@ type HeaderPlayControlsProps = {
   compact: boolean
   isSpectator: boolean
   currentPlayerIsAi: boolean
+  canEndTurn: boolean
   onEndTurn: () => void
   onUnstick: () => void
   onNewGame: () => void
@@ -17,12 +18,13 @@ export function HeaderPlayControls({
   compact,
   isSpectator,
   currentPlayerIsAi,
+  canEndTurn,
   onEndTurn,
   onUnstick,
   onNewGame,
 }: HeaderPlayControlsProps) {
   const showOpeningProTip = useOverlayStore((s) => s.showOpeningProTip)
-  const endDisabled = isSpectator || currentPlayerIsAi || showOpeningProTip
+  const endDisabled = isSpectator || currentPlayerIsAi || showOpeningProTip || !canEndTurn
   const unstickDisabled = isSpectator || showOpeningProTip
 
   return (
@@ -52,7 +54,7 @@ export function HeaderPlayControls({
         data-board-sync-skip-lock
         disabled={unstickDisabled}
         className="btn-ps"
-        title="Clear a stuck Founderbot or confrontation roll without leaving the table"
+        title="Clear a stuck Founderbot, confrontation roll, or frozen live founder without leaving the table"
         style={{
           height: compact ? 30 : 34,
           padding: compact ? '0 16px' : '0 16px',

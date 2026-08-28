@@ -4,6 +4,7 @@
  *  - Construction: recorded SFX (public/assets/sfx/construction.m4a) when a structure is built
  *  - Calamity: recorded SFX (public/assets/sfx/calamity.m4a) after each city-wide calamity roll;
  *    volume and playback rate scale with the die face (1 quiet → 6 full intensity)
+ *  - Confrontation rolls: victory-roll.m4a / unsuccessful-roll.m4a
  *  - Cash register, crowd boo/cheer, anchor chain: synthesized with Web Audio
  *    (no binary assets for those, works offline in the Capacitor shell)
  */
@@ -11,12 +12,16 @@
 /** Bundled build SFX — served from /public so Capacitor sync includes it offline. */
 const CONSTRUCTION_SFX_URL = '/assets/sfx/construction.m4a'
 const CALAMITY_SFX_URL = '/assets/sfx/calamity.m4a'
+const VICTORY_ROLL_SFX_URL = '/assets/sfx/victory-roll.m4a'
+const UNSUCCESSFUL_ROLL_SFX_URL = '/assets/sfx/unsuccessful-roll.m4a'
 
 let audioContext: AudioContext | null = null
 /** Reused HTMLAudioElement so rapid builds don't stack overlapping decoders. */
 let constructionAudio: HTMLAudioElement | null = null
 /** Reused so sequential calamity rolls restart instead of stacking. */
 let calamityAudio: HTMLAudioElement | null = null
+let victoryRollAudio: HTMLAudioElement | null = null
+let unsuccessfulRollAudio: HTMLAudioElement | null = null
 
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null
@@ -169,6 +174,52 @@ export function playCalamitySound(face: number) {
   } catch (err) {
     console.warn('Calamity SFX unavailable:', err)
   }
+}
+
+function playBundledSample(url: string, label: string, getEl: () => HTMLAudioElement | null, setEl: (el: HTMLAudioElement) => void) {
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return
+  try {
+    let audio = getEl()
+    if (!audio) {
+      audio = new Audio(url)
+      audio.preload = 'auto'
+      setEl(audio)
+    }
+    audio.pause()
+    audio.currentTime = 0
+    const playResult = audio.play()
+    if (playResult && typeof playResult.catch === 'function') {
+      void playResult.catch((err) => {
+        console.warn(`${label} SFX play failed:`, err)
+      })
+    }
+  } catch (err) {
+    console.warn(`${label} SFX unavailable:`, err)
+  }
+}
+
+/** Successful Hostile Takeover / City Council Freeze / Scandal / Police Raid / Remove Investors / defense roll. */
+export function playVictoryRollSound() {
+  playBundledSample(
+    VICTORY_ROLL_SFX_URL,
+    'Victory roll',
+    () => victoryRollAudio,
+    (el) => {
+      victoryRollAudio = el
+    }
+  )
+}
+
+/** Missed confrontation or defense roll. */
+export function playUnsuccessfulRollSound() {
+  playBundledSample(
+    UNSUCCESSFUL_ROLL_SFX_URL,
+    'Unsuccessful roll',
+    () => unsuccessfulRollAudio,
+    (el) => {
+      unsuccessfulRollAudio = el
+    }
+  )
 }
 
 /** Stop a lingering calamity sting so income/coin cues are never buried under it. */
