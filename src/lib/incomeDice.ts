@@ -30,7 +30,9 @@ export const INCOME_CARD_DICE_ROLL_RULE =
 export const INCOME_CARD_ACTIONS_BODY =
   'Roll the die to set your property-income payout as a percentage of your calculated property income total. ' +
   '1: 70% (tough times). 2: 80%; 3: 90%; 4: 100% (steady growth). 5: 110%; 6: 120% (boom times). ' +
-  'No influence cards or tenants count towards changing the die.'
+  'No influence cards or tenants count towards changing the die. ' +
+  'After the endgame is declared, property-income rolls are closed — you may only bank this card. ' +
+  'Freeze Assets is a legal action on all players (including the founder who pays) for one complete round: no Income card collections, investments, or Anchor tributes.'
 
 /** One-line legend for the Income dialog. */
 export const INCOME_DIE_LEGEND_COMPACT =

@@ -13,7 +13,7 @@ import { getDeviceConnectionId } from '@/lib/realtimeClient'
 import { gameDockToast as toast } from '@/lib/fsGameToast'
 import { replenishCurrentPlayerActionHand } from '@/lib/turnActions'
 import { resolveActionPlayId } from '@/lib/actionWildCard'
-import type { GameState, Plot } from '@/lib/types'
+import type { GameState } from '@/lib/types'
 
 export function isAiSeat(p: { isAi?: boolean; aiDifficulty?: unknown } | null | undefined): boolean {
   return p?.isAi === true || p?.aiDifficulty != null
@@ -34,6 +34,8 @@ export const initialGameState: GameState = {
   incomeResolvedThisTurn: false,
   crossingTheLineActive: false,
   councilFreezeBlockBuildForPlayerId: undefined,
+  incomeAssetsFrozenPlayerIds: [],
+  incomeAssetsFrozenTurnsRemaining: undefined,
   pendingIncomeTaxPlayerIds: [],
   openingNarrationComplete: false,
   playRoundNumber: 1,
@@ -81,15 +83,7 @@ export function withReplenishedActionHand(gameState: GameState, playerIndex: num
   return nextState
 }
 
-export function sumInvestmentBookForPlayer(plots: Plot[], investorId: number): number {
-  let s = 0
-  for (const p of plots) {
-    p.investmentStripes?.forEach((t) => {
-      if (t.investorId === investorId) s += t.contributionMillion
-    })
-  }
-  return s
-}
+export { sumInvestmentBookForPlayer } from '@/lib/playerWealth'
 
 let cardFlightCounter = 0
 export const nextCardFlightId = (): string => `flight-${++cardFlightCounter}`

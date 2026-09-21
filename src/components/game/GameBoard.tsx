@@ -9,24 +9,29 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
-  type ReactNode,
+  type MouseEvent,
 } from 'react'
 import { BoardTableChrome } from '@/components/game/BoardTableChrome'
 import { BoardActionStripHost } from '@/components/game/BoardActionStripHost'
 import { Toaster as BoardDockToaster } from 'sonner'
 import { FS_BOARD_TOASTER_ID } from '@/lib/fsGameToast'
-import type { BoardPlayerColor } from '@/lib/boardSelectors'
 import { Plot, COLUMNS } from '@/lib/types'
-import { propertyCards } from '@/lib/cardData'
-import { coordKeySet, plotCoordKey } from '@/lib/boardIndex'
 import {
-  BoardLot,
-  USE_BOARD_ART,
-  borderLabelPx,
-  type InvestorStripeView,
+  STREET_TRACK_PX,
+  STATIC_LOT_BY_KEY,
+  CELL_COORD,
+  boardColTemplate,
+  boardRowTemplate,
+} from '@/lib/boardGeometry'
+import type { LastBuiltToken, LotTurnState } from '@/lib/selectLotTurnState'
+import { BoardStaticTrack } from '@/components/game/board/BoardStaticTrack'
+import { BoardRegions } from '@/components/game/board/BoardRegions'
+import {
+  OwnershipLayer,
+  BuildingsLayer,
+  TokenLayer,
   type PlacementHi,
-} from '@/components/game/BoardLot'
-import { BOARD_ART } from '@/lib/boardArt'
+} from '@/components/game/board/BoardDynamicLayers'
 
 /** Named "[Player] Square" — entire 3×3 city block owned by one founder. */
 export interface NamedSquare {
@@ -51,8 +56,9 @@ export interface NamedStreet {
 }
 
 interface GameBoardProps {
-  plots: Plot[]
-  players: BoardPlayerColor[]
+  /** Sparse overlay — claimed / built / suppressed lots only. */
+  lotStates: LotTurnState[]
+  lastBuiltToken?: LastBuiltToken | null
   onPlotClaim: (row: number, col: string) => void
   placementMode?: {
     active: boolean
@@ -71,19 +77,13 @@ interface GameBoardProps {
   showNamedRegions?: boolean
   /** When the player taps a vacant lot without property placement active (claiming is only via card build). */
   onVacantLotHint?: () => void
-  /** Phone / compact chrome — smaller terrain strips, hide masthead, pixel-scaled lot labels. */
+  /** Phone / compact chrome — smaller bleed bands, hide masthead, pixel-scaled lot labels. */
   compact?: boolean
 }
 
-const STREET_COLS = new Set(['E', 'I', 'M', 'Q'])
-const STREET_ROWS = new Set([5, 9, 13, 17])
-
 const BOARD_ASPECT = 21 / 9
-const STREET_TRACK_PX = 4
 const STREET_COL_COUNT = 4
 const STREET_ROW_COUNT = 4
-
-const EMPTY_STRIPES: InvestorStripeView[] = []
 
 const PLACEMENT_HI: Record<string, PlacementHi> = {
   investment: {
@@ -130,15 +130,15 @@ const PLACEMENT_HI: Record<string, PlacementHi> = {
   },
 }
 
-/** City lot size from grid fr tracks (terrain strips + hairline streets are thinner than city blocks). */
+/** City lot size from grid fr tracks (bleed bands + hairline streets are thinner than city blocks). */
 function computeCityCellPx(gridW: number, gridH: number, compact: boolean): number {
-  const terrainFr = compact ? 0.35 : 0.4
+  const bleedFr = compact ? 0.35 : 0.4
   const streetPx = STREET_TRACK_PX * STREET_COL_COUNT
-  const colFr = 17 + terrainFr * 2
+  const colFr = 17 + bleedFr * 2
   const cityColW = Math.max(0, (gridW - streetPx) / colFr)
 
   const streetRowPx = STREET_TRACK_PX * STREET_ROW_COUNT
-  const rowFr = 15 + terrainFr * 2
+  const rowFr = 15 + bleedFr * 2
   const cityRowH = Math.max(0, (gridH - streetRowPx) / rowFr)
 
   return Math.min(cityColW, cityRowH)
@@ -153,9 +153,15 @@ function fitBoardDimensions(containerW: number, containerH: number): { w: number
   return { w: heightLed * BOARD_ASPECT, h: heightLed }
 }
 
+/** Resolve the board cell under a pointer event via the delegated `data-cell` attribute. */
+function cellKeyFromEvent(e: { target: EventTarget | null }): string | null {
+  const el = (e.target as HTMLElement | null)?.closest?.('[data-cell]') as HTMLElement | null
+  return el?.dataset.cell ?? null
+}
+
 function GameBoardImpl({
-  plots,
-  players,
+  lotStates,
+  lastBuiltToken = null,
   onPlotClaim,
   placementMode,
   onCardDrop,
@@ -196,19 +202,39 @@ function GameBoardImpl({
   }, [])
 
   const boardDimensions = fitBoardDimensions(fitSize.w, fitSize.h)
-  const cityCellPx = computeCityCellPx(gridSize.w, gridSize.h, compact)
-  const borderFs = borderLabelPx(cityCellPx, compact)
-  const terrainFr = compact ? '0.35fr' : '0.4fr'
+  // Bucket to 0.5px so sub-pixel resize churn cannot re-render the static track.
+  const cityCellPx =
+    Math.round(computeCityCellPx(gridSize.w, gridSize.h, compact) * 2) / 2
+  const bleedFr = compact ? 0.35 : 0.4
 
-  const streetSegmentTint = useMemo(() => {
-    if (!showNamedRegions || !namedStreets || namedStreets.length === 0) return new Map<string, string>()
-    const m = new Map<string, string>()
-    for (const s of namedStreets) {
-      for (const cell of s.streetSegment) {
-        m.set(`${cell.col}${cell.row}`, s.color)
-      }
-    }
+  const colTemplate = useMemo(() => boardColTemplate(bleedFr), [bleedFr])
+  const rowTemplate = useMemo(() => boardRowTemplate(bleedFr), [bleedFr])
+
+  /** O(1) overlay lookup for the delegated pointer handlers. */
+  const overlayByKey = useMemo(() => {
+    const m = new Map<string, LotTurnState>()
+    for (const s of lotStates) m.set(s.key, s)
     return m
+  }, [lotStates])
+
+  const streetTints = useMemo(() => {
+    if (!showNamedRegions || !namedStreets || namedStreets.length === 0) {
+      return [] as Array<{ key: string; color: string; gridColumn: string; gridRow: string }>
+    }
+    return namedStreets.map((s, idx) => {
+      const rows = s.streetSegment.map((c) => c.row)
+      const cols = s.streetSegment.map((c) => COLUMNS.indexOf(c.col))
+      const minR = Math.min(...rows)
+      const maxR = Math.max(...rows)
+      const minC = Math.min(...cols)
+      const maxC = Math.max(...cols)
+      return {
+        key: `${idx}`,
+        color: s.color,
+        gridColumn: `${minC + 1} / ${maxC + 2}`,
+        gridRow: `${minR} / ${maxR + 1}`,
+      }
+    })
   }, [showNamedRegions, namedStreets])
 
   /**
@@ -222,8 +248,8 @@ function GameBoardImpl({
   const [fadingAnchorCells, setFadingAnchorCells] = useState<Set<string>>(() => new Set())
   useEffect(() => {
     const builtNow = new Set<string>()
-    for (const p of plots) {
-      if (p.builtProperty) builtNow.add(`${p.col}${p.row}`)
+    for (const s of lotStates) {
+      if (s.builtProperty) builtNow.add(s.key)
     }
     const prev = prevBuiltKeysRef.current
     prevBuiltKeysRef.current = builtNow
@@ -242,12 +268,13 @@ function GameBoardImpl({
       })
     }, 1700)
     return () => window.clearTimeout(t)
-  }, [plots])
+  }, [lotStates])
 
   useEffect(() => {
-    const curKeys = new Set(
-      plots.filter((p) => p.anchorInfluenceSuppressed).map((p) => `${p.col}${p.row}`)
-    )
+    const curKeys = new Set<string>()
+    for (const s of lotStates) {
+      if (s.suppressed) curKeys.add(s.key)
+    }
     const prev = prevSuppressedKeysRef.current
     prevSuppressedKeysRef.current = curKeys
     if (!prev) return
@@ -265,98 +292,85 @@ function GameBoardImpl({
       })
     }, 1600)
     return () => window.clearTimeout(t)
-  }, [plots])
+  }, [lotStates])
 
   const validPlotsKey =
     placementMode?.active && placementMode.validPlots
       ? placementMode.validPlots.map((p) => `${p.col}${p.row}`).join(',')
       : ''
-  const validPlotKeys = useMemo(
-    () => (placementMode?.active ? coordKeySet(placementMode.validPlots) : new Set<string>()),
+  const validCellKeys = useMemo(
+    () => new Set<string>(validPlotsKey ? validPlotsKey.split(',') : []),
     // Serialize lot keys so a new validPlots array with the same cells does not
-    // rebuild the Set (that busted BoardLot memo on every GameApp render).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [placementMode?.active, validPlotsKey]
+    // rebuild the Set (that would bust the TokenLayer memo on every render).
+    [validPlotsKey]
   )
-  const winningPlotKeys = useMemo(() => coordKeySet(winningSequence), [winningSequence])
-  const playerById = useMemo(() => {
-    const m = new Map<number, BoardPlayerColor>()
-    for (const p of players) m.set(p.id, p)
-    return m
-  }, [players])
-  const propertyCardById = useMemo(() => {
-    const m = new Map<string, (typeof propertyCards)[number]>()
-    for (const c of propertyCards) m.set(c.id, c)
-    return m
-  }, [])
+  const winningCellKeys = useMemo(() => {
+    const s = new Set<string>()
+    for (const c of winningSequence ?? []) s.add(`${c.col}${c.row}`)
+    return s
+  }, [winningSequence])
 
   const placementHi = useMemo(() => {
     const kind = placementMode?.interaction ?? 'build'
     return PLACEMENT_HI[kind] ?? PLACEMENT_HI.build
   }, [placementMode?.interaction])
 
+  const placementActive = placementMode?.active === true
   const placementBuildLens =
-    placementMode?.active === true &&
-    placementMode.interaction === 'build' &&
+    placementActive &&
+    placementMode?.interaction === 'build' &&
     (placementMode.validPlots?.length ?? 0) > 0
 
-  const handlePlotClick = useCallback(
-    (plot: Plot) => {
-      if (placementMode?.active) {
-        if (validPlotKeys.has(plotCoordKey(plot.col, plot.row))) onPlotClaim(plot.row, plot.col)
+  /** Delegated pointer handlers — one listener for the whole board. */
+  const handleBoardClick = useCallback(
+    (e: MouseEvent) => {
+      const key = cellKeyFromEvent(e)
+      if (!key) return
+      const coord = CELL_COORD.get(key)
+      if (!coord) return
+      const overlay = overlayByKey.get(key)
+      if (placementActive) {
+        if (validCellKeys.has(key)) onPlotClaim(coord.row, coord.col)
         return
       }
-      if (plot.builtProperty && onPropertyClick) {
-        onPropertyClick(plot.row, plot.col)
+      if (overlay?.builtProperty && onPropertyClick) {
+        onPropertyClick(coord.row, coord.col)
         return
       }
+      const printed = STATIC_LOT_BY_KEY.get(key)
       const vacantUnbuilt =
-        plot.type === 'city' &&
-        plot.claimedBy === undefined &&
-        plot.building !== '' &&
-        !plot.builtProperty
+        Boolean(printed?.building) && overlay?.claimedBy === undefined && !overlay?.builtProperty
       if (vacantUnbuilt && onVacantLotHint) onVacantLotHint()
     },
-    [placementMode?.active, validPlotKeys, onPlotClaim, onPropertyClick, onVacantLotHint]
+    [placementActive, validCellKeys, overlayByKey, onPlotClaim, onPropertyClick, onVacantLotHint]
   )
 
-  const handleDragOver = useCallback(
-    (e: DragEvent, plot: Plot) => {
-      if (placementMode?.active === true && validPlotKeys.has(plotCoordKey(plot.col, plot.row))) {
+  const handleBoardDragOver = useCallback(
+    (e: DragEvent) => {
+      if (!placementActive) return
+      const key = cellKeyFromEvent(e)
+      if (key && validCellKeys.has(key)) {
         e.preventDefault()
         e.dataTransfer.dropEffect = 'move'
       }
     },
-    [placementMode?.active, validPlotKeys]
+    [placementActive, validCellKeys]
   )
 
-  const handleDrop = useCallback(
-    (e: DragEvent, plot: Plot) => {
+  const handleBoardDrop = useCallback(
+    (e: DragEvent) => {
+      if (!placementActive) return
+      const key = cellKeyFromEvent(e)
+      if (!key || !validCellKeys.has(key)) return
       e.preventDefault()
-      if (placementMode?.active === true && validPlotKeys.has(plotCoordKey(plot.col, plot.row))) {
-        const propertyInstanceId = e.dataTransfer.getData('propertyInstanceId')
-        if (propertyInstanceId && onCardDrop) {
-          onCardDrop(plot.row, plot.col, propertyInstanceId)
-        }
+      const coord = CELL_COORD.get(key)
+      const propertyInstanceId = e.dataTransfer.getData('propertyInstanceId')
+      if (coord && propertyInstanceId && onCardDrop) {
+        onCardDrop(coord.row, coord.col, propertyInstanceId)
       }
     },
-    [placementMode?.active, validPlotKeys, onCardDrop]
+    [placementActive, validCellKeys, onCardDrop]
   )
-
-  const colTemplate = COLUMNS.map((col) => {
-    if (STREET_COLS.has(col)) return '4px'
-    if (col === 'A' || col === 'U') return terrainFr
-    return '1fr'
-  }).join(' ')
-
-  const rows = Array.from({ length: 21 }, (_, i) => i + 1)
-  const rowTemplate = rows
-    .map((row) => {
-      if (STREET_ROWS.has(row)) return '4px'
-      if (row === 1 || row === 21) return terrainFr
-      return '1fr'
-    })
-    .join(' ')
 
   return (
     <div
@@ -395,6 +409,10 @@ function GameBoardImpl({
           word-break: break-word;
           overflow-wrap: break-word;
           hyphens: none;
+        }
+        .fs-hi-cell:hover {
+          border-color: var(--hi-solid) !important;
+          box-shadow: 0 0 8px var(--hi-houter), inset 0 0 6px var(--hi-hinner) !important;
         }
       `}</style>
 
@@ -477,7 +495,7 @@ function GameBoardImpl({
           position: 'relative',
           width: '100%',
           height: '100%',
-          flex: USE_BOARD_ART ? '1 1 auto' : 1,
+          flex: 1,
           maxWidth: 1600,
           maxHeight: '100%',
           display: 'flex',
@@ -489,92 +507,52 @@ function GameBoardImpl({
       >
         <div
           ref={gridRef}
-          className={USE_BOARD_ART ? 'fs-board-art-surface' : 'fs-board-grid'}
+          className="fs-board-grid"
+          onClick={handleBoardClick}
+          onDragOver={handleBoardDragOver}
+          onDrop={handleBoardDrop}
           style={{
             display: 'grid',
             gridTemplateColumns: colTemplate,
             gridTemplateRows: rowTemplate,
-            ...(USE_BOARD_ART
-              ? {
-                  width: boardDimensions.w > 0 ? boardDimensions.w : '100%',
-                  height: boardDimensions.h > 0 ? boardDimensions.h : 'auto',
-                  aspectRatio: `${BOARD_ART.width} / ${BOARD_ART.height}`,
-                  backgroundImage: `url(${BOARD_ART.src})`,
-                  backgroundSize: '100% 100%',
-                  backgroundPosition: 'center',
-                  backgroundRepeat: 'no-repeat',
-                }
-              : {
-                  width: boardDimensions.w > 0 ? boardDimensions.w : '100%',
-                  height: boardDimensions.h > 0 ? boardDimensions.h : 'auto',
-                  maxWidth: 1400,
-                  aspectRatio: '21 / 9',
-                }),
+            width: boardDimensions.w > 0 ? boardDimensions.w : '100%',
+            height: boardDimensions.h > 0 ? boardDimensions.h : 'auto',
+            maxWidth: 1400,
+            aspectRatio: '21 / 9',
             flexShrink: 0,
-            borderRadius: USE_BOARD_ART ? 8 : 16,
+            borderRadius: 16,
             overflow: 'hidden',
             border: 'none',
-            boxShadow: USE_BOARD_ART
-              ? '0 0 40px rgba(0,0,0,0.65)'
-              : '0 0 60px rgba(0,0,0,0.5), 0 0 120px rgba(0,112,204,0.05), inset 0 0 80px rgba(0,0,0,0.3)',
+            boxShadow:
+              '0 0 60px rgba(0,0,0,0.5), 0 0 120px rgba(0,112,204,0.05), inset 0 0 80px rgba(0,0,0,0.3)',
           }}
         >
-          {plots.map((plot) => {
-            const cellKey = `${plot.col}${plot.row}`
-            const validPlacement =
-              placementMode?.active === true && validPlotKeys.has(plotCoordKey(plot.col, plot.row))
-            const claimable = validPlacement
-            const isWinning = winningPlotKeys.has(plotCoordKey(plot.col, plot.row))
-            const builtCard = plot.builtProperty
-              ? propertyCardById.get(plot.builtProperty)
-              : undefined
-            const claimColor =
-              plot.claimedBy !== undefined ? playerById.get(plot.claimedBy)?.color : undefined
-            const dimVacantForBuild =
-              plot.type === 'city' &&
-              placementBuildLens &&
-              !validPlacement &&
-              !plot.builtProperty
+          {/* Layer 0 — static track: streets + printed lot shells. Renders once. */}
+          <BoardStaticTrack cityCellPx={cityCellPx} compact={compact} />
 
-            let investorStripes = EMPTY_STRIPES
-            if (plot.investmentStripes && plot.investmentStripes.length > 0) {
-              investorStripes = plot.investmentStripes.map((s, si) => {
-                const inv = playerById.get(s.investorId)
-                return {
-                  key: `${s.investorId}-${si}-${s.contributionMillion}`,
-                  color: inv?.color ?? '#94a3b8',
-                  title: inv
-                    ? `${inv.name} — $${s.contributionMillion}M invested`
-                    : `$${s.contributionMillion}M invested`,
-                }
-              })
-            }
+          {/* Layer 1 — free-canvas named regions: bleed band + inner court. */}
+          <BoardRegions cityCellPx={cityCellPx} compact={compact} />
 
-            return (
-              <BoardLot
-                key={cellKey}
-                plot={plot}
-                builtCard={builtCard}
-                claimColor={claimColor}
-                investorStripes={investorStripes}
-                validPlacement={validPlacement}
-                claimable={claimable}
-                isWinning={isWinning}
-                placementBuildLens={placementBuildLens}
-                dimVacantForBuild={dimVacantForBuild}
-                isElevating={elevatingCells.has(cellKey)}
-                isFading={fadingAnchorCells.has(cellKey)}
-                streetTint={streetSegmentTint.get(cellKey)}
-                cityCellPx={cityCellPx}
-                compact={compact}
-                borderFs={borderFs}
-                placementHi={placementHi}
-                onPlotClick={handlePlotClick}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-              />
-            )
-          })}
+          {/* Layers 2/3 — ownership fill + buildings: only lots that carry state. */}
+          <OwnershipLayer lotStates={lotStates} fadingAnchorCells={fadingAnchorCells} />
+          <BuildingsLayer
+            lotStates={lotStates}
+            elevatingCells={elevatingCells}
+            cityCellPx={cityCellPx}
+            compact={compact}
+          />
+
+          {/* Layer 4 — tokens: last-built pawn, placement highlights, winning pulse. */}
+          <TokenLayer
+            lastBuiltToken={lastBuiltToken}
+            validCellKeys={validCellKeys}
+            placementActive={placementActive}
+            placementBuildLens={placementBuildLens}
+            placementHi={placementHi}
+            winningCellKeys={winningCellKeys}
+            streetTints={streetTints}
+          />
+
           {/* Named end-game regions: Squares (whole blocks) and Streets (6-lot runs). */}
           {showNamedRegions && namedSquares && namedSquares.length > 0 ? (
             <>
@@ -779,4 +757,19 @@ function GameBoardImpl({
   )
 }
 
-export const GameBoard = memo(GameBoardImpl)
+export const GameBoard = memo(GameBoardImpl, (a, b) => {
+  return (
+    a.lotStates === b.lotStates &&
+    a.lastBuiltToken === b.lastBuiltToken &&
+    a.placementMode === b.placementMode &&
+    a.winningSequence === b.winningSequence &&
+    a.namedSquares === b.namedSquares &&
+    a.namedStreets === b.namedStreets &&
+    a.showNamedRegions === b.showNamedRegions &&
+    a.compact === b.compact &&
+    a.onPlotClaim === b.onPlotClaim &&
+    a.onPropertyClick === b.onPropertyClick &&
+    a.onVacantLotHint === b.onVacantLotHint &&
+    a.onCardDrop === b.onCardDrop
+  )
+})

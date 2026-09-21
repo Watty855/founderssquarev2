@@ -282,6 +282,8 @@ export function setupComplete(s: PlaySession, players: Player[], partyBoard?: Pa
         actionsPlayedThisTurn: 0,
         lastBuiltProperty: undefined,
         councilFreezeBlockBuildForPlayerId: undefined,
+        incomeAssetsFrozenPlayerIds: [],
+        incomeAssetsFrozenTurnsRemaining: undefined,
         pendingCouncilFreezeDefense: undefined,
         pendingRebuttalRoll: undefined,
         pendingIncomeTaxPlayerIds: [],

@@ -3,6 +3,8 @@
 import { Player, Plot } from '@/lib/types'
 import { PropertyCard, ActionCard, CardInstance } from '@/lib/cardTypes'
 import { propertyCards, actionCards, ANCHOR_WILD_CARD_EMULATE_IDS, ACTION_WILD_CARD_ID } from '@/lib/cardData'
+import { FREEZE_ASSETS_CARD_ID, FREEZE_ASSETS_PLAY_COST } from '@/lib/freezeAssets'
+import { FreezeAssetsPlayPrompt } from '@/components/game/FreezeAssetsPlayPrompt'
 import { getActionWildEmulateCards } from '@/lib/actionWildCard'
 import {
   getCivicVariantShortRule,
@@ -39,8 +41,10 @@ export type PlayCardsOptions = {
   skipTaxBuildPrompt?: boolean
   /** Anchor Wild Card or Civic flex: property id to emulate when starting placement. */
   wildCardEmulatePropertyId?: string
-  /** Action Wild Card: action id this play copies. */
+  /** Wild Action Card: action id this play copies. */
   wildCardEmulateActionId?: string
+  /** Caller already confirmed Pay $8M on Freeze Assets (skip the legal-action prompt). */
+  freezeAssetsConfirmed?: boolean
   /** Omit info toasts when starting placement early (card click highlights valid lots before Build). */
   suppressPlacementToast?: boolean
 }
@@ -393,7 +397,10 @@ export function PlayerHand({
     setCardDialog(null)
     setCouncilFreezeTargetId(null)
     setActionWildEmulateId(null)
-    onPlayCards(null, [instanceId], [], Object.keys(wildOpts).length ? wildOpts : undefined)
+    onPlayCards(null, [instanceId], [], {
+      ...wildOpts,
+      ...(playAs === FREEZE_ASSETS_CARD_ID ? { freezeAssetsConfirmed: true } : {}),
+    })
   }
 
   const handleCouncilFreezeTargetSelect = (targetPlayerId: number) => {
@@ -1481,6 +1488,26 @@ export function PlayerHand({
                     </p>
                   </div>
                 )}
+                {actionWildEmulateId === FREEZE_ASSETS_CARD_ID ? (
+                  <FreezeAssetsPlayPrompt
+                    compact
+                    canPay={player.money >= FREEZE_ASSETS_PLAY_COST}
+                    onPay={() => {
+                      if (!cardDialog) return
+                      const instanceId = cardDialog.instanceId
+                      setCardDialog(null)
+                      setCouncilFreezeTargetId(null)
+                      setActionWildEmulateId(null)
+                      onPlayCards(null, [instanceId], [], {
+                        wildCardEmulateActionId: FREEZE_ASSETS_CARD_ID,
+                        freezeAssetsConfirmed: true,
+                      })
+                    }}
+                    onBank={handleCashCard}
+                    onCancel={() => setCardDialog(null)}
+                  />
+                ) : (
+                  <>
                 <button
                   onClick={handlePlayAction}
                   disabled={!actionWildEmulateId || actionWildEmulateId === 'city-council-freeze'}
@@ -1511,8 +1538,10 @@ export function PlayerHand({
                   onClick={handleCashCard}
                   style={{ height: 42, borderRadius: 10, backgroundColor: 'transparent', color: '#f0f0f5', fontSize: 14, fontWeight: 500, border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}
                 >
-                  Bank Action Wild Card — ${currentCard.bankValue}M
+                  Bank Wild Action Card — ${currentCard.bankValue}M
                 </button>
+                  </>
+                )}
               </>
             )}
             {cardDialog?.type === 'action' && currentCard && currentCard.id !== ACTION_WILD_CARD_ID && (
@@ -1554,6 +1583,21 @@ export function PlayerHand({
                     </p>
                   </div>
                 )}
+                {currentCard.id === FREEZE_ASSETS_CARD_ID ? (
+                  <FreezeAssetsPlayPrompt
+                    compact
+                    canPay={player.money >= FREEZE_ASSETS_PLAY_COST}
+                    onPay={() => {
+                      if (!cardDialog) return
+                      const instanceId = cardDialog.instanceId
+                      setCardDialog(null)
+                      onPlayCards(null, [instanceId], [], { freezeAssetsConfirmed: true })
+                    }}
+                    onBank={handleCashCard}
+                    onCancel={() => setCardDialog(null)}
+                  />
+                ) : (
+                  <>
                 <button
                   onClick={handlePlayAction}
                   disabled={currentCard.id === 'city-council-freeze'}
@@ -1573,7 +1617,9 @@ export function PlayerHand({
                     opacity: currentCard.id === 'city-council-freeze' ? 0.5 : 1,
                   }}
                 >
-                  {currentCard.id === 'city-council-freeze' ? 'Select target above' : 'Play Action'}
+                  {currentCard.id === 'city-council-freeze'
+                    ? 'Select target above'
+                    : 'Play Action'}
                 </button>
                 <button
                   onClick={handleCashCard}
@@ -1581,14 +1627,21 @@ export function PlayerHand({
                 >
                   Cash ${currentCard.bankValue}M
                 </button>
+                  </>
+                )}
               </>
             )}
+            {!(
+              (currentCard?.id === FREEZE_ASSETS_CARD_ID) ||
+              (currentCard?.id === ACTION_WILD_CARD_ID && actionWildEmulateId === FREEZE_ASSETS_CARD_ID)
+            ) ? (
             <button
               onClick={() => setCardDialog(null)}
               style={{ height: 28, background: 'none', color: '#666680', fontSize: 12, border: 'none', cursor: 'pointer' }}
             >
               Cancel
             </button>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>

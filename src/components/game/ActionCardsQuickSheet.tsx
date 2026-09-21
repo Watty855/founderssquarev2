@@ -26,7 +26,7 @@ export function ActionCardsQuickSheet({ open, onOpenChange }: ActionCardsQuickSh
             Founders Square — Action Cards
           </DialogTitle>
           <DialogDescription className="text-left text-xs leading-relaxed text-[#9b9bad]">
-            Action Wild Card, Earn Income, Improve Building, Against Opponents, and Citywide Crisis. Scroll to read the full sheet.
+            Wild Action Card, Earn Income, Improve Building, Against Opponents, and Citywide Crisis. Scroll to read the full sheet.
           </DialogDescription>
         </DialogHeader>
 
@@ -38,7 +38,7 @@ export function ActionCardsQuickSheet({ open, onOpenChange }: ActionCardsQuickSh
           */}
           <img
             src={ACTION_CARDS_SHEET_IMG}
-            alt="Founders Square Action Cards — Action Wild Card, Earn Income, Improve Building, Against Opponents, Citywide Crisis"
+            alt="Founders Square Action Cards — Wild Action Card, Earn Income, Improve Building, Against Opponents, Citywide Crisis"
             className="mx-auto block h-auto w-full max-w-full"
             draggable={false}
           />

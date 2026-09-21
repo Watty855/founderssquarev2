@@ -123,6 +123,14 @@ export interface GameState {
   /** When set, this player cannot build properties until they finish their next turn (City Council Freeze). */
   councilFreezeBlockBuildForPlayerId?: number
   /**
+   * Freeze Assets: every founder is locked out of Income-card collections,
+   * investment payouts, and Anchor tributes for one complete round (including
+   * the founder who paid). Banking an Income card is still allowed.
+   * `incomeAssetsFrozenTurnsRemaining` counts seat-advances until the freeze lifts.
+   */
+  incomeAssetsFrozenPlayerIds?: number[]
+  incomeAssetsFrozenTurnsRemaining?: number
+  /**
    * Online games: a City Council Freeze attack succeeded and the target must roll to negate.
    * The device controlling the target seat (or the host, for a bot) opens the defense
    * dice dialog; every other device shows a waiting banner until the roll resolves.
@@ -212,12 +220,15 @@ export interface StreetBonusEntry {
 
 export interface PlayerScore {
   player: Player
+  /** Treasury cash, including banked cards. Exposed to Calamity. Unplayed hand cards are not included. */
   cashInHand: number
+  /** Built property end-game values plus this founder's investment book. */
   propertyValue: number
   /** Sum of square ($50M each) + street ($30M each) bonuses earned by this founder. */
   bonusMillion: number
   squareBonuses: SquareBonusEntry[]
   streetBonuses: StreetBonusEntry[]
+  /** cashInHand + propertyValue + bonusMillion. Hand cards still unplayed do not count. */
   totalScore: number
   propertiesOwned: number
 }

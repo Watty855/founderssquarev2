@@ -8,7 +8,7 @@ import {
   resolveActionPlayId,
 } from './actionWildCard'
 
-describe('Action Wild Card', () => {
+describe('Wild Action Card', () => {
   it('puts 4 copies in the action deck, banks $6M, and none of Double Income', () => {
     const deck = createActionDeck()
     expect(deck.filter((c) => c.cardId === ACTION_WILD_CARD_ID)).toHaveLength(4)
@@ -19,6 +19,7 @@ describe('Action Wild Card', () => {
   it('may copy every hand-playable action except itself and Calamity', () => {
     const ids = getActionWildEmulateCards().map((c) => c.id)
     expect(ids).toContain('income')
+    expect(ids).toContain('freeze-assets')
     expect(ids).toContain('hostile-takeover')
     expect(ids).toContain('build-with-tax-dollars')
     expect(ids).not.toContain(ACTION_WILD_CARD_ID)

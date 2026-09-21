@@ -21,6 +21,16 @@ export function createClosedActionCriteriaDialog(): ActionCriteriaDialogState {
   }
 }
 
+export type FreezeAssetsConfirmState = {
+  open: boolean
+  actionInstanceId: string | null
+  wildCardEmulateActionId?: string | null
+}
+
+export function createClosedFreezeAssetsConfirm(): FreezeAssetsConfirmState {
+  return { open: false, actionInstanceId: null, wildCardEmulateActionId: null }
+}
+
 export type PlacementModeState = {
   active: boolean
   propertyCardId: string | null
@@ -212,7 +222,7 @@ export type CalamityAcceptPending = {
   percent: number
   lossMillion: number
   playerName: string
-  /** Founderbot seats resolve after the outcome banner — no Accept click. */
+  /** Founderbots and remote seats resolve after the outcome banner — no Accept click. */
   autoAccept?: boolean
 }
 
@@ -238,6 +248,7 @@ export type PlayUiState = {
   discardPropertySelectMode: DiscardPropertySelectMode
   discardPropertyConfirmOpen: boolean
   actionCriteriaDialog: ActionCriteriaDialogState
+  freezeAssetsConfirm: FreezeAssetsConfirmState
   takeoverSelectMode: PlotSelectMode
   scandalSelectMode: PlotSelectMode
   rezoningMode: RezoningModeState
@@ -271,6 +282,7 @@ export const initialPlayUiState: PlayUiState = {
   },
   discardPropertyConfirmOpen: false,
   actionCriteriaDialog: createClosedActionCriteriaDialog(),
+  freezeAssetsConfirm: createClosedFreezeAssetsConfirm(),
   takeoverSelectMode: inactiveSelect,
   scandalSelectMode: inactiveSelect,
   rezoningMode: { phase: 'inactive' },
@@ -322,6 +334,7 @@ export const setRemoveInvestorsSelectMode = fieldSetter('removeInvestorsSelectMo
 export const setDiscardPropertySelectMode = fieldSetter('discardPropertySelectMode')
 export const setDiscardPropertyConfirmOpen = fieldSetter('discardPropertyConfirmOpen')
 export const setActionCriteriaDialog = fieldSetter('actionCriteriaDialog')
+export const setFreezeAssetsConfirm = fieldSetter('freezeAssetsConfirm')
 export const setTakeoverSelectMode = fieldSetter('takeoverSelectMode')
 export const setScandalSelectMode = fieldSetter('scandalSelectMode')
 export const setRezoningMode = fieldSetter('rezoningMode')
@@ -364,6 +377,7 @@ export function isPlayUiBlockingTurnAdvance(ui: PlayUiState): boolean {
     ui.investmentSelectMode.active ||
     ui.removeInvestorsSelectMode.active ||
     ui.discardPropertySelectMode.active ||
-    ui.actionCriteriaDialog.open
+    ui.actionCriteriaDialog.open ||
+    ui.freezeAssetsConfirm.open
   )
 }

@@ -16,23 +16,28 @@ import { DiscardDialog } from '@/components/dialogs/DiscardDialog'
 import { DeclareEndGameDialog } from '@/components/dialogs/DeclareEndGameDialog'
 import { IncomeDialog } from '@/components/dialogs/IncomeDialog'
 import { InvestmentOrphanDialog } from '@/components/dialogs/InvestmentOrphanDialog'
+import { FreezeAssetsConfirmDialog } from '@/components/dialogs/FreezeAssetsConfirmDialog'
 import { RollDieDialog } from '@/components/dialogs/RollDieDialog'
 import { UndoLastActionDialog } from '@/components/dialogs/UndoLastActionDialog'
 import { actionCards, propertyCards } from '@/lib/cardData'
-import { CALAMITY_OUTCOME_BANNER_MS, calamityPostRollBannerDetail } from '@/lib/calamity'
+import { CALAMITY_ACCEPT_LABEL, CALAMITY_OUTCOME_BANNER_MS } from '@/lib/calamity'
 import { incomeTaxLevyMillion, pendingIncomeTaxCount } from '@/lib/cityTax'
+import { propertyIncomeRollBlockedReason, FREEZE_ASSETS_PLAY_COST } from '@/lib/freezeAssets'
 import { getGameHandlers } from '@/lib/gameHandlerBag'
 import { useGameTableStore } from '@/lib/gameTableStore'
 import { rollSeatIsAi } from '@/lib/buildRequiredAction'
 import {
   createClosedActionCriteriaDialog,
+  createClosedFreezeAssetsConfirm,
   setActionCriteriaDialog,
+  setFreezeAssetsConfirm,
   setDiscardPropertyConfirmOpen,
   setDoubleIncomeOrphanDialog,
   setTaxBuildPrompt,
   taxPromptResumeRef,
   usePlayUiStore,
 } from '@/lib/playUiStore'
+import { CalamityOutcomeBody } from '@/components/game/CalamityOutcomeBody'
 import { MAX_TURN_ACTIONS } from '@/lib/turnActions'
 
 function isAiSeat(p: { isAi?: boolean; aiDifficulty?: unknown } | null | undefined): boolean {
@@ -43,17 +48,18 @@ const DOUBLE_INCOME_BANK_VALUE = actionCards.find((c) => c.id === 'double-income
 
 export function CalamityAcceptLayer() {
   const pending = usePlayUiStore((s) => s.calamityAcceptPending)
+  const autoAccept = pending?.autoAccept === true
   const acceptKey = pending
     ? `${pending.playerName}|${pending.face}|${pending.variantKey}|${pending.lossMillion}`
     : ''
 
   useEffect(() => {
-    if (!acceptKey) return
+    if (!acceptKey || !autoAccept) return
     const t = window.setTimeout(() => {
       getGameHandlers().handleAcceptCalamity()
     }, CALAMITY_OUTCOME_BANNER_MS)
     return () => window.clearTimeout(t)
-  }, [acceptKey])
+  }, [acceptKey, autoAccept])
 
   if (!pending) return null
   return (
@@ -67,7 +73,7 @@ export function CalamityAcceptLayer() {
     >
       <div className="absolute inset-0 bg-black/55" aria-hidden />
       <div
-        className="relative max-w-[min(94vw,32rem)] rounded-xl border px-5 py-5 text-center sm:rounded-2xl sm:px-8 sm:py-7"
+        className="relative max-w-[min(94vw,36rem)] rounded-xl border px-5 py-5 text-center sm:rounded-2xl sm:px-8 sm:py-7"
         style={{
           background: 'linear-gradient(180deg, #dc2626 0%, #991b1b 42%, #7f1d1d 100%)',
           borderColor: 'rgba(254, 202, 202, 0.55)',
@@ -85,46 +91,49 @@ export function CalamityAcceptLayer() {
             textTransform: 'uppercase',
             color: 'rgba(248,250,252,0.98)',
             margin: 0,
+            marginBottom: 14,
           }}
         >
           Calamity
         </p>
-        <p
-          style={{
-            marginTop: 14,
-            fontSize: 'clamp(13px, 1.8vw, 16px)',
-            fontWeight: 600,
-            color: 'rgba(254, 226, 226, 0.95)',
-            letterSpacing: '0.01em',
-            whiteSpace: 'pre-line',
-            lineHeight: 1.45,
-          }}
-        >
-          {calamityPostRollBannerDetail({
-            face: pending.face,
-            playerName: pending.playerName,
-            percent: pending.percent,
-            lossMillion: pending.lossMillion,
-            variant: {
-              key: pending.variantKey,
-              title: pending.variantTitle,
-              flavor: pending.variantFlavor,
-            },
-          })}
-        </p>
-        <p
-          style={{
-            marginTop: 18,
-            marginBottom: 0,
-            fontSize: 12,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: 'rgba(254, 226, 226, 0.8)',
-          }}
-        >
-          Resolving…
-        </p>
+        <CalamityOutcomeBody
+          playerName={pending.playerName}
+          face={pending.face}
+          percent={pending.percent}
+          lossMillion={pending.lossMillion}
+          variantTitle={pending.variantTitle}
+          variantFlavor={pending.variantFlavor}
+        />
+        {autoAccept ? (
+          <p
+            style={{
+              marginTop: 18,
+              marginBottom: 0,
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'rgba(254, 226, 226, 0.8)',
+            }}
+          >
+            Resolving…
+          </p>
+        ) : (
+          <Button
+            type="button"
+            className="btn-ps mt-6 h-12 w-full max-w-xs text-base"
+            style={{
+              backgroundColor: '#fff',
+              color: '#7f1d1d',
+              fontWeight: 800,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+            }}
+            onClick={() => getGameHandlers().handleAcceptCalamity()}
+          >
+            {CALAMITY_ACCEPT_LABEL}
+          </Button>
+        )}
       </div>
     </div>
   )
@@ -226,6 +235,27 @@ export function DialogHost() {
         onBank={h.handleActionCriteriaBank}
         onCancel={() => setActionCriteriaDialog(createClosedActionCriteriaDialog())}
       />
+      <FreezeAssetsConfirmDialog
+        open={ui.freezeAssetsConfirm.open}
+        canPay={(currentPlayer?.money ?? 0) >= FREEZE_ASSETS_PLAY_COST}
+        onPay={() => {
+          const id = ui.freezeAssetsConfirm.actionInstanceId
+          const emu = ui.freezeAssetsConfirm.wildCardEmulateActionId
+          setFreezeAssetsConfirm(createClosedFreezeAssetsConfirm())
+          if (!id) return
+          h.handlePlayCards(null, [id], [], {
+            freezeAssetsConfirmed: true,
+            ...(emu ? { wildCardEmulateActionId: emu } : {}),
+          })
+        }}
+        onBank={() => {
+          const id = ui.freezeAssetsConfirm.actionInstanceId
+          setFreezeAssetsConfirm(createClosedFreezeAssetsConfirm())
+          if (!id) return
+          h.handlePlayCards(null, [], [id])
+        }}
+        onCancel={() => setFreezeAssetsConfirm(createClosedFreezeAssetsConfirm())}
+      />
       <AlertDialog
         open={ui.doubleIncomeOrphanDialog.open}
         onOpenChange={(open) => {
@@ -297,6 +327,9 @@ export function DialogHost() {
               : 0
           }
           doubleIncomeAllowed={(gs.turnActionsConsumed ?? 0) + 2 <= MAX_TURN_ACTIONS}
+          propertyIncomeRollLockedReason={
+            income.player ? propertyIncomeRollBlockedReason(gs, income.player.id) : null
+          }
           onComplete={h.handleIncomeComplete}
           onCancel={h.handleIncomeCancel}
           aiAutoplay={income.player?.isAi === true || income.player?.aiDifficulty != null}

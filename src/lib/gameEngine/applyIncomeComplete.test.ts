@@ -69,7 +69,7 @@ describe('applyIncomeComplete', () => {
     expect(first.state.players[1].money).toBe(18)
   })
 
-  it('accepts Action Wild Card as the Income spend', () => {
+  it('accepts Wild Action Card as the Income spend', () => {
     const start = baseState()
     start.players[1] = {
       ...start.players[1],

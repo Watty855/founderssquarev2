@@ -19,6 +19,8 @@ export const initialGameTableState: GameState = {
   incomeResolvedThisTurn: false,
   crossingTheLineActive: false,
   councilFreezeBlockBuildForPlayerId: undefined,
+  incomeAssetsFrozenPlayerIds: [],
+  incomeAssetsFrozenTurnsRemaining: undefined,
   pendingIncomeTaxPlayerIds: [],
   openingNarrationComplete: false,
   playRoundNumber: 1,

@@ -265,7 +265,7 @@ function OpeningScreen({
                 boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
               }}
             >
-              Play on this device
+              Local play
             </button>
           </div>
         </div>
@@ -283,7 +283,7 @@ function ModeSelectScreen({
   onBack: () => void
   onPick: (m: GameMode) => void
   onJoinOnlineAsGuest?: () => void
-  /** True after "Play on this device" — hide Online (that path uses Play online on the title screen). */
+  /** True after "Local play" — hide Online (that path uses Play online on the title screen). */
   deviceOnly?: boolean
 }) {
   const cards: { mode: GameMode; title: string; desc: string; Icon: typeof User }[] = [
@@ -1526,7 +1526,7 @@ export function GameSetupWizard({
 }) {
   const [phase, setPhase] = useState<SetupWizardPhase>('opening')
   const [lobbyMode, setLobbyMode] = useState<'single' | 'online'>('single')
-  /** After "Play on this device", mode picker hides Online (use Play online on title screen). */
+  /** After "Local play", mode picker hides Online (use Play online on the title screen). */
   const [modeScreenDeviceOnly, setModeScreenDeviceOnly] = useState(false)
   const [lobbySuggestedRole, setLobbySuggestedRole] = useState<OnlineLobbyRole | undefined>(undefined)
   const [lobbyPrefill, setLobbyPrefill] = useState<{ displayName: string; roomCode: string } | null>(

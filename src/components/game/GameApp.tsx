@@ -9,7 +9,7 @@ import {
   useMemo,
 } from 'react'
 import { useGameState } from '@/hooks/use-game-state'
-import { Player, Plot, GameState, PlayerScore } from '@/lib/types'
+import { Player, Plot, GameState } from '@/lib/types'
 import { attachUndoSnapshotIfTurnAction, canUndoLastAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
 import { createInitialBoard } from '@/lib/boardData'
 import { createActionDeck, createPropertyDeck, drawCards, drawFromDeckWithDiscardReshuffle, shuffleDeck } from '@/lib/deckUtils'
@@ -82,7 +82,6 @@ import {
   makeDrawFlight,
   resolveHandDrawTargetRect,
   restoreHostOnlineConfig,
-  sumInvestmentBookForPlayer,
 } from '@/components/game/playSession/helpers'
 import * as playCards from '@/components/game/playSession/playCards'
 import * as plots from '@/components/game/playSession/plots'
@@ -150,8 +149,6 @@ import {
 import { enablePlayKeepAwake, disablePlayKeepAwake } from '@/lib/keepAwake'
 import { incomePercentageForDie } from '@/lib/incomeDice'
 import {
-  findCompleteSquares,
-  findCompleteStreets,
   getChurchIncomeBonusForPlayer,
   getArtsCouncilIncomeBonusForPlayer,
   getFarmCoopIncomeBonusForPlayer,
@@ -179,13 +176,8 @@ import {
 } from '@/lib/utils'
 import { getInvestablePlots, getTakeoverTargetPlots } from '@/lib/investmentTargets'
 import { boardHasBuiltAnchorTenant, boardHasBuiltMafia } from '@/lib/actionPreconditions'
-import {
-  getHousingBuildCost,
-  getPlotPropertyEndValue,
-  getPlotPropertyIncome,
-  HIGH_DENSITY_HOUSING_STATS,
-  isHousingPropertyCard,
-} from '@/lib/housingEconomics'
+import { calculateFinalScores } from '@/lib/playerWealth'
+import { canRollPropertyIncome, isIncomeFreezeActive } from '@/lib/freezeAssets'
 import { getBuildCelebrationNotice, getPlotLotDisplayName } from '@/lib/buildCelebrationMessages'
 import {
   MAX_ACTION_HAND_SIZE,
@@ -735,27 +727,23 @@ function AppInner() {
               lossMillion: e.lossMillion,
               variant: { key: '', title: e.variantTitle, flavor: e.variantFlavor },
             }) + (e.cityWideComplete ? '\nCalamity resolved — play resumes.' : ''),
-            { tone: 'calamity', durationMs: CALAMITY_OUTCOME_BANNER_MS }
+            {
+              tone: 'calamity',
+              durationMs: CALAMITY_OUTCOME_BANNER_MS,
+              calamityOutcome: {
+                playerName: e.playerName,
+                face: e.result,
+                percent: e.percent,
+                lossMillion: e.lossMillion,
+                variantTitle: e.variantTitle,
+                variantFlavor: e.variantFlavor,
+              },
+            }
           )
-          playCalamitySound(e.result)
         }
       }
     }
   }
-
-  // D11 plot fix - moved into useEffect to avoid setState during render
-  useEffect(() => {
-    const d11Plot = gameState.plots?.find(p => p.row === 11 && p.col === 'D')
-    if (d11Plot && d11Plot.building === 'Housing') {
-      setGameState((current) => {
-        const updatedPlots = current.plots.map(p =>
-          p.row === 11 && p.col === 'D' ? { ...p, building: 'Reese Park' } : p
-        )
-        return { ...current, plots: updatedPlots }
-      })
-    }
-  }, [gameState.plots, setGameState])
-
 
   const safeGameState: GameState = {
     ...gameState,
@@ -1454,9 +1442,11 @@ function AppInner() {
       return
     }
     const incomeActorIsAi = getPlayUiSnapshot().incomeDialogState.player?.isAi === true || actingSeatIsAi
+    const incomeOwner = getPlayUiSnapshot().incomeDialogState.player
+    const rollLocked = incomeOwner != null && !canRollPropertyIncome(safeGameState, incomeOwner.id)
     // Founderbots with no lots only hit this dialog if a play leaked through —
     // never splash the table with a roll banner for a bank/cancel.
-    if (incomeActorIsAi && getPlayUiSnapshot().incomeDialogState.hasBuiltPropertiesForIncomeRoll !== true) {
+    if (rollLocked || (incomeActorIsAi && getPlayUiSnapshot().incomeDialogState.hasBuiltPropertiesForIncomeRoll !== true)) {
       return
     }
     const key = `${getPlayUiSnapshot().incomeDialogState.player?.id ?? ''}|${getPlayUiSnapshot().incomeDialogState.actionInstanceId ?? ''}`
@@ -1990,59 +1980,6 @@ function AppInner() {
   })
   sessionRef.current = { ...sessionRef.current, handInteractionsActive }
 
-  const calculateFinalScores = (): PlayerScore[] => {
-    /** Squares + Streets are computed once per scoring call; any number per player is allowed.
-     *  Squares earn $50M each; streets earn $30M each. Names use the founder's display name at scoring. */
-    const allSquares = findCompleteSquares(safeGameState.plots)
-    const allStreets = findCompleteStreets(safeGameState.plots)
-
-    return safeGameState.players.map(player => {
-      const ownedPlots = safeGameState.plots.filter(p => p.claimedBy === player.id && p.builtProperty)
-
-      let propertyValue = 0
-      ownedPlots.forEach(plot => {
-        const propertyCard = propertyCards.find(c => c.id === plot.builtProperty)
-        if (propertyCard) {
-          propertyValue += getPlotPropertyEndValue(plot, propertyCard)
-        }
-      })
-
-      const investmentBook = sumInvestmentBookForPlayer(safeGameState.plots, player.id)
-
-      const squareBonuses = allSquares
-        .filter((s) => s.ownerPlayerId === player.id)
-        .map((s) => ({
-          name: `${player.name} Square`,
-          bonusMillion: s.bonusMillion,
-          bounds: s.bounds,
-          lots: s.lots,
-        }))
-      const streetBonuses = allStreets
-        .filter((s) => s.ownerPlayerId === player.id)
-        .map((s) => ({
-          name: `${player.name} Street`,
-          bonusMillion: s.bonusMillion,
-          orientation: s.orientation,
-          lots: s.lots,
-          streetSegment: s.streetSegment,
-        }))
-      const bonusMillion =
-        squareBonuses.reduce((acc, b) => acc + b.bonusMillion, 0) +
-        streetBonuses.reduce((acc, b) => acc + b.bonusMillion, 0)
-
-      return {
-        player,
-        cashInHand: player.money,
-        propertyValue,
-        bonusMillion,
-        squareBonuses,
-        streetBonuses,
-        totalScore: player.money + propertyValue + investmentBook + bonusMillion,
-        propertiesOwned: ownedPlots.length
-      }
-    })
-  }
-
   const councilFreezeTargetId = safeGameState.councilFreezeBlockBuildForPlayerId
   const councilFreezePlayerIndex =
     councilFreezeTargetId != null
@@ -2050,6 +1987,9 @@ function AppInner() {
       : -1
   const councilFreezePlayerNumber =
     councilFreezePlayerIndex >= 0 ? councilFreezePlayerIndex + 1 : null
+  const freezeAssetsRoundActive = isIncomeFreezeActive(safeGameState)
+  const finalRoundIncomeLocked =
+    safeGameState.endGameTriggered === true && safeGameState.gameEnded !== true
 
   const guestHostDelayed = partyBoardConfig?.role === 'guest' && syncClock.hostDelayed
   const guestRevBehind =
@@ -2340,6 +2280,38 @@ function AppInner() {
           Player {councilFreezePlayerNumber} has City Council Freeze on building
         </div>
       )}
+      {freezeAssetsRoundActive && (
+        <div
+          role="status"
+          style={{
+            padding: '8px 32px',
+            backgroundColor: 'rgba(220, 38, 38, 0.14)',
+            borderBottom: '1px solid rgba(248, 113, 113, 0.35)',
+            fontSize: 13,
+            fontWeight: 500,
+            color: '#fecaca',
+            letterSpacing: '0.02em',
+          }}
+        >
+          Freeze Assets — one round: no Income card collections, investments, or Anchor tributes
+        </div>
+      )}
+      {finalRoundIncomeLocked && !freezeAssetsRoundActive && (
+        <div
+          role="status"
+          style={{
+            padding: '8px 32px',
+            backgroundColor: 'rgba(202, 138, 4, 0.14)',
+            borderBottom: '1px solid rgba(250, 204, 21, 0.3)',
+            fontSize: 13,
+            fontWeight: 500,
+            color: '#fde68a',
+            letterSpacing: '0.02em',
+          }}
+        >
+          Final Round — property-income rolls are closed (Income cards may still be banked)
+        </div>
+      )}
       </div>
 
       {/* Main content area — desktop: sidebar + board; phone: board-first column */}
@@ -2387,7 +2359,7 @@ function AppInner() {
       {safeGameState.gameEnded && (
         <GameEndDialog
           open={safeGameState.gameEnded}
-          scores={calculateFinalScores()}
+          scores={calculateFinalScores(safeGameState)}
           onNewGame={handleNewGame}
         />
       )}

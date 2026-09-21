@@ -9,7 +9,6 @@ import { playVictoryRollSound, playUnsuccessfulRollSound } from '@/lib/soundEffe
 import {
   calamityLossMillion,
   calamityPercentForFace,
-  calamityPostRollBannerDetail,
   CALAMITY_PRE_ROLL_INSTRUCTION,
   pickCalamityVariant,
   type CalamityVariant,
@@ -18,6 +17,7 @@ import {
   attackRollRequiredTitle,
   defenseRollRequiredTitle,
 } from '@/lib/confrontationNotice'
+import { CalamityOutcomeBody } from '@/components/game/CalamityOutcomeBody'
 import { AI_FAST_PLAYBACK_MS } from '@/lib/bot/aiTiming'
 import { CALAMITY_OUTCOME_BANNER_MS } from '@/lib/calamity'
 
@@ -318,7 +318,7 @@ function RollDieDialogInner({
                       : mode === 'remove-investors'
                         ? 'Roll the die. Total 5+ includes applicable citywide, district, and rival Regulation Bureau block influence. No investor counter-roll. If you succeed, pay each investor 50% of their contribution, then clear all stripes on that lot.'
                         : mode === 'calamity'
-                          ? `${CALAMITY_PRE_ROLL_INSTRUCTION} ${calamitySummary?.rollerName ?? 'You'} rolls (${(calamitySummary?.rollIndex ?? 0) + 1} of ${calamitySummary?.totalPlayers ?? 1}).${calamitySummary?.drawerName ? ` ${calamitySummary.drawerName} drew the card.` : ''}`
+                          ? `${CALAMITY_PRE_ROLL_INSTRUCTION} Roll ${(calamitySummary?.rollIndex ?? 0) + 1} of ${calamitySummary?.totalPlayers ?? 1}.${calamitySummary?.drawerName ? ` ${calamitySummary.drawerName} drew the card.` : ''}`
                         : 'Click to roll and see your result'
 
   const total =
@@ -520,6 +520,21 @@ function RollDieDialogInner({
           >
             {councilFreezeFlow && showCouncilFreezeIntro ? councilFreezeIntroTitle : title}
           </DialogTitle>
+          {calamityFlow && diceValue === null ? (
+            <p
+              style={{
+                margin: '8px 0 0',
+                fontSize: 'clamp(26px, 3.6vw, 32px)',
+                fontWeight: 800,
+                lineHeight: 1.15,
+                color: '#fee2e2',
+                letterSpacing: '0.04em',
+                textAlign: 'center',
+              }}
+            >
+              {calamitySummary?.rollerName ?? actingPlayerName ?? 'Founder'}
+            </p>
+          ) : null}
           <DialogDescription
             style={{
               fontSize: 13,
@@ -858,25 +873,14 @@ function RollDieDialogInner({
                 </p>
               )}
               {calamityFlow && diceValue !== null && calamityVariant && (
-                <p
-                  style={{
-                    textAlign: 'center',
-                    fontSize: 14,
-                    fontWeight: 600,
-                    color: '#fee2e2',
-                    margin: 0,
-                    whiteSpace: 'pre-line',
-                    lineHeight: 1.45,
-                  }}
-                >
-                  {calamityPostRollBannerDetail({
-                    face: diceValue,
-                    playerName: calamitySummary?.rollerName ?? 'You',
-                    percent: calamityPercentForFace(diceValue),
-                    lossMillion: calamityLossMillion(calamitySummary?.rollerMoney ?? 0, diceValue),
-                    variant: calamityVariant,
-                  })}
-                </p>
+                <CalamityOutcomeBody
+                  playerName={calamitySummary?.rollerName ?? 'You'}
+                  face={diceValue}
+                  percent={calamityPercentForFace(diceValue)}
+                  lossMillion={calamityLossMillion(calamitySummary?.rollerMoney ?? 0, diceValue)}
+                  variantTitle={calamityVariant.title}
+                  variantFlavor={calamityVariant.flavor}
+                />
               )}
               {mode === 'council-freeze-defender' && diceValue !== null && (
                 <p style={{ textAlign: 'center', fontSize: 13, color: diceValue === 6 ? '#6ee7b7' : '#fca5a5', margin: 0 }}>

@@ -7,7 +7,7 @@ export function isActionWildCard(cardId: string | undefined | null): boolean {
   return cardId === ACTION_WILD_CARD_ID
 }
 
-/** Hand-playable actions the Action Wild Card may copy. Calamity is deck-triggered, not a hand play. */
+/** Hand-playable actions the Wild Action Card may copy. Calamity is deck-triggered, not a hand play. */
 export function getActionWildEmulateCards(): ActionCard[] {
   return actionCards.filter((c) => c.id !== ACTION_WILD_CARD_ID && c.category !== 'calamity')
 }
@@ -22,7 +22,7 @@ export function resolveActionPlayId(cardId: string, emulateActionId?: string | n
   return emulateActionId && isValidActionWildEmulateId(emulateActionId) ? emulateActionId : cardId
 }
 
-/** Effective action id for a hand instance (Action Wild Card copies `emulateActionId`). */
+/** Effective action id for a hand instance (Wild Action Card copies `emulateActionId`). */
 export function playedActionId(
   cardId: string | undefined | null,
   emulateActionId?: string | null

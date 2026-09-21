@@ -5,41 +5,12 @@ import { Anchor, ArrowCounterClockwise, BookOpen, Gavel, House } from '@phosphor
 import { ChromeDimmer } from '@/components/game/ChromeDimmer'
 import { SidebarHandFlightAnchors } from '@/components/game/SidebarHandFlightAnchors'
 import { canUndoLastAction } from '@/lib/undoLastAction'
-import { propertyCards } from '@/lib/cardData'
-import { getPlotPropertyEndValue, getPlotPropertyIncome } from '@/lib/housingEconomics'
-import { getParkIncomeBonusForPlayer } from '@/lib/utils'
+import { isPlayerIncomeFrozen } from '@/lib/freezeAssets'
+import { calculateFinalScores, playerIncomePerTurn } from '@/lib/playerWealth'
 import { useGameTableStore } from '@/lib/gameTableStore'
 import { usePlayUiStore, setUndoActionDialogOpen } from '@/lib/playUiStore'
 import { setActionCardsOpen, setAnchorTenetsOpen, setPropertyTypesOpen, setRulesQuickOpen } from '@/lib/gameOverlayStore'
-import type { Player, Plot } from '@/lib/types'
-
-function sumInvestmentBookForPlayer(plots: Plot[], investorId: number): number {
-  let s = 0
-  for (const p of plots) {
-    p.investmentStripes?.forEach((t) => {
-      if (t.investorId === investorId) s += t.contributionMillion
-    })
-  }
-  return s
-}
-
-function playerStats(plots: Plot[], player: Player) {
-  const ownedPlots = plots.filter((p) => p.claimedBy === player.id && p.builtProperty)
-  let totalPropertyValue = 0
-  let totalIncome = 0
-  ownedPlots.forEach((plot) => {
-    const propertyCard = propertyCards.find((c) => c.id === plot.builtProperty)
-    if (propertyCard) {
-      totalPropertyValue += getPlotPropertyEndValue(plot, propertyCard)
-      totalIncome += getPlotPropertyIncome(plot, propertyCard)
-    }
-  })
-  const { bonus: parkIncomeBonus } = getParkIncomeBonusForPlayer(player.id, plots)
-  return {
-    propertyValue: totalPropertyValue,
-    income: totalIncome + parkIncomeBonus,
-  }
-}
+import type { Player } from '@/lib/types'
 
 const boardHudIconButtonClass =
   'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/12 bg-white/[0.04] text-[#a8b0c8] transition-colors hover:border-[#c9a85c]/45 hover:bg-[#1a1a24] hover:text-[#f5ecd7] disabled:opacity-35 disabled:pointer-events-none disabled:hover:border-white/12 disabled:hover:bg-white/[0.04] disabled:hover:text-[#a8b0c8]'
@@ -67,6 +38,17 @@ export function PlayerSidebar() {
     isSpectator,
     diceResolutionOpen,
   })
+  const scores = calculateFinalScores({ players, plots })
+  const scoreById = new Map(scores.map((s) => [s.player.id, s]))
+  const statsFor = (player: Player) => {
+    const score = scoreById.get(player.id)
+    return {
+      cash: score?.cashInHand ?? player.money,
+      propertyValue: score?.propertyValue ?? 0,
+      standingTotal: score?.totalScore ?? player.money,
+      income: playerIncomePerTurn(plots, player.id),
+    }
+  }
 
   const hudButtons = (size: number, compactBtns: boolean) => (
     <div
@@ -169,10 +151,12 @@ export function PlayerSidebar() {
         {hudButtons(16, true)}
         {players.map((player, index) => {
           const isActive = index === currentPlayerIndex
-          const stats = playerStats(plots, player)
+          const stats = statsFor(player)
+          const assetsFrozen = isPlayerIncomeFrozen(gs, player.id)
           return (
             <div
               key={player.id}
+              title={`${player.name}.${assetsFrozen ? ' Assets frozen — no property Income or investment payouts until this turn ends.' : ''} Cash $${stats.cash}M (banked cards count; Calamity hits cash). Property $${stats.propertyValue}M (built lots + investments). Total $${stats.standingTotal}M. Unplayed hand cards do not score.`}
               style={{
                 flexShrink: 0,
                 display: 'flex',
@@ -183,7 +167,7 @@ export function PlayerSidebar() {
                 border: isActive ? `1.5px solid ${player.color}` : '1px solid rgba(255,255,255,0.1)',
                 background: isActive ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)',
                 boxShadow: isActive ? `0 0 12px ${player.color}44` : undefined,
-                maxWidth: 200,
+                maxWidth: 280,
               }}
             >
               <div
@@ -199,11 +183,25 @@ export function PlayerSidebar() {
                 {player.name}
               </span>
               <span style={{ fontSize: 10, color: 'rgba(248,250,252,0.75)', fontVariantNumeric: 'tabular-nums' }}>
-                ${player.money}M
+                ${stats.cash}M
+              </span>
+              <span style={{ fontSize: 10, color: 'rgba(186, 214, 247, 0.9)', fontVariantNumeric: 'tabular-nums' }}>
+                ${stats.propertyValue}M
+              </span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
+                ${stats.standingTotal}M
               </span>
               {isActive ? (
                 <span style={{ fontSize: 10, color: '#fef9c3', fontVariantNumeric: 'tabular-nums' }}>
                   ${stats.income}M/t
+                </span>
+              ) : null}
+              {assetsFrozen ? (
+                <span
+                  title="Freeze Assets: no property Income or investment payouts until this turn ends"
+                  style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.04em', color: '#fecaca', textTransform: 'uppercase' }}
+                >
+                  Frozen
                 </span>
               ) : null}
               {player.id !== handRailPlayerId ? <SidebarHandFlightAnchors player={player} /> : null}
@@ -229,13 +227,14 @@ export function PlayerSidebar() {
         {hudButtons(18, false)}
         {players.map((player, index) => {
           const isActive = index === currentPlayerIndex
-          const stats = playerStats(plots, player)
+          const stats = statsFor(player)
+          const assetsFrozen = isPlayerIncomeFrozen(gs, player.id)
           const showSidebarAnchors = player.id !== handRailPlayerId
           const handCounts = `${player.propertyCards.length} property and ${player.actionCards.length} action cards in hand`
           const handNote = showSidebarAnchors
             ? `${handCounts}. Card flights land at this player's row — backs only.`
             : `${handCounts}. Main table hand strip below.`
-          const statusSummary = `${player.name}.${isActive ? ' Current turn.' : ''} Cash ${player.money} million dollars. Property book value ${stats.propertyValue} million dollars. Income ${stats.income} million dollars per turn. ${handNote}`
+          const statusSummary = `${player.name}.${isActive ? ' Current turn.' : ''}${assetsFrozen ? ' Assets frozen — no property Income or investment payouts until this turn ends.' : ''} Cash ${stats.cash} million dollars. Property ${stats.propertyValue} million dollars including investments. Standing total ${stats.standingTotal} million dollars. Income ${stats.income} million dollars per turn. Unplayed cards in hand are not scored. ${handNote}`
           return (
             <article
               key={player.id}
@@ -283,6 +282,21 @@ export function PlayerSidebar() {
                 >
                   {player.name}
                 </p>
+                {assetsFrozen ? (
+                  <span
+                    title="Freeze Assets: no property Income or investment payouts until this turn ends"
+                    style={{
+                      marginLeft: 'auto',
+                      fontSize: 9,
+                      fontWeight: 700,
+                      letterSpacing: '0.06em',
+                      textTransform: 'uppercase',
+                      color: '#fecaca',
+                    }}
+                  >
+                    Frozen
+                  </span>
+                ) : null}
               </div>
               <div
                 style={{
@@ -300,15 +314,36 @@ export function PlayerSidebar() {
                 aria-hidden
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                  <span style={{ color: 'rgba(226, 232, 240, 0.62)', fontWeight: 500 }}>Cash</span>
+                  <span
+                    style={{ color: 'rgba(226, 232, 240, 0.62)', fontWeight: 500 }}
+                    title="Treasury. Banked cards add here and are exposed to Calamity."
+                  >
+                    Cash
+                  </span>
                   <span style={{ fontWeight: 600, color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
-                    ${player.money}M
+                    ${stats.cash}M
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                  <span style={{ color: 'rgba(226, 232, 240, 0.62)', fontWeight: 500 }}>Property</span>
+                  <span
+                    style={{ color: 'rgba(226, 232, 240, 0.62)', fontWeight: 500 }}
+                    title="Built lots plus your investments. Unplayed cards in hand are not included."
+                  >
+                    Property
+                  </span>
                   <span style={{ fontWeight: 600, color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
                     ${stats.propertyValue}M
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <span
+                    style={{ color: 'rgba(226, 232, 240, 0.62)', fontWeight: 500 }}
+                    title="Cash + property + Square/Street bonuses if already earned."
+                  >
+                    Total
+                  </span>
+                  <span style={{ fontWeight: 700, color: '#f8fafc', fontVariantNumeric: 'tabular-nums' }}>
+                    ${stats.standingTotal}M
                   </span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>

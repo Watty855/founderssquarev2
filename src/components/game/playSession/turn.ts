@@ -25,6 +25,7 @@ import {
 import { createActionDeck, createPropertyDeck, drawCards, drawFromDeckWithDiscardReshuffle, shuffleDeck } from '@/lib/deckUtils'
 import { createInitialBoard } from '@/lib/boardData'
 import { playerHasBuiltIncomeProperty, pickAiDiscardPropertyIds, pickAiActionCardDiscardIds, trySimpleAiMainPhase } from '@/lib/bot/simpleAiTurn'
+import { canRollPropertyIncome } from '@/lib/freezeAssets'
 import { incomePercentageForDie } from '@/lib/incomeDice'
 import { getInvestablePlots, getTakeoverTargetPlots } from '@/lib/investmentTargets'
 import { boardHasBuiltAnchorTenant, boardHasBuiltMafia } from '@/lib/actionPreconditions'
@@ -635,10 +636,13 @@ export function unstickPlay(s: PlaySession)
 
     // Force-resolve stuck Income (bots) — previously Unstick could not clear this dialog.
     if (getPlayUiSnapshot().incomeDialogState.open && (acting?.isAi === true || getPlayUiSnapshot().incomeDialogState.player?.isAi === true)) {
-      if (getPlayUiSnapshot().incomeDialogState.hasBuiltPropertiesForIncomeRoll) {
+      const incomeUi = getPlayUiSnapshot().incomeDialogState
+      const incomeOwnerId = incomeUi.player?.id ?? acting?.id
+      const rollLocked = incomeOwnerId != null && !canRollPropertyIncome(safeGameState, incomeOwnerId)
+      if (incomeUi.hasBuiltPropertiesForIncomeRoll && !rollLocked) {
         const face = 4
         const pct = incomePercentageForDie(face)
-        const amount = Math.floor((getPlayUiSnapshot().incomeDialogState.totalIncome * pct) / 100)
+        const amount = Math.floor((incomeUi.totalIncome * pct) / 100)
         getGameHandlers().handleIncomeComplete(Math.max(0, amount), undefined, 'property-roll', face)
       } else {
         const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? 2

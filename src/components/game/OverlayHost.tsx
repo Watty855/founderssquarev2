@@ -7,6 +7,7 @@ import { CardFlightLayer } from '@/components/game/CardFlightLayer'
 import { OpeningProTipOverlay } from '@/components/game/OpeningProTipOverlay'
 import { PropertyTypesQuickSheet } from '@/components/game/PropertyTypesQuickSheet'
 import { RulesQuickSheet } from '@/components/game/RulesQuickSheet'
+import { CalamityOutcomeBody } from '@/components/game/CalamityOutcomeBody'
 import { usePlayUiStore } from '@/lib/playUiStore'
 import {
   dismissOpeningProTip,
@@ -30,7 +31,7 @@ function CalamityScreenBanner() {
       role="status"
     >
       <div
-        className="max-w-[min(94vw,32rem)] rounded-xl border px-5 py-5 text-center sm:rounded-2xl sm:px-8 sm:py-7"
+        className="max-w-[min(94vw,36rem)] rounded-xl border px-5 py-5 text-center sm:rounded-2xl sm:px-8 sm:py-7"
         style={{
           background: 'linear-gradient(180deg, #dc2626 0%, #991b1b 42%, #7f1d1d 100%)',
           borderColor: 'rgba(254, 202, 202, 0.55)',
@@ -47,20 +48,23 @@ function CalamityScreenBanner() {
             textTransform: 'uppercase',
             color: 'rgba(248,250,252,0.98)',
             margin: 0,
+            marginBottom: 14,
           }}
         >
           {boardNotice.title}
         </p>
-        {boardNotice.detail ? (
+        {boardNotice.calamityOutcome ? (
+          <CalamityOutcomeBody {...boardNotice.calamityOutcome} />
+        ) : boardNotice.detail ? (
           <p
             style={{
               marginTop: 14,
-              fontSize: 'clamp(13px, 1.8vw, 16px)',
-              fontWeight: 600,
+              fontSize: 'clamp(26px, 3.6vw, 32px)',
+              fontWeight: 700,
               color: 'rgba(254, 226, 226, 0.95)',
               letterSpacing: '0.01em',
               whiteSpace: 'pre-line',
-              lineHeight: 1.45,
+              lineHeight: 1.35,
             }}
           >
             {boardNotice.detail}

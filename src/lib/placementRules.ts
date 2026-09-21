@@ -161,7 +161,14 @@ export function getValidPlotsForProperty(
   plots: Plot[],
   crossingTheLineActive: boolean = false
 ): Plot[] {
-  return plots.filter((plot) => canPlaceProperty(card, plot, plots, crossingTheLineActive))
+  // Only vacant printed city lots can accept a build. Streets, borders, and
+  // already-built cells are skipped so a turn does not walk the whole board.
+  const open: Plot[] = []
+  for (const plot of plots) {
+    if (plot.type !== 'city' || !plot.building || plot.builtProperty) continue
+    if (canPlaceProperty(card, plot, plots, crossingTheLineActive)) open.push(plot)
+  }
+  return open
 }
 
 /** Vacant city lots where a Rezoning build may be attempted (ignores normal zoning / district match). */

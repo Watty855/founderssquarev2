@@ -6,7 +6,8 @@ import { BoardPinchZoom } from '@/components/game/BoardPinchZoom'
 import { useOverlayStore } from '@/lib/gameOverlayStore'
 import { useGameTableStore } from '@/lib/gameTableStore'
 import { usePlayUiStore } from '@/lib/playUiStore'
-import { selectBoardPlayerColors, selectNamedRegions } from '@/lib/boardSelectors'
+import { selectNamedRegions } from '@/lib/boardSelectors'
+import { selectLastBuiltToken, selectLotTurnStates } from '@/lib/selectLotTurnState'
 import { selectBoardPlacement } from '@/lib/selectBoardPlacement'
 import { getGameHandlers } from '@/lib/gameHandlerBag'
 import { getGameTableSnapshot } from '@/lib/gameTableStore'
@@ -36,12 +37,12 @@ function BoardLift({ children }: { children: React.ReactNode }) {
 }
 
 function BoardViewportImpl({ compact, landscape }: BoardViewportProps) {
-  const plots = useGameTableStore((s) => s.plots)
+  const lotStates = useGameTableStore(selectLotTurnStates)
+  const lastBuiltToken = useGameTableStore(selectLastBuiltToken)
   const winningSequence = useGameTableStore((s) => s.winningSequence)
   const gameEnded = useGameTableStore((s) => s.gameEnded === true)
   const crossingTheLineActive = useGameTableStore((s) => s.crossingTheLineActive)
   const currentPlayerIndex = useGameTableStore((s) => s.currentPlayerIndex)
-  const players = useGameTableStore(selectBoardPlayerColors)
   const named = useGameTableStore(selectNamedRegions)
   const placement = usePlayUiStore((s) => s.placementMode)
   const takeover = usePlayUiStore((s) => s.takeoverSelectMode)
@@ -53,7 +54,7 @@ function BoardViewportImpl({ compact, landscape }: BoardViewportProps) {
   const placementMode = useMemo(
     () => selectBoardPlacement(getGameTableSnapshot(), getPlayUiSnapshot()),
     [
-      plots,
+      lotStates,
       crossingTheLineActive,
       currentPlayerIndex,
       placement,
@@ -90,8 +91,8 @@ function BoardViewportImpl({ compact, landscape }: BoardViewportProps) {
         <BoardLift>
           <GameBoard
             compact={compact}
-            plots={plots}
-            players={players}
+            lotStates={lotStates}
+            lastBuiltToken={lastBuiltToken}
             onPlotClaim={onPlotClaim}
             winningSequence={winningSequence}
             onPropertyClick={onPropertyClick}

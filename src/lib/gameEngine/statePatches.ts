@@ -7,6 +7,10 @@ import {
   largestOwnedAdjacentCluster,
 } from '@/lib/utils'
 
+import { tickIncomeFreezeOnEndTurn } from '@/lib/freezeAssets'
+
+export { tickIncomeFreezeOnEndTurn }
+
 export function clearCouncilFreezeIfEndingPlayer(
   current: GameState,
   finishingPlayerIndex: number

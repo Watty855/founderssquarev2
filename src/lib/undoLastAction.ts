@@ -1,4 +1,5 @@
 import { actionCards, propertyCards } from '@/lib/cardData'
+import { isActionWildCard } from '@/lib/actionWildCard'
 import type { GameState } from '@/lib/types'
 
 export type UndoLastAction = {
@@ -31,6 +32,32 @@ function consumedTurnUsedDiceAction(before: GameState, after: GameState): boolea
   return newActionDiscardsSince(before, after).some((card) =>
     isDiceDeterminedActionCardId(card.cardId)
   )
+}
+
+/** Successful Rezoning builds after a die roll — that outcome cannot be undone. */
+function rezoningBuildUsedDice(before: GameState, after: GameState): boolean {
+  const built = after.lastBuiltProperty
+  const hadBuilt = before.lastBuiltProperty
+  if (
+    !built ||
+    (hadBuilt &&
+      hadBuilt.row === built.row &&
+      hadBuilt.col === built.col &&
+      hadBuilt.propertyId === built.propertyId)
+  ) {
+    return false
+  }
+  return newActionDiscardsSince(before, after).some(
+    (card) =>
+      isDiceDeterminedActionCardId(card.cardId) ||
+      isActionWildCard(card.cardId)
+  )
+}
+
+/** Clear leftover undo after any die-determined resolution. */
+export function denyUndoAfterDiceOutcome(state: GameState): GameState {
+  if (!state.undoLastAction) return state
+  return { ...state, undoLastAction: undefined }
 }
 
 const EPHEMERAL_KEYS = ['undoLastAction', 'showNewCardsAnimation', 'newCardsDrawn'] as const
@@ -100,6 +127,11 @@ export function attachUndoSnapshotIfTurnAction(before: GameState, after: GameSta
   }
 
   if (consumedTurnUsedDiceAction(before, after)) {
+    return { ...after, undoLastAction: undefined }
+  }
+
+  // Rezoning success is a build that also spends a dice-gated action card.
+  if (rezoningBuildUsedDice(before, after)) {
     return { ...after, undoLastAction: undefined }
   }
 

@@ -57,6 +57,8 @@ interface IncomeDialogProps {
    * would exceed the per-turn action limit).
    */
   doubleIncomeAllowed?: boolean
+  /** When set, the property-income die is closed (Freeze Assets or Final Round). Bank is still allowed. */
+  propertyIncomeRollLockedReason?: string | null
   onComplete: (
     earnedIncome: number,
     doubleIncomeInstanceId?: string,
@@ -132,6 +134,7 @@ export function IncomeDialog({
   hasBuiltPropertiesForIncomeRoll,
   incomeTaxLevyMillion = 0,
   doubleIncomeAllowed = true,
+  propertyIncomeRollLockedReason = null,
   onComplete,
   onCancel,
   aiAutoplay = false,
@@ -159,6 +162,8 @@ export function IncomeDialog({
   const hasIncomeGeneratingProperties =
     hasBuiltPropertiesForIncomeRoll === true ||
     (hasBuiltPropertiesForIncomeRoll === undefined && totalIncome > 0)
+  const rollLocked = Boolean(propertyIncomeRollLockedReason)
+  const canOfferPropertyRoll = hasIncomeGeneratingProperties && !rollLocked
   const bankValue = actionCards.find(c => c.id === 'income')?.bankValue ?? 4
   /** Humans only — bots never see Roll/Bank/Cancel. */
   const atChooser = showInitialChoice && !aiAutoplay
@@ -166,7 +171,7 @@ export function IncomeDialog({
    * Bots skip the 3D dice box entirely (init can take seconds). Humans mount dice
    * only after dismissing the chooser.
    */
-  const diceOpen = open && !aiAutoplay && !atChooser && hasIncomeGeneratingProperties
+  const diceOpen = open && !aiAutoplay && !atChooser && canOfferPropertyRoll
   const { roll, isRolling, diceValue, isReady } = useDiceBox({ containerId, open: diceOpen })
 
   const onCompleteRef = useRef(onComplete)
@@ -182,6 +187,8 @@ export function IncomeDialog({
   doubleAllowedRef.current = doubleIncomeAllowed
   const bankValueRef = useRef(bankValue)
   bankValueRef.current = bankValue
+  const rollLockedRef = useRef(rollLocked)
+  rollLockedRef.current = rollLocked
   const incomeResultRef = useRef(incomeResult)
   incomeResultRef.current = incomeResult
   const resultShownAtRef = useRef(0)
@@ -221,7 +228,7 @@ export function IncomeDialog({
       })
       const useDouble = Boolean(doubleInst) && doubleAllowedRef.current
       playIncomeSound()
-      if (!hasPropsRef.current) {
+      if (!hasPropsRef.current || rollLockedRef.current) {
         const bv = actionCards.find((c) => c.id === 'income')?.bankValue ?? bankValueRef.current
         onCompleteRef.current(bv, undefined, 'bank-income-card')
         return
@@ -392,7 +399,9 @@ export function IncomeDialog({
           <DialogDescription style={{ fontSize: 13, color: '#8888a0', lineHeight: 1.4 }}>
             {aiAutoplay
               ? `${player.name} is collecting income…`
-              : atChooser && hasIncomeGeneratingProperties
+              : rollLocked
+                ? propertyIncomeRollLockedReason
+                : atChooser && canOfferPropertyRoll
                 ? `Roll the die for a chance at more income, or bank the card for a guaranteed $${bankValue}M.`
                 : !hasIncomeGeneratingProperties
                   ? `No properties to generate income. Bank this card for $${bankValue}M?`
@@ -414,7 +423,7 @@ export function IncomeDialog({
             >
               Resolving…
             </div>
-          ) : !hasIncomeGeneratingProperties ? (
+          ) : !canOfferPropertyRoll ? (
             <div style={{ display: 'flex', gap: 10 }}>
               <button
                 onClick={handleBankCard}

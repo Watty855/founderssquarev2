@@ -43,6 +43,7 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
     lines: [
       'Plays itself the instant it’s drawn — at most once every 7 rounds.',
       'Every founder rolls in turn order starting with the drawer: lose 5–30% of cash (5% per pip). Cannot be overturned.',
+      'Cash includes banked cards. Unplayed cards in hand and built property are not hit.',
     ],
   },
   {
@@ -56,8 +57,10 @@ export const FOUNDERS_SHORT_RULES: ReadonlyArray<{
     title: 'End game',
     lines: [
       '12 adjacent properties owned by the same player makes the Final Round available — only that player may declare it, on their own turn.',
-      'Declaring starts it immediately: every other founder gets one more turn, and the declaring player also gets one more turn, then final scoring (Squares & Streets).',
+      'Declaring starts it immediately: every other founder gets one more turn, and the declaring player also gets one more turn, then final scoring.',
       'The eligible player has up to 4 of their own turns to declare. If they haven’t declared by the end of their 4th turn, the game ends immediately at that point — no bonus round for anyone else.',
+      'Score is cash + property value + Square/Street bonuses. Property value includes built lots and your investments. Unplayed cards in hand score nothing — bank them for cash (exposed to Calamity) or build/invest first.',
+      'Once the Final Round is declared, nobody may roll property Income (you may still bank the card). Freeze Assets locks every founder — including the player who paid — for one complete round: no Income card collections, investments, or Anchor tributes.',
     ],
   },
 ]

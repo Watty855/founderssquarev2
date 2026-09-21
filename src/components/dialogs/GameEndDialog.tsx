@@ -57,11 +57,11 @@ export function GameEndDialog({ open, scores, onNewGame }: GameEndDialogProps) {
                 <div style={{ fontSize: 36, fontWeight: 300, color: '#f0f0f5', marginBottom: 16 }}>${winner.totalScore}M</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12, fontSize: 13 }}>
                   <div>
-                    <div style={{ color: '#8888a0', marginBottom: 2 }}>Cash in Hand</div>
+                    <div style={{ color: '#8888a0', marginBottom: 2 }}>Cash</div>
                     <div style={{ fontSize: 16, fontWeight: 600, color: '#f0f0f5' }}>${winner.cashInHand}M</div>
                   </div>
                   <div>
-                    <div style={{ color: '#8888a0', marginBottom: 2 }}>Property Value</div>
+                    <div style={{ color: '#8888a0', marginBottom: 2 }}>Property</div>
                     <div style={{ fontSize: 16, fontWeight: 600, color: '#f0f0f5' }}>${winner.propertyValue}M</div>
                   </div>
                   <div>
@@ -74,6 +74,10 @@ export function GameEndDialog({ open, scores, onNewGame }: GameEndDialogProps) {
                     <div style={{ color: '#8888a0', marginBottom: 2 }}>Properties</div>
                     <div style={{ fontSize: 16, fontWeight: 600, color: '#f0f0f5' }}>{winner.propertiesOwned}</div>
                   </div>
+                </div>
+                <div style={{ marginTop: 10, fontSize: 11, color: '#8888a0', lineHeight: 1.45 }}>
+                  Property includes built lots and investments. Unplayed cards in hand are not scored.
+                  Banked cards are cash and were exposed to Calamity.
                 </div>
                 {(winner.squareBonuses.length > 0 || winner.streetBonuses.length > 0) ? (
                   <div style={{ marginTop: 14, display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
@@ -149,7 +153,7 @@ export function GameEndDialog({ open, scores, onNewGame }: GameEndDialogProps) {
                           <div style={{ fontWeight: 600, color: '#f0f0f5', whiteSpace: 'nowrap' }}>${score.cashInHand}M</div>
                         </div>
                         <div style={{ textAlign: 'right', minWidth: 90 }}>
-                          <div style={{ color: '#666680', fontSize: 12, whiteSpace: 'nowrap' }}>Properties</div>
+                          <div style={{ color: '#666680', fontSize: 12, whiteSpace: 'nowrap' }}>Property</div>
                           <div style={{ fontWeight: 600, color: '#f0f0f5', whiteSpace: 'nowrap' }}>${score.propertyValue}M</div>
                         </div>
                         <div style={{ textAlign: 'right', minWidth: 76 }}>

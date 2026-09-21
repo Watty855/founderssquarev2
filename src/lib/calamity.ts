@@ -129,6 +129,15 @@ export const CALAMITY_ACCEPT_LABEL = 'Accept Calamity'
 /** Outcome banner / bot auto-accept pause so every seat can read the result. */
 export const CALAMITY_OUTCOME_BANNER_MS = 2000
 
+export type CalamityOutcomeFields = {
+  playerName: string
+  face?: number
+  percent: number
+  lossMillion: number
+  variantTitle: string
+  variantFlavor: string
+}
+
 /** Post-roll banner body: die result, percent of cash reserve lost, and the table cause. */
 export function calamityPostRollBannerDetail(opts: {
   face?: number
@@ -279,6 +288,7 @@ export function beginCalamity(
   return {
     ...state,
     lastCalamityPlayRound: state.playRoundNumber ?? 1,
+    undoLastAction: undefined,
     actionDeck: rest.length > 0 ? shuffleDeck([...state.actionDeck, ...rest]) : state.actionDeck,
     pendingCalamity: {
       instance: first,
@@ -361,6 +371,7 @@ export function applyCalamityRoll(
     ...state,
     players,
     calamityUsedVariantKeys: usedKeys,
+    undoLastAction: undefined,
     pendingCalamity: moreRolls ? { ...pending, currentRollIndex: nextIndex } : undefined,
   }
 

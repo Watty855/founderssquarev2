@@ -13,6 +13,7 @@ import {
   incomeTaxLevyMillion,
   pendingIncomeTaxCount,
 } from '@/lib/cityTax'
+import { canRollPropertyIncome, omitFrozenRecipientAmounts } from '@/lib/freezeAssets'
 
 export type IncomeCompleteParams = {
   incomeInstanceId: string
@@ -35,28 +36,40 @@ export function applyIncomeComplete(state: GameState, params: IncomeCompletePara
     return { ok: false, error: 'Income already resolved this turn.', code: 'income_used' }
   }
 
+  const ownerId = currentPlayer.id
+  const isPropertyRoll = params.incomeResolution === 'property-roll'
+  if (isPropertyRoll && !canRollPropertyIncome(state, ownerId)) {
+    return {
+      ok: false,
+      error: state.endGameTriggered
+        ? 'Final Round — property-income rolls are closed. Bank the Income card instead.'
+        : 'Freeze Assets is in effect — you cannot collect property income this turn. Bank the Income card instead.',
+      code: state.endGameTriggered ? 'final_round_income_lock' : 'income_frozen',
+    }
+  }
+
   let effectiveDoubleId = params.doubleIncomeInstanceId
   const consumedBefore = state.turnActionsConsumed ?? 0
   if (effectiveDoubleId && consumedBefore + 2 > MAX_TURN_ACTIONS) {
     effectiveDoubleId = undefined
   }
 
-  const ownerId = currentPlayer.id
   const pendingTax = pendingIncomeTaxCount(state.pendingIncomeTaxPlayerIds, ownerId) > 0
   const levy = pendingTax ? incomeTaxLevyMillion(params.totalPropertyIncomeBase) : 0
-  const isPropertyRoll = params.incomeResolution === 'property-roll'
 
-  const { payoutByPlayerId } = isPropertyRoll
+  const { payoutByPlayerId: rawInvestorPayout } = isPropertyRoll
     ? computeInvestorIncomeAwardsForOwner(state.plots, ownerId)
     : { payoutByPlayerId: {} as Record<number, number> }
+  const payoutByPlayerId = isPropertyRoll ? omitFrozenRecipientAmounts(rawInvestorPayout, state) : {}
 
   const { scaled: scaledInner, ownerKeeps: afterInvestors } = allocateInvestorPayoutsFromOwner(
     params.earnedIncome,
-    isPropertyRoll ? payoutByPlayerId : {}
+    payoutByPlayerId
   )
-  const { recipientAmounts: mafiaOwed } = isPropertyRoll
+  const { recipientAmounts: rawMafiaOwed } = isPropertyRoll
     ? getMafiaLevyForIncomePlayer(ownerId, state.plots)
     : { recipientAmounts: {} as Record<number, number> }
+  const mafiaOwed = isPropertyRoll ? omitFrozenRecipientAmounts(rawMafiaOwed, state) : {}
   const { scaled: mafiaRecipientAmounts, ownerKeeps: afterMafia } = allocateMafiaTributeFromOwner(
     afterInvestors,
     mafiaOwed

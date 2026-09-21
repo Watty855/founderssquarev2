@@ -111,7 +111,7 @@ import {
   hostileTakeoverDefenseSuccessTitle,
   investmentNoticeTitle,
 } from '@/lib/confrontationNotice'
-import { countResolvedActionStepsInBatch, initialGameState, withReplenishedActionHand } from './helpers'
+import { countResolvedActionStepsInBatch, initialGameState, isAiSeat, withReplenishedActionHand } from './helpers'
 import type { PlaySession } from './types'
 
 export function calamitySettled(s: PlaySession, info: {
@@ -152,6 +152,10 @@ export function calamitySettled(s: PlaySession, info: {
       const percent = calamityPercentForFace(face)
       const lossMillion = calamityLossMillion(roller?.money ?? 0, face)
       const playerName = roller?.name ?? 'Founder'
+      const rollerIsLocalHuman =
+        !isAiSeat(roller) &&
+        !isSpectator &&
+        (!partyBoardConfig || partyBoardSeatPlayer?.id === rollerId)
       setCalamityAcceptPending({
         face,
         variantKey: info.variant.key,
@@ -160,9 +164,11 @@ export function calamitySettled(s: PlaySession, info: {
         percent,
         lossMillion,
         playerName,
-        autoAccept: true,
+        autoAccept: !rollerIsLocalHuman,
       })
-      playCalamitySound(face)
+      if (rollerIsLocalHuman) {
+        playCalamitySound(face)
+      }
       clearBoardNotice()
       setRollDieDialogState({
         open: false,

@@ -12,6 +12,8 @@ import {
 import { PropertyCardView } from '@/components/game/PropertyCardView'
 import { ActionCardView } from '@/components/game/ActionCardView'
 import { CardBackFace } from '@/components/game/CardBackFace'
+import { FreezeAssetsLegalIcon } from '@/components/game/FreezeAssetsPlayPrompt'
+import { FREEZE_ASSETS_CARD_ID } from '@/lib/freezeAssets'
 
 interface CompactCardViewProps {
   card: PropertyCard | ActionCard
@@ -275,6 +277,13 @@ export function CompactCardView({
                 </div>
                 <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
                   Income
+                </div>
+              </div>
+            ) : actCard?.id === FREEZE_ASSETS_CARD_ID ? (
+              <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                <FreezeAssetsLegalIcon size={36} />
+                <div style={{ fontSize: 9, fontWeight: 500, color: '#fde68a', lineHeight: 1.3 }}>
+                  Pay $8M
                 </div>
               </div>
             ) : (

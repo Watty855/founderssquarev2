@@ -6,29 +6,50 @@ import { isCivicFlexHandCard } from '@/lib/civicFlexProperty'
 import { getAvailableCivicVariantIds } from '@/lib/lotCategory'
 import { resolvePropertyPlacementTemplate } from '@/lib/placementTemplate'
 import { getValidPlotsForProperty, getVacantCityLotsForRezoning } from '@/lib/placementRules'
-import {
-  getHousingBuildCost,
-  getPlotPropertyEndValue,
-  getPlotPropertyIncome,
-  HIGH_DENSITY_HOUSING_STATS,
-  isHousingPropertyCard,
-} from '@/lib/housingEconomics'
+import { getHousingBuildCost, getPlotPropertyEndValue, getPlotPropertyIncome, HIGH_DENSITY_HOUSING_STATS, isHousingPropertyCard } from '@/lib/housingEconomics'
+import { sumPlayerPropertyValue } from '@/lib/playerWealth'
 import {
   turnLimitReached,
   MAX_TURN_ACTIONS,
   MAX_ACTION_HAND_SIZE,
   canAttemptRezoning,
 } from '@/lib/turnActions'
-import { getInvestablePlots, getTakeoverTargetPlots } from '@/lib/investmentTargets'
+import { getCityBlockBounds, getInvestablePlots, getTakeoverTargetPlots } from '@/lib/investmentTargets'
+import {
+  canRollPropertyIncome,
+  FREEZE_ASSETS_CARD_ID,
+  FREEZE_ASSETS_PLAY_COST,
+  isFinalRoundIncomeLocked,
+  isPlayerIncomeFrozen,
+} from '@/lib/freezeAssets'
+import { playerIncomePerTurn } from '@/lib/playerWealth'
 import {
   getPlotsEligibleForScandal,
   largestOwnedAdjacentCluster,
   END_GAME_ADJACENT_THRESHOLD,
   totalRemoveInvestorsBuyoutMillion,
-  countPlayerBuiltInCityBlock,
   blockCompletionBiasScore,
 } from '@/lib/utils'
 import { buildPlotIndex, getPlotAt } from '@/lib/boardIndex'
+
+/** One pass over built lots only — block depth without scanning the full board per candidate. */
+function ownedBlockCounts(plots: Plot[], playerId: number): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const p of plots) {
+    if (p.type !== 'city' || p.claimedBy !== playerId || !p.builtProperty) continue
+    const b = getCityBlockBounds(p.row, p.col)
+    if (!b) continue
+    const key = `${b.minRow}:${b.minColI}`
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return counts
+}
+
+function blockScoreAt(counts: Map<string, number>, row: number, col: string): number {
+  const b = getCityBlockBounds(row, col)
+  if (!b) return 0
+  return blockCompletionBiasScore(counts.get(`${b.minRow}:${b.minColI}`) ?? 0)
+}
 
 /** Matches PlayerHand → GameApp.handlePlayCards options subset. */
 export type AiPlayOptions = {
@@ -175,6 +196,8 @@ export function actionCardKeepScore(cardId: string): number {
     case 'taxation':
     case 'property-taxation':
       return 35
+    case FREEZE_ASSETS_CARD_ID:
+      return 42
     case 'calamity':
       return 0
     case 'discard-property-cards':
@@ -193,7 +216,7 @@ function actionCardBankValue(cardId: string): number {
   return card?.bankValue ?? 0
 }
 
-/** Exact card, or Action Wild Card copied as `cardId`. */
+/** Exact card, or Wild Action Card copied as `cardId`. */
 function findHandAction(
   cp: Player,
   cardId: string
@@ -269,16 +292,11 @@ function pickRichestHumanTarget(gs: GameState, selfId: number): Player | null {
   return [...humans].sort((a, b) => b.money - a.money)[0] ?? null
 }
 
-/** Rough wealth so the bot avoids feeding the current table leader with investment cash. */
+/** Cash plus property standing (built lots + investments). Unplayed hand cards do not count. */
 function playerWealthScore(gs: GameState, playerId: number): number {
   const p = gs.players.find((x) => x.id === playerId)
   if (!p) return 0
-  let propertyValue = 0
-  for (const plot of gs.plots) {
-    if (plot.claimedBy !== playerId || !plot.builtProperty) continue
-    propertyValue += propertyEndValue(plot.builtProperty)
-  }
-  return p.money + propertyValue
+  return p.money + sumPlayerPropertyValue(gs.plots, playerId)
 }
 
 function tableLeaderId(gs: GameState, excludeId?: number): number | null {
@@ -604,14 +622,55 @@ export function playerHasBuiltIncomeProperty(
  */
 function tryPlayIncomeFirst(gs: GameState, cp: Player, h: SimpleAiTurnHandlers): boolean {
   if (gs.incomeResolvedThisTurn === true) return false
-  if (!playerHasBuiltIncomeProperty(gs.plots, cp.id)) return false
   const income = findHandAction(cp, 'income')
   if (!income) return false
   const consumed = gs.turnActionsConsumed ?? 0
   const slotsLeft = MAX_TURN_ACTIONS - consumed
   if (slotsLeft <= 0 || turnLimitReached(consumed)) return false
 
+  if (!canRollPropertyIncome(gs, cp.id)) {
+    h.handlePlayCards(null, [], [income.instanceId], undefined)
+    return true
+  }
+  if (!playerHasBuiltIncomeProperty(gs.plots, cp.id)) return false
+
   h.handlePlayCards(null, [income.instanceId], [], income.options)
+  return true
+}
+
+function tryPlayFreezeAssets(gs: GameState, cp: Player, h: SimpleAiTurnHandlers): boolean {
+  if (isFinalRoundIncomeLocked(gs)) return false
+  if (isPlayerIncomeFrozen(gs, cp.id)) return false
+  if (cp.money < FREEZE_ASSETS_PLAY_COST) return false
+  const card = findHandAction(cp, FREEZE_ASSETS_CARD_ID)
+  const wild = !card ? cp.actionCards.find((a) => isActionWildCard(a.cardId)) : null
+  if (!card && !wild) return false
+  const consumed = gs.turnActionsConsumed ?? 0
+  const slotsLeft = MAX_TURN_ACTIONS - consumed
+  if (slotsLeft <= 0 || turnLimitReached(consumed)) return false
+
+  let bestRivalIncome = 0
+  let unfrozenRivalWithEngine = false
+  for (const p of gs.players) {
+    if (p.id === cp.id) continue
+    if (isPlayerIncomeFrozen(gs, p.id)) continue
+    if (!playerHasBuiltIncomeProperty(gs.plots, p.id)) continue
+    unfrozenRivalWithEngine = true
+    bestRivalIncome = Math.max(bestRivalIncome, playerIncomePerTurn(gs.plots, p.id))
+  }
+  if (!unfrozenRivalWithEngine) return false
+
+  const late =
+    gs.endGameEligiblePlayerId != null ||
+    gs.endGameTriggered === true ||
+    endGameProximityScore(gs.plots, cp.id) >= 9
+  if (!late && bestRivalIncome < 10) return false
+
+  if (card) {
+    h.handlePlayCards(null, [card.instanceId], [], card.options)
+  } else if (wild) {
+    h.handlePlayCards(null, [wild.instanceId], [], { wildCardEmulateActionId: FREEZE_ASSETS_CARD_ID })
+  }
   return true
 }
 
@@ -624,6 +683,7 @@ function tryPlaySafeActionsOrEnd(gs: GameState, cp: Player, h: SimpleAiTurnHandl
   }
 
   if (tryPlayIncomeFirst(gs, cp, h)) return
+  if (tryPlayFreezeAssets(gs, cp, h)) return
   if (tryPlayConfrontation(gs, cp, h)) return
 
   const handSize = cp.actionCards?.length ?? 0
@@ -668,6 +728,9 @@ function tryPlaySafeActionsOrEnd(gs: GameState, cp: Player, h: SimpleAiTurnHandl
     return
   }
 
+  // Over 8 is legal until the 3 actions are spent. Do not end the turn here —
+  // that would open the discard in the same turn the two cards were dealt.
+  if ((cp.actionCards?.length ?? 0) > MAX_ACTION_HAND_SIZE) return
   h.handleEndTurn()
 }
 
@@ -788,13 +851,10 @@ export function trySimpleAiMainPhase(
 
     // Prefer lots that deepen / complete a city block the bot already owns; income-first card
     // choice still wins — this only picks where to place after a card is in placement mode.
+    const blockCounts = ownedBlockCounts(gs.plots, cp.id)
     validPlots.sort((a, b) => {
-      const scoreA = blockCompletionBiasScore(
-        countPlayerBuiltInCityBlock(cp.id, gs.plots, a.row, a.col)
-      )
-      const scoreB = blockCompletionBiasScore(
-        countPlayerBuiltInCityBlock(cp.id, gs.plots, b.row, b.col)
-      )
+      const scoreA = blockScoreAt(blockCounts, a.row, a.col)
+      const scoreB = blockScoreAt(blockCounts, b.row, b.col)
       if (scoreA !== scoreB) return scoreB - scoreA
       if (a.row !== b.row) return a.row - b.row
       return a.col.localeCompare(b.col)
@@ -811,8 +871,9 @@ export function trySimpleAiMainPhase(
     return true
   }
 
-  // Goal: greatest income — resolve Income before builds / confrontations when held.
+  // Goal: greatest income — collect before Freeze Assets, which now freezes the caster too.
   if (tryPlayIncomeFirst(gs, cp, h)) return true
+  if (tryPlayFreezeAssets(gs, cp, h)) return true
 
   // Build the highest-income affordable property (high density when it pays more).
   if (
@@ -820,6 +881,7 @@ export function trySimpleAiMainPhase(
     (gs.propertiesBuiltThisTurn ?? 0) < 1 &&
     consumedNow + 1 <= MAX_TURN_ACTIONS
   ) {
+    const blockCounts = ownedBlockCounts(gs.plots, cp.id)
     const ranked = cp.propertyCards
       .map((inst) => {
         const c = propertyCards.find((pc) => pc.id === inst.cardId) as PropertyCard | undefined
@@ -855,9 +917,7 @@ export function trySimpleAiMainPhase(
           ? HIGH_DENSITY_HOUSING_STATS.endGameValue
           : c.endGameValue
         const blockScore = plots.reduce((best, p) => {
-          const s = blockCompletionBiasScore(
-            countPlayerBuiltInCityBlock(cp.id, gs.plots, p.row, p.col)
-          )
+          const s = blockScoreAt(blockCounts, p.row, p.col)
           return s > best ? s : best
         }, 0)
         return {

@@ -130,25 +130,23 @@ describe('applyEndTurn action-hand soft cap', () => {
     expect(after.state.awaitingEndTurnActionDiscard).toBeFalsy()
   })
 
-  it('seat-verified end turn with 0 actions and an over-cap hand enters the discard phase (no silent swallow)', () => {
-    // The silent no-op here deadlocked humans (End Turn did nothing) and looped
-    // Founderbots forever when they held >8 cards with nothing playable/bankable.
+  it('does not discard when a seat-verified end turn hits a founder who just drew 2', () => {
     const stuck = baseState({ turnActionsConsumed: 0 })
     const result = applyEndTurn(stuck, { expectedSeatIndex: 0 })
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.events.some((e) => e.type === 'discard_required')).toBe(true)
-    expect(result.state.awaitingEndTurnActionDiscard).toBe(true)
-    expect(result.state.turnActionsConsumed).toBe(MAX_TURN_ACTIONS)
+    expect(result.events.some((e) => e.type === 'discard_required')).toBe(false)
+    expect(result.state.awaitingEndTurnActionDiscard).toBeFalsy()
+    expect(result.state.turnActionsConsumed).toBe(0)
+    expect(result.state.players[0].actionCards.length).toBe(9)
   })
 
-  it('seat-verified end turn mid-turn with an over-cap hand also enters the discard phase', () => {
+  it('refuses a seat-verified mid-turn end while over the cap after a 2-card draw', () => {
     const midTurn = baseState({ turnActionsConsumed: 1 })
     const result = applyEndTurn(midTurn, { expectedSeatIndex: 0 })
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.events.some((e) => e.type === 'discard_required')).toBe(true)
-    expect(result.state.awaitingEndTurnActionDiscard).toBe(true)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.code).toBe('hand_cap_after_actions')
   })
 
   it('stale seat-verified end turn is a precise no-op against the advanced seat', () => {

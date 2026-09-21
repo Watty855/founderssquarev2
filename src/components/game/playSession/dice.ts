@@ -390,6 +390,7 @@ export function finalizeSimpleActionResolution(s: PlaySession, instanceId: strin
           actionDiscard: actionDiscardPile,
           actionsPlayedThisTurn: newActionsPlayedThisTurn,
           turnActionsConsumed: newTurnActionsConsumed,
+          undoLastAction: undefined,
         }
         if (turnLimitReached(newTurnActionsConsumed)) {
           scheduleEndOfTurn()
@@ -1284,6 +1285,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             actionDiscard: discard,
             actionsPlayedThisTurn: nActions,
             turnActionsConsumed: nTurnConsumed,
+            undoLastAction: undefined,
           }
           if (turnLimitReached(nTurnConsumed)) {
             scheduleEndOfTurn()
@@ -1372,6 +1374,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
             actionDiscard: actionDiscardPile,
             actionsPlayedThisTurn: nActions,
             turnActionsConsumed: nTurnConsumed,
+            undoLastAction: undefined,
           }
           if (turnLimitReached(nTurnConsumed)) {
             scheduleEndOfTurn()
@@ -1433,6 +1436,7 @@ export function rollDieComplete(s: PlaySession, result: number, extras?: {
           actionsPlayedThisTurn: newActions,
           turnActionsConsumed: newTurnConsumed,
           playedPropertyCardThisTurn: propInst.instanceId,
+          undoLastAction: undefined,
           lastBuiltProperty: {
             row: ctx.row,
             col: ctx.col,

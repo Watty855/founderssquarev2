@@ -2,7 +2,7 @@
 
 import { useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { CardFlight } from '@/components/game/CardFlightLayer'
-import { CALAMITY_OUTCOME_BANNER_MS } from '@/lib/calamity'
+import { CALAMITY_OUTCOME_BANNER_MS, type CalamityOutcomeFields } from '@/lib/calamity'
 
 const OPENING_PRO_TIP_DURATION_MS = 10_000
 
@@ -12,6 +12,7 @@ export type BoardNotice = {
   title: ReactNode
   detail?: string
   tone?: BoardNoticeTone
+  calamityOutcome?: CalamityOutcomeFields
 }
 
 export type FinalTurnBannerPayload = {
@@ -55,7 +56,13 @@ let overlayState: OverlayState = initialOverlayState
 const listeners = new Set<() => void>()
 
 let boardNoticeTimer: ReturnType<typeof setTimeout> | null = null
-let noticeQueue: Array<{ title: ReactNode; detail?: string; tone?: BoardNoticeTone; durationMs: number }> = []
+let noticeQueue: Array<{
+  title: ReactNode
+  detail?: string
+  tone?: BoardNoticeTone
+  durationMs: number
+  calamityOutcome?: CalamityOutcomeFields
+}> = []
 let motivationalTimer: ReturnType<typeof setTimeout> | null = null
 let openingProTipTimer: ReturnType<typeof setTimeout> | null = null
 let finalTurnTimer: ReturnType<typeof setTimeout> | null = null
@@ -121,7 +128,13 @@ export function resetOverlayStore() {
 export function showBoardNotice(
   title: ReactNode,
   detail?: string,
-  opts?: { quick?: boolean; durationMs?: number; tone?: BoardNoticeTone; replace?: boolean }
+  opts?: {
+    quick?: boolean
+    durationMs?: number
+    tone?: BoardNoticeTone
+    replace?: boolean
+    calamityOutcome?: CalamityOutcomeFields
+  }
 ) {
   const ms =
     opts?.durationMs ?? (opts?.tone === 'calamity' ? CALAMITY_OUTCOME_BANNER_MS : opts?.quick ? 900 : 4000)
@@ -132,27 +145,34 @@ export function showBoardNotice(
     }
     noticeQueue = []
   } else if (overlayState.boardNotice != null || boardNoticeTimer) {
-    noticeQueue.push({ title, detail, tone: opts?.tone, durationMs: ms })
+    noticeQueue.push({
+      title,
+      detail,
+      tone: opts?.tone,
+      durationMs: ms,
+      calamityOutcome: opts?.calamityOutcome,
+    })
     return
   }
-  presentBoardNotice(title, detail, opts?.tone, ms)
+  presentBoardNotice(title, detail, opts?.tone, ms, opts?.calamityOutcome)
 }
 
 function presentBoardNotice(
   title: ReactNode,
   detail: string | undefined,
   tone: BoardNoticeTone | undefined,
-  ms: number
+  ms: number,
+  calamityOutcome?: CalamityOutcomeFields
 ) {
   setOverlayState({
     ...overlayState,
-    boardNotice: { title, detail, tone },
+    boardNotice: { title, detail, tone, calamityOutcome },
   })
   boardNoticeTimer = setTimeout(() => {
     boardNoticeTimer = null
     const next = noticeQueue.shift()
     if (next) {
-      presentBoardNotice(next.title, next.detail, next.tone, next.durationMs)
+      presentBoardNotice(next.title, next.detail, next.tone, next.durationMs, next.calamityOutcome)
       return
     }
     setOverlayState({ ...overlayState, boardNotice: null })

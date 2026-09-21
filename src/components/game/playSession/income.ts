@@ -8,7 +8,8 @@ import { applyBuildAt } from '@/lib/gameEngine/applyBuildAt'
 import { applyEndTurn } from '@/lib/gameEngine/applyEndTurn'
 import { applyBankActionCards } from '@/lib/gameEngine/applyBankAction'
 import { applyIncomeComplete } from '@/lib/gameEngine/applyIncomeComplete'
-import { consumeOnePendingIncomeTax, incomeTaxLevyMillion, pendingIncomeTaxCount } from '@/lib/cityTax'
+import { incomeTaxLevyMillion, pendingIncomeTaxCount } from '@/lib/cityTax'
+import { omitFrozenRecipientAmounts } from '@/lib/freezeAssets'
 import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
 import { attachUndoSnapshotIfTurnAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
 import {
@@ -265,12 +266,18 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
     const { payoutByPlayerId: rawInvestorPayout, awards: investorIncomeAwards } = isPropertyRoll
       ? computeInvestorIncomeAwardsForOwner(safeGameState.plots, incomeOwnerPreview.id)
       : { payoutByPlayerId: {} as Record<number, number>, awards: [] as InvestorIncomeAwardDetail[] }
+    const investorPayoutForToast = isPropertyRoll
+      ? omitFrozenRecipientAmounts(rawInvestorPayout, safeGameState)
+      : {}
 
     const { scaled: scaledInvestorPayout, ownerKeeps: afterInvestorsPreview } =
-      allocateInvestorPayoutsFromOwner(earnedIncome, isPropertyRoll ? rawInvestorPayout : {})
+      allocateInvestorPayoutsFromOwner(earnedIncome, investorPayoutForToast)
     const mafiaOwedPreview =
       incomeResolution === 'property-roll'
-        ? getMafiaLevyForIncomePlayer(incomeOwnerPreview.id, safeGameState.plots).recipientAmounts
+        ? omitFrozenRecipientAmounts(
+            getMafiaLevyForIncomePlayer(incomeOwnerPreview.id, safeGameState.plots).recipientAmounts,
+            safeGameState
+          )
         : {}
     const { scaled: mafiaForToast, ownerKeeps: afterMafiaPreview } = allocateMafiaTributeFromOwner(
       afterInvestorsPreview,
@@ -281,7 +288,7 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
     const totalInvestorPayout =
       Object.values(scaledInvestorPayout).reduce((a, b) => a + b, 0)
     const totalInvestorOwed =
-      Object.values(rawInvestorPayout).reduce((a, b) => a + b, 0)
+      Object.values(investorPayoutForToast).reduce((a, b) => a + b, 0)
     const investorsProRated = isPropertyRoll && totalInvestorOwed > 0 && totalInvestorPayout < totalInvestorOwed
 
     // Founderbots (host-driven, including Play Online) resolve locally then
@@ -302,92 +309,26 @@ export function incomeComplete(s: PlaySession, earnedIncome: number,
       })
     } else {
       patchGameState((current) => {
-      if (current.incomeResolvedThisTurn) return current
-      const currentPlayer = current.players[current.currentPlayerIndex]
-      if (!currentPlayer) return current
-      const ownerIdResolved = currentPlayer.id
-      const stillPendingTax = pendingIncomeTaxCount(current.pendingIncomeTaxPlayerIds, ownerIdResolved) > 0
-
-      const { payoutByPlayerId } = isPropertyRoll
-        ? computeInvestorIncomeAwardsForOwner(current.plots, ownerIdResolved)
-        : { payoutByPlayerId: {} as Record<number, number> }
-      const { scaled: scaledInner, ownerKeeps: afterInvestors } = allocateInvestorPayoutsFromOwner(
+      if (!incomeInstanceId) return current
+      const result = applyIncomeComplete(current, {
+        incomeInstanceId,
         earnedIncome,
-        isPropertyRoll ? payoutByPlayerId : {}
-      )
-      const { recipientAmounts: mafiaOwed } =
-        incomeResolution === 'property-roll'
-          ? getMafiaLevyForIncomePlayer(ownerIdResolved, current.plots)
-          : { recipientAmounts: {} as Record<number, number> }
-      const { scaled: mafiaRecipientAmounts, ownerKeeps: afterMafia } = allocateMafiaTributeFromOwner(
-        afterInvestors,
-        mafiaOwed
-      )
-      const cashFromIncome = pendingTax ? Math.max(0, afterMafia - levy) : afterMafia
-      const updatedMoney = currentPlayer.money + cashFromIncome
-
-      let updatedActionCards = currentPlayer.actionCards.filter(
-        c => c.instanceId !== getPlayUiSnapshot().incomeDialogState.actionInstanceId
-      )
-
-      if (effectiveDoubleIncomeId) {
-        updatedActionCards = updatedActionCards.filter(
-          c => c.instanceId !== effectiveDoubleIncomeId
-        )
-      }
-
-      const incomeCardInstance = currentPlayer.actionCards.find(
-        c => c.instanceId === getPlayUiSnapshot().incomeDialogState.actionInstanceId
-      )
-
-      const doubleIncomeCardInstance = effectiveDoubleIncomeId
-        ? currentPlayer.actionCards.find(c => c.instanceId === effectiveDoubleIncomeId)
-        : null
-
-      const updatedPlayers = current.players.map((p, idx) => {
-        if (idx === current.currentPlayerIndex) {
-          return { ...p, money: updatedMoney, actionCards: updatedActionCards }
-        }
-        const investorPay = isPropertyRoll ? scaledInner[p.id] ?? 0 : 0
-        const mafiaPay = mafiaRecipientAmounts[p.id] ?? 0
-        const payout = investorPay + mafiaPay
-        return payout > 0 ? { ...p, money: p.money + payout } : p
+        totalPropertyIncomeBase: totalInc,
+        doubleIncomeInstanceId: effectiveDoubleIncomeId,
+        incomeResolution,
       })
-
-      const actionDiscardPile = [...current.actionDiscard]
-
-      if (incomeCardInstance) {
-        actionDiscardPile.push(incomeCardInstance)
-      }
-      if (doubleIncomeCardInstance) {
-        actionDiscardPile.push(doubleIncomeCardInstance)
+      if (!result.ok) {
+        queueMicrotask(() => toast.error(result.error))
+        return current
       }
 
-      const actionsPlayed = 1 + (effectiveDoubleIncomeId ? 1 : 0)
-      const newActionsPlayedThisTurn = current.actionsPlayedThisTurn + actionsPlayed
-      const newTurnActionsConsumed = (current.turnActionsConsumed ?? 0) + actionsPlayed
-
-      const nextPendingTax = stillPendingTax
-        ? consumeOnePendingIncomeTax(current.pendingIncomeTaxPlayerIds, ownerIdResolved)
-        : (current.pendingIncomeTaxPlayerIds ?? [])
-
-      const newState: GameState = {
-        ...current,
-        players: updatedPlayers,
-        actionDiscard: actionDiscardPile,
-        actionsPlayedThisTurn: newActionsPlayedThisTurn,
-        turnActionsConsumed: newTurnActionsConsumed,
-        incomeResolvedThisTurn: true,
-        pendingIncomeTaxPlayerIds: nextPendingTax,
-      }
-
-      if (turnLimitReached(newTurnActionsConsumed)) {
+      if (turnLimitReached(result.state.turnActionsConsumed ?? 0)) {
         setTimeout(() => {
           getGameHandlers().handleEndTurn()
         }, 0)
       }
 
-      return withReplenishedActionHand(newState, current.currentPlayerIndex)
+      return result.state
     })
     }
 

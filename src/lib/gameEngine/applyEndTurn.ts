@@ -12,6 +12,7 @@ import type { ApplyGameActionResult, GameEvent } from '@/lib/onlineGameActions'
 import {
   applyFinalRoundCountdown,
   clearCouncilFreezeIfEndingPlayer,
+  tickIncomeFreezeOnEndTurn,
   maybeOfferEndGameAtEndOfTurn,
 } from '@/lib/gameEngine/statePatches'
 import { ingestActionDraw } from '@/lib/calamity'
@@ -25,10 +26,9 @@ export interface ApplyEndTurnOptions {
   /**
    * Seat index the caller believes is ending its turn. When it no longer matches
    * `currentPlayerIndex` the end_turn is stale (seat already advanced) and is
-   * ignored. When it matches, the end turn is a verified, deliberate request —
-   * an over-cap hand goes to the end-turn discard phase at ANY consumed count
-   * instead of being silently swallowed (the swallow deadlocked founders — and
-   * looped Founderbots forever — who held >8 cards with nothing left to play).
+   * ignored. When it matches, the end turn is a verified request. An over-cap
+   * hand still waits until all 3 actions are spent — a 2-card deal must not
+   * open the discard during the turn.
    */
   expectedSeatIndex?: number
 }
@@ -86,18 +86,13 @@ export function applyEndTurn(
   const alreadyAwaitingDiscard = state.awaitingEndTurnActionDiscard === true
   const consumed = state.turnActionsConsumed ?? 0
 
-  // Soft hand cap: excess is allowed for the whole turn — including the start-of-turn
-  // draw 2 and mid-turn Draw 2 Action Cards. Discard-to-cap runs only after the
-  // founder has spent all 3 turn actions, is already in the end-turn discard phase,
-  // or deliberately ends the turn early (seat-verified caller).
-  //
-  // Unverified callers keep the conservative behavior: a stale end_turn after the
-  // seat already advanced is the classic freeze — the new founder has just been
-  // dealt 2 cards (hand often > 8) with 0 actions used, and must not be forced to
-  // discard. Verified callers instead pass into the discard phase, because
-  // swallowing their end_turn deadlocks humans and loops Founderbots forever.
+  // Soft hand cap: a founder may hold more than 8 for the whole turn. Drawing 2
+  // (start of turn, or Draw 2 Action Cards) must never open the discard by itself.
+  // The cap is resolved only after this founder's turn — once all 3 actions are
+  // spent, or they are already in the end-turn discard phase.
   if (totalActionCards > MAX_ACTION_HAND_SIZE) {
-    if (!budgetSpent && !alreadyAwaitingDiscard && !seatVerified) {
+    if (!budgetSpent && !alreadyAwaitingDiscard) {
+      // Start of turn, including the 2-card deal: keep the cards and play.
       if (consumed === 0) {
         return { ok: true, state, events: [] }
       }
@@ -158,6 +153,11 @@ export function applyEndTurn(
     endGameDeclarationOfferedThisTurn: undefined,
   }
 
+  const freezeClear = {
+    ...clearCouncilFreezeIfEndingPlayer(state, state.currentPlayerIndex),
+    ...tickIncomeFreezeOnEndTurn(state),
+  }
+
   const finalRoundPatch = applyFinalRoundCountdown(state)
   if (finalRoundPatch.gameEnded) {
     events.push({ type: 'game_over', reason: 'final-round' })
@@ -165,7 +165,7 @@ export function applyEndTurn(
       ok: true,
       state: {
         ...newState,
-        ...clearCouncilFreezeIfEndingPlayer(state, state.currentPlayerIndex),
+        ...freezeClear,
         ...finalRoundPatch,
         lastBuiltProperty: undefined,
       },
@@ -197,7 +197,7 @@ export function applyEndTurn(
 
   const advanced: GameState = {
     ...newState,
-    ...clearCouncilFreezeIfEndingPlayer(state, state.currentPlayerIndex),
+    ...freezeClear,
     ...finalRoundPatch,
     currentPlayerIndex: nextPlayerIndex,
     playRoundNumber,

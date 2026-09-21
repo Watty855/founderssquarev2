@@ -8,9 +8,10 @@ export const MAX_TURN_ACTIONS = 3
 export const REZONING_SUCCESS_ACTION_COST = 2
 
 /**
- * Soft action-hand cap. Players may hold more than this during a turn (start-of-turn
- * draw 2, or Draw 2 Action Cards). Excess is discarded only after the turn's 3 actions
- * are spent (1 build + 2 actions, or 3 actions) — never at the start-of-turn deal.
+ * Soft action-hand cap. Players may hold more than this for the whole turn, including
+ * when 2 action cards are dealt (start of turn, or Draw 2 Action Cards). Excess is
+ * discarded only after the turn — once all 3 actions are spent — never when the
+ * two cards are placed.
  */
 export const MAX_ACTION_HAND_SIZE = 8
 

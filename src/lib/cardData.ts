@@ -26,8 +26,9 @@ export const CIVIC_VARIANT_PROPERTY_IDS = [
   'civic-center',
 ] as const
 
+/** Deck copies match vacant lots of that letter in each district (overlap lots count in every district they sit in). */
 export const propertyCards: PropertyCard[] = [
-  ...Array(4).fill(null).map((_, i) => ({
+  ...Array(1).fill(null).map((_, i) => ({
     id: `storage-riverfront-${i + 1}`,
     type: 'property' as const,
     name: 'Storage',
@@ -41,7 +42,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'industrial' as const,
     district: 'Riverfront' as const
   })),
-  ...Array(3).fill(null).map((_, i) => ({
+  ...Array(1).fill(null).map((_, i) => ({
     id: `storage-mountain-${i + 1}`,
     type: 'property' as const,
     name: 'Storage',
@@ -55,7 +56,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'industrial' as const,
     district: 'Mountain Cove' as const
   })),
-  ...Array(5).fill(null).map((_, i) => ({
+  ...Array(1).fill(null).map((_, i) => ({
     id: `storage-railway-${i + 1}`,
     type: 'property' as const,
     name: 'Storage',
@@ -69,7 +70,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'industrial' as const,
     district: 'Railway District' as const
   })),
-  ...Array(6).fill(null).map((_, i) => ({
+  ...Array(1).fill(null).map((_, i) => ({
     id: `storage-farm-${i + 1}`,
     type: 'property' as const,
     name: 'Storage',
@@ -83,8 +84,22 @@ export const propertyCards: PropertyCard[] = [
     category: 'industrial' as const,
     district: 'Farmland' as const
   })),
-  
   ...Array(4).fill(null).map((_, i) => ({
+    id: `storage-city-${i + 1}`,
+    type: 'property' as const,
+    name: 'Storage',
+    buildCost: 4,
+    buildIncome: 4,
+    influence: 0,
+    bankValue: 2,
+    endGameValue: 4,
+    copies: 1,
+    buildLocations: ['Storage', 'Warehouse', 'Quarry Dock'],
+    category: 'industrial' as const,
+    district: 'City Center' as const
+  })),
+  
+  ...Array(5).fill(null).map((_, i) => ({
     id: `freight-riverfront-${i + 1}`,
     type: 'property' as const,
     name: 'Freight',
@@ -98,7 +113,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'industrial' as const,
     district: 'Riverfront' as const
   })),
-  ...Array(4).fill(null).map((_, i) => ({
+  ...Array(3).fill(null).map((_, i) => ({
     id: `freight-mountain-${i + 1}`,
     type: 'property' as const,
     name: 'Freight',
@@ -112,7 +127,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'industrial' as const,
     district: 'Mountain Cove' as const
   })),
-  ...Array(7).fill(null).map((_, i) => ({
+  ...Array(5).fill(null).map((_, i) => ({
     id: `freight-railway-${i + 1}`,
     type: 'property' as const,
     name: 'Freight',
@@ -126,7 +141,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'industrial' as const,
     district: 'Railway District' as const
   })),
-  ...Array(6).fill(null).map((_, i) => ({
+  ...Array(3).fill(null).map((_, i) => ({
     id: `freight-farm-${i + 1}`,
     type: 'property' as const,
     name: 'Freight',
@@ -139,6 +154,20 @@ export const propertyCards: PropertyCard[] = [
     buildLocations: ['Freight Terminal', 'Marina', 'Distribution', 'Train Terminal'],
     category: 'industrial' as const,
     district: 'Farmland' as const
+  })),
+  ...Array(4).fill(null).map((_, i) => ({
+    id: `freight-city-${i + 1}`,
+    type: 'property' as const,
+    name: 'Freight',
+    buildCost: 4,
+    buildIncome: 3,
+    influence: 0,
+    bankValue: 2,
+    endGameValue: 4,
+    copies: 1,
+    buildLocations: ['Freight Terminal', 'Marina', 'Distribution', 'Train Terminal'],
+    category: 'industrial' as const,
+    district: 'City Center' as const
   })),
   
   ...Array(1).fill(null).map((_, i) => ({
@@ -198,21 +227,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'industrial' as const,
     district: 'Riverfront' as const
   })),
-  ...Array(2).fill(null).map((_, i) => ({
-    id: `industry-mountain-${i + 1}`,
-    type: 'property' as const,
-    name: 'Industry',
-    buildCost: 8,
-    buildIncome: 6,
-    influence: 0,
-    bankValue: 6,
-    endGameValue: 6,
-    copies: 1,
-    buildLocations: ['Industry', 'Founders Mill', 'Timber Yard'],
-    category: 'industrial' as const,
-    district: 'Mountain Cove' as const
-  })),
-  ...Array(6).fill(null).map((_, i) => ({
+  ...Array(3).fill(null).map((_, i) => ({
     id: `industry-railway-${i + 1}`,
     type: 'property' as const,
     name: 'Industry',
@@ -226,7 +241,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'industrial' as const,
     district: 'Railway District' as const
   })),
-  ...Array(3).fill(null).map((_, i) => ({
+  ...Array(4).fill(null).map((_, i) => ({
     id: `industry-farm-${i + 1}`,
     type: 'property' as const,
     name: 'Industry',
@@ -285,7 +300,7 @@ export const propertyCards: PropertyCard[] = [
       'Build on any vacant civic (C) lot — Hope Hospital, Firehouse, City Hall, Courthouse, Police, Public Works, Water Works, Children’s Hosp, etc. Choose the lot when you play. No district restriction.',
     category: 'civic' as const,
   })),
-  ...Array(6).fill(null).map((_, i) => ({
+  ...Array(3).fill(null).map((_, i) => ({
     id: `civic-city-${i + 1}`,
     type: 'property' as const,
     name: 'Civic',
@@ -388,7 +403,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'commercial' as const,
     district: 'Riverfront' as const
   })),
-  ...Array(5).fill(null).map((_, i) => ({
+  ...Array(4).fill(null).map((_, i) => ({
     id: `hotel-mountain-${i + 1}`,
     type: 'property' as const,
     name: 'Hotel',
@@ -402,7 +417,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'commercial' as const,
     district: 'Mountain Cove' as const
   })),
-  ...Array(3).fill(null).map((_, i) => ({
+  ...Array(4).fill(null).map((_, i) => ({
     id: `hotel-railway-${i + 1}`,
     type: 'property' as const,
     name: 'Hotel',
@@ -430,7 +445,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'commercial' as const,
     district: 'Farmland' as const
   })),
-  ...Array(7).fill(null).map((_, i) => ({
+  ...Array(4).fill(null).map((_, i) => ({
     id: `hotel-city-${i + 1}`,
     type: 'property' as const,
     name: 'Hotel',
@@ -445,7 +460,7 @@ export const propertyCards: PropertyCard[] = [
     district: 'City Center' as const
   })),
   
-  ...Array(1).fill(null).map((_, i) => ({
+  ...Array(4).fill(null).map((_, i) => ({
     id: `park-riverfront-${i + 1}`,
     type: 'property' as const,
     name: 'Park',
@@ -460,7 +475,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'commercial' as const,
     district: 'Riverfront' as const
   })),
-  ...Array(1).fill(null).map((_, i) => ({
+  ...Array(4).fill(null).map((_, i) => ({
     id: `park-mountain-${i + 1}`,
     type: 'property' as const,
     name: 'Park',
@@ -475,7 +490,22 @@ export const propertyCards: PropertyCard[] = [
     category: 'commercial' as const,
     district: 'Mountain Cove' as const
   })),
-  ...Array(1).fill(null).map((_, i) => ({
+  ...Array(4).fill(null).map((_, i) => ({
+    id: `park-railway-${i + 1}`,
+    type: 'property' as const,
+    name: 'Park',
+    buildCost: 5,
+    buildIncome: 0,
+    influence: 0,
+    bankValue: 3,
+    endGameValue: 0,
+    copies: 1,
+    buildLocations: ['Park'],
+    specialAbility: 'Adds $1M income to each surrounding income-generating lot on the same city block (any owner). The Park itself does not receive this bonus or grant influence.',
+    category: 'commercial' as const,
+    district: 'Railway District' as const
+  })),
+  ...Array(4).fill(null).map((_, i) => ({
     id: `park-farm-${i + 1}`,
     type: 'property' as const,
     name: 'Park',
@@ -490,7 +520,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'commercial' as const,
     district: 'Farmland' as const
   })),
-  ...Array(6).fill(null).map((_, i) => ({
+  ...Array(4).fill(null).map((_, i) => ({
     id: `park-city-${i + 1}`,
     type: 'property' as const,
     name: 'Park',
@@ -520,7 +550,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'commercial' as const,
     district: 'Riverfront' as const
   })),
-  ...Array(4).fill(null).map((_, i) => ({
+  ...Array(6).fill(null).map((_, i) => ({
     id: `mixed-mountain-${i + 1}`,
     type: 'property' as const,
     name: 'Commercial',
@@ -534,7 +564,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'commercial' as const,
     district: 'Mountain Cove' as const
   })),
-  ...Array(4).fill(null).map((_, i) => ({
+  ...Array(5).fill(null).map((_, i) => ({
     id: `mixed-railway-${i + 1}`,
     type: 'property' as const,
     name: 'Commercial',
@@ -548,7 +578,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'commercial' as const,
     district: 'Railway District' as const
   })),
-  ...Array(4).fill(null).map((_, i) => ({
+  ...Array(6).fill(null).map((_, i) => ({
     id: `mixed-farm-${i + 1}`,
     type: 'property' as const,
     name: 'Commercial',
@@ -562,7 +592,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'commercial' as const,
     district: 'Farmland' as const
   })),
-  ...Array(6).fill(null).map((_, i) => ({
+  ...Array(12).fill(null).map((_, i) => ({
     id: `mixed-city-${i + 1}`,
     type: 'property' as const,
     name: 'Commercial',
@@ -577,7 +607,7 @@ export const propertyCards: PropertyCard[] = [
     district: 'City Center' as const
   })),
   
-  ...Array(7).fill(null).map((_, i) => ({
+  ...Array(9).fill(null).map((_, i) => ({
     id: `housing-riverfront-${i + 1}`,
     type: 'property' as const,
     name: 'Housing',
@@ -592,7 +622,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'residential' as const,
     district: 'Riverfront' as const
   })),
-  ...Array(5).fill(null).map((_, i) => ({
+  ...Array(9).fill(null).map((_, i) => ({
     id: `housing-mountain-${i + 1}`,
     type: 'property' as const,
     name: 'Housing',
@@ -607,7 +637,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'residential' as const,
     district: 'Mountain Cove' as const
   })),
-  ...Array(4).fill(null).map((_, i) => ({
+  ...Array(9).fill(null).map((_, i) => ({
     id: `housing-railway-${i + 1}`,
     type: 'property' as const,
     name: 'Housing',
@@ -622,7 +652,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'residential' as const,
     district: 'Railway District' as const
   })),
-  ...Array(2).fill(null).map((_, i) => ({
+  ...Array(9).fill(null).map((_, i) => ({
     id: `housing-farm-${i + 1}`,
     type: 'property' as const,
     name: 'Housing',
@@ -637,7 +667,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'residential' as const,
     district: 'Farmland' as const
   })),
-  ...Array(27).fill(null).map((_, i) => ({
+  ...Array(16).fill(null).map((_, i) => ({
     id: `housing-city-${i + 1}`,
     type: 'property' as const,
     name: 'Housing',
@@ -667,7 +697,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'service' as const,
     district: 'Riverfront' as const
   })),
-  ...Array(3).fill(null).map((_, i) => ({
+  ...Array(2).fill(null).map((_, i) => ({
     id: `grocery-mountain-${i + 1}`,
     type: 'property' as const,
     name: 'Food',
@@ -681,7 +711,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'service' as const,
     district: 'Mountain Cove' as const
   })),
-  ...Array(4).fill(null).map((_, i) => ({
+  ...Array(2).fill(null).map((_, i) => ({
     id: `grocery-railway-${i + 1}`,
     type: 'property' as const,
     name: 'Food',
@@ -709,7 +739,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'service' as const,
     district: 'Farmland' as const
   })),
-  ...Array(6).fill(null).map((_, i) => ({
+  ...Array(4).fill(null).map((_, i) => ({
     id: `grocery-city-${i + 1}`,
     type: 'property' as const,
     name: 'Food',
@@ -752,7 +782,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'service' as const,
     district: 'Mountain Cove' as const
   })),
-  ...Array(1).fill(null).map((_, i) => ({
+  ...Array(2).fill(null).map((_, i) => ({
     id: `power-railway-${i + 1}`,
     type: 'property' as const,
     name: 'Power',
@@ -780,22 +810,22 @@ export const propertyCards: PropertyCard[] = [
     category: 'service' as const,
     district: 'Farmland' as const
   })),
-  
-  ...Array(2).fill(null).map((_, i) => ({
-    id: `tourism-riverfront-${i + 1}`,
-    type: 'property' as const,
-    name: 'Arts',
-    buildCost: 6,
-    buildIncome: 2,
-    influence: 0,
-    bankValue: 2,
-    endGameValue: 3,
-    copies: 1,
-    buildLocations: ['Tourism', 'Fairgrounds'],
-    category: 'service' as const,
-    district: 'Riverfront' as const
-  })),
   ...Array(4).fill(null).map((_, i) => ({
+    id: `power-city-${i + 1}`,
+    type: 'property' as const,
+    name: 'Power',
+    buildCost: 5,
+    buildIncome: 6,
+    influence: 0,
+    bankValue: 3,
+    endGameValue: 5,
+    copies: 1,
+    buildLocations: ['Fuel', 'Power Plant'],
+    category: 'service' as const,
+    district: 'City Center' as const
+  })),
+  
+  ...Array(1).fill(null).map((_, i) => ({
     id: `tourism-mountain-${i + 1}`,
     type: 'property' as const,
     name: 'Arts',
@@ -808,6 +838,20 @@ export const propertyCards: PropertyCard[] = [
     buildLocations: ['Tourism'],
     category: 'service' as const,
     district: 'Mountain Cove' as const
+  })),
+  ...Array(1).fill(null).map((_, i) => ({
+    id: `tourism-railway-${i + 1}`,
+    type: 'property' as const,
+    name: 'Arts',
+    buildCost: 6,
+    buildIncome: 2,
+    influence: 0,
+    bankValue: 2,
+    endGameValue: 3,
+    copies: 1,
+    buildLocations: ['Tourism'],
+    category: 'service' as const,
+    district: 'Railway District' as const
   })),
   ...Array(1).fill(null).map((_, i) => ({
     id: `tourism-farm-${i + 1}`,
@@ -823,7 +867,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'service' as const,
     district: 'Farmland' as const
   })),
-  ...Array(2).fill(null).map((_, i) => ({
+  ...Array(3).fill(null).map((_, i) => ({
     id: `tourism-city-${i + 1}`,
     type: 'property' as const,
     name: 'Arts',
@@ -838,7 +882,7 @@ export const propertyCards: PropertyCard[] = [
     district: 'City Center' as const
   })),
   
-  ...Array(1).fill(null).map((_, i) => ({
+  ...Array(2).fill(null).map((_, i) => ({
     id: `food-riverfront-${i + 1}`,
     type: 'property' as const,
     name: 'Food',
@@ -852,7 +896,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'service' as const,
     district: 'Riverfront' as const
   })),
-  ...Array(3).fill(null).map((_, i) => ({
+  ...Array(2).fill(null).map((_, i) => ({
     id: `food-mountain-${i + 1}`,
     type: 'property' as const,
     name: 'Food',
@@ -866,7 +910,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'service' as const,
     district: 'Mountain Cove' as const
   })),
-  ...Array(4).fill(null).map((_, i) => ({
+  ...Array(1).fill(null).map((_, i) => ({
     id: `food-railway-${i + 1}`,
     type: 'property' as const,
     name: 'Food',
@@ -880,7 +924,7 @@ export const propertyCards: PropertyCard[] = [
     category: 'service' as const,
     district: 'Railway District' as const
   })),
-  ...Array(8).fill(null).map((_, i) => ({
+  ...Array(2).fill(null).map((_, i) => ({
     id: `food-farm-${i + 1}`,
     type: 'property' as const,
     name: 'Food',
@@ -1164,7 +1208,7 @@ export const actionCards: ActionCard[] = [
     id: ACTION_WILD_CARD_ID,
     type: 'action',
     category: 'social',
-    name: 'Action Wild Card',
+    name: 'Wild Action Card',
     description: 'Play as any action card',
     buildCost: 0,
     buildIncome: 0,
@@ -1325,6 +1369,21 @@ export const actionCards: ActionCard[] = [
     diceRequired: true,
     diceRollRule: 'Up to 3 rolls: 5–6 after influence succeeds; $5M per extra roll; defender rolls once (6 negates)',
     actions: 'Choose another player. Roll up to three times: total 5–6 after civic influence succeeds. The first roll is free; each extra roll costs $5M. +1 influence (max +1) if you own built City Hall and/or Courthouse anywhere on the board (one bonus total). If all three rolls miss, the card fails. If you succeed, the target rolls once — a 6 negates the freeze. Otherwise they cannot build properties until they finish their next turn.'
+  },
+  {
+    id: 'freeze-assets',
+    type: 'action',
+    category: 'legal',
+    name: 'Freeze Assets',
+    description:
+      "Legal action on all players freezing all income from 'Income action card', investments and tributes from Anchors.",
+    buildCost: 8,
+    buildIncome: 0,
+    bankValue: 5,
+    copies: 4,
+    diceRequired: false,
+    actions:
+      "Pay $8M. Legal action on all players — including you — freezing all income from an Income action card, investments, and tributes from Anchors for one complete round. Frozen founders may still bank an Income card for its printed cash value. This cannot be overturned. Bank this card for $5M instead of playing it.",
   },
   {
     id: 'calamity',

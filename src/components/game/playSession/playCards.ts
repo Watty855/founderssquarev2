@@ -12,6 +12,13 @@ import {
   appendIncomeTaxAssessments,
   propertyTaxLevyMillion,
 } from '@/lib/cityTax'
+import {
+  applyFreezeAssetsForRound,
+  canRollPropertyIncome,
+  FREEZE_ASSETS_CARD_ID,
+  FREEZE_ASSETS_PLAY_COST,
+  propertyIncomeRollBlockedReason,
+} from '@/lib/freezeAssets'
 import { vacateOverthrownAnchorPlot } from '@/lib/gameEngine/applyRebuttalResolution'
 import { attachUndoSnapshotIfTurnAction, restoreUndoSnapshot } from '@/lib/undoLastAction'
 import {
@@ -84,6 +91,7 @@ import {
   getPlayUiSnapshot,
   resetPlayUiStore,
   setActionCriteriaDialog,
+  setFreezeAssetsConfirm,
   setCalamityAcceptPending,
   setDiscardDialogState,
   setDiscardPropertyConfirmOpen,
@@ -425,11 +433,11 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
     })
     if (wildInPlay.length > 0) {
       if (wildInPlay.length > 1 || actionInstanceIds.length > 1 || convertToCashInstanceIds.length > 0 || propertyInstanceId) {
-        toast.error('Play the Action Wild Card by itself — choose which action it copies.')
+        toast.error('Play the Wild Action Card by itself — choose which action it copies.')
         return
       }
       if (!isValidActionWildEmulateId(emulateActionId)) {
-        toast.error('Choose which action the Action Wild Card copies.')
+        toast.error('Choose which action the Wild Action Card copies.')
         return
       }
     }
@@ -464,6 +472,36 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
     if (hasIncome && safeGameState.incomeResolvedThisTurn) {
       toast.error('You already resolved Income this turn — only one Income resolution per turn.')
       return
+    }
+
+    const freezeAssetPlays = actionInstanceIds.filter((id) => {
+      const inst = safeGameState.players[cpIdx].actionCards.find((c) => c.instanceId === id)
+      return playedIdOf(inst) === FREEZE_ASSETS_CARD_ID
+    })
+    if (freezeAssetPlays.length > 0) {
+      const freezeAlone =
+        freezeAssetPlays.length === 1 &&
+        actionInstanceIds.length === 1 &&
+        convertToCashInstanceIds.length === 0 &&
+        !propertyInstanceId
+      if (!freezeAlone) {
+        toast.error('Play Freeze Assets by itself.')
+        return
+      }
+      const acting = safeGameState.players[cpIdx]
+      if (!options?.freezeAssetsConfirmed && acting && !isAiSeat(acting)) {
+        setFreezeAssetsConfirm({
+          open: true,
+          actionInstanceId: freezeAssetPlays[0] ?? null,
+          wildCardEmulateActionId: emulateActionId ?? null,
+        })
+        return
+      }
+      let cashForFreeze = acting?.money ?? 0
+      if (cashForFreeze < FREEZE_ASSETS_PLAY_COST) {
+        toast.error(`You need $${FREEZE_ASSETS_PLAY_COST}M to play Freeze Assets.`)
+        return
+      }
     }
     // Founderbots must not open Income (host dialog / bank-cancel) until they own a built lot.
     // Humans may still bank the card with zero properties. Online host drives bots locally,
@@ -926,6 +964,18 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
           housingHighDensity: undefined,
           wildCardEmulatePropertyId: undefined,
         })
+        const rezoningPlayer = safeGameState.players[cpIdx]
+        if (safeGameState.councilFreezeBlockBuildForPlayerId === rezoningPlayer.id) {
+          setActionCriteriaDialog({
+            open: true,
+            actionInstanceId: actionInstanceIds[0],
+            bankValue: ac.bankValue,
+            cardName: ac.name,
+            reasonDescription:
+              'City Council Freeze is in effect — you cannot play Rezoning this turn. Bank this card or continue with another action.',
+          })
+          return
+        }
         if (safeGameState.propertiesBuiltThisTurn >= 1) {
           setActionCriteriaDialog({
             open: true,
@@ -1059,6 +1109,8 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
       let crossingActivated = current.crossingTheLineActive
       let updatedActionDeck = [...current.actionDeck]
       let pendingIncomeTaxPlayerIds = [...(current.pendingIncomeTaxPlayerIds ?? [])]
+      let incomeAssetsFrozenPlayerIds = [...(current.incomeAssetsFrozenPlayerIds ?? [])]
+      let incomeAssetsFrozenTurnsRemaining = current.incomeAssetsFrozenTurnsRemaining
       /** Property Taxation: playerId → immediate city assessment (not rebuttable). */
       const propertyTaxByPlayerId = new Map<number, number>()
       let drawnCalamities: CardInstance[] = []
@@ -1272,6 +1324,29 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
                 return
               }
 
+              if (card.id === FREEZE_ASSETS_CARD_ID) {
+                if (updatedMoney < FREEZE_ASSETS_PLAY_COST) {
+                  toast.error(`You need $${FREEZE_ASSETS_PLAY_COST}M to play Freeze Assets.`)
+                  return
+                }
+                updatedMoney -= FREEZE_ASSETS_PLAY_COST
+                updatedActionCards = updatedActionCards.filter((c) => c.instanceId !== instanceId)
+                updatedActionDiscard.push(instance)
+                actionsPlayedCount++
+                const freeze = applyFreezeAssetsForRound(current.players.map((p) => p.id))
+                incomeAssetsFrozenPlayerIds = freeze.incomeAssetsFrozenPlayerIds
+                incomeAssetsFrozenTurnsRemaining = freeze.incomeAssetsFrozenTurnsRemaining
+                broadcastBoardFx({
+                  sound: 'boo',
+                  notice: {
+                    title: 'Assets frozen!',
+                    detail: `${currentPlayer.name} froze all income from Income cards, investments, and Anchor tributes for one complete round — including themselves.`,
+                    durationMs: 2400,
+                  },
+                })
+                return
+              }
+
               if (card.id === 'property-taxation') {
                 updatedActionCards = updatedActionCards.filter((c) => c.instanceId !== instanceId)
                 updatedActionDiscard.push(instance)
@@ -1334,7 +1409,7 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
               if (card.id !== 'crossing-the-line') {
                 toast.success(
                   isActionWildCard(instance.cardId)
-                    ? `Played Action Wild Card as ${card.name}!`
+                    ? `Played Wild Action Card as ${card.name}!`
                     : `Played ${card.name}!`
                 )
               }
@@ -1419,31 +1494,41 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
               .find((inst) => inst?.cardId === 'double-income')
             const consumed = current.turnActionsConsumed ?? 0
             const canDouble = Boolean(doubleFromPlay) && consumed + 2 <= MAX_TURN_ACTIONS
-            const face = Math.floor(Math.random() * 6) + 1
-            const pct = incomePercentageForDie(face)
-            let earned = Math.floor((totalIncome * pct) / 100)
-            if (canDouble) earned *= 2
+            const rollLocked = !canRollPropertyIncome(current, currentPlayer.id)
+            const face = rollLocked ? undefined : Math.floor(Math.random() * 6) + 1
+            const pct = face != null ? incomePercentageForDie(face) : 0
+            let earned = rollLocked
+              ? (actionCards.find((c) => c.id === 'income')?.bankValue ?? 4)
+              : Math.floor((totalIncome * pct) / 100)
+            if (!rollLocked && canDouble) earned *= 2
             const result = applyIncomeComplete(current, {
               incomeInstanceId: incomeCardInstance,
               earnedIncome: earned,
               totalPropertyIncomeBase: totalIncome,
-              doubleIncomeInstanceId: canDouble ? doubleFromPlay?.instanceId : undefined,
-              incomeResolution: 'property-roll',
+              doubleIncomeInstanceId: !rollLocked && canDouble ? doubleFromPlay?.instanceId : undefined,
+              incomeResolution: rollLocked ? 'bank-income-card' : 'property-roll',
             })
             if (!result.ok) return current
             const gained =
               (result.state.players[result.state.currentPlayerIndex]?.money ?? currentPlayer.money) -
               currentPlayer.money
+            const lockReason = rollLocked ? propertyIncomeRollBlockedReason(current, currentPlayer.id) : null
             queueMicrotask(() => {
               toast.success(
-                `${currentPlayer.name} collected income: $${Math.max(0, gained)}M (rolled ${face}).`,
+                rollLocked
+                  ? `${currentPlayer.name} banked Income for $${Math.max(0, gained)}M.`
+                  : `${currentPlayer.name} collected income: $${Math.max(0, gained)}M (rolled ${face}).`,
                 { duration: CALAMITY_OUTCOME_BANNER_MS }
               )
               broadcastBoardFx({
                 sound: 'income',
                 notice: {
-                  title: `${currentPlayer.name} collected income`,
-                  detail: `Rolled ${face} — $${Math.max(0, gained)}M added to their treasury.`,
+                  title: rollLocked
+                    ? `${currentPlayer.name} banked Income`
+                    : `${currentPlayer.name} collected income`,
+                  detail: rollLocked
+                    ? `${lockReason ?? 'Property-income rolls are closed.'} +$${Math.max(0, gained)}M.`
+                    : `Rolled ${face} — $${Math.max(0, gained)}M added to their treasury.`,
                   durationMs: CALAMITY_OUTCOME_BANNER_MS,
                   replace: true,
                 },
@@ -1517,6 +1602,8 @@ export function playCards(s: PlaySession, propertyInstanceId: string | null,
         turnActionsConsumed: newTurnActionsConsumed,
         crossingTheLineActive: crossingActivated,
         pendingIncomeTaxPlayerIds,
+        incomeAssetsFrozenPlayerIds,
+        incomeAssetsFrozenTurnsRemaining,
       }
 
       if (turnLimitReached(newTurnActionsConsumed)) {

@@ -14,6 +14,7 @@ import { CALAMITY_ACCEPT_LABEL, CALAMITY_PRE_ROLL_INSTRUCTION } from '@/lib/cala
 import { HIGH_DENSITY_HOUSING_STATS } from '@/lib/housingEconomics'
 import { MAX_ACTION_HAND_SIZE } from '@/lib/turnActions'
 import { getGameHandlers } from '@/lib/gameHandlerBag'
+import { canRollPropertyIncome } from '@/lib/freezeAssets'
 import type { PlayUiState, RollDieDialogState } from '@/lib/playUiStore'
 import type { RequiredAction } from '@/components/game/RequiredActionBanner'
 import { setDiscardPropertyConfirmOpen, setTaxBuildMode } from '@/lib/playUiStore'
@@ -312,14 +313,18 @@ export function buildRequiredAction(gs: GameState, ui: PlayUiState): RequiredAct
   }
   if (ui.incomeDialogState.open) {
     const income = ui.incomeDialogState
+    const ownerId = income.player?.id
+    const rollLocked = ownerId != null && !canRollPropertyIncome(gs, ownerId)
     return {
       id: 'income',
-      title: 'Income — collecting',
-      detail: 'Income is resolving automatically. If this stalls, collect now to continue your turn.',
+      title: rollLocked ? 'Income — bank only' : 'Income — collecting',
+      detail: rollLocked
+        ? 'Property-income rolls are closed. Bank this Income card for cash, or cancel.'
+        : 'Income is resolving automatically. If this stalls, collect now to continue your turn.',
       tone: 'info',
-      ctaLabel: 'Collect now',
+      ctaLabel: rollLocked ? 'Bank card' : 'Collect now',
       onCta: () => {
-        if (income.hasBuiltPropertiesForIncomeRoll) {
+        if (income.hasBuiltPropertiesForIncomeRoll && !rollLocked) {
           const face = 4
           const pct = incomePercentageForDie(face)
           const amount = Math.floor((income.totalIncome * pct) / 100)
